@@ -2059,11 +2059,9 @@ public class BrowserApp extends GeckoApp
     @Override
     public void addPrivateTab() {
         Tabs.getInstance().addPrivateTab();
-
-        showTrackingProtectionPromptIfApplicable();
     }
 
-    private void showTrackingProtectionPromptIfApplicable() {
+    public void showTrackingProtectionPromptIfApplicable() {
         final SharedPreferences prefs = getSharedPreferences();
 
         final boolean hasTrackingProtectionPromptBeShownBefore = prefs.getBoolean(GeckoPreferences.PREFS_TRACKING_PROTECTION_PROMPT_SHOWN, false);
@@ -3970,6 +3968,9 @@ public class BrowserApp extends GeckoApp
         final boolean inGuestMode = GeckoProfile.get(this).inGuestMode();
         if (inGuestMode) {
             return StartupAction.GUEST;
+        }
+        if (RestrictedProfiles.isRestrictedProfile(this)) {
+            return StartupAction.RESTRICTED;
         }
         return (passedURL == null ? StartupAction.NORMAL : StartupAction.URL);
     }
