@@ -682,6 +682,11 @@
                   // If the browser is loading it must not be crashed anymore
                   this.mTab.removeAttribute("crashed");
 
+                  // If the browser was playing audio, we should remove the playing state.
+                  if (this.mTab.hasAttribute("soundplaying")) {
+                    this.mTab.removeAttribute("soundplaying");
+                    this.mTabBrowser._tabAttrModified(this.mTab, ["soundplaying"]);
+                  }
                   // If the browser was previously muted, we should restore the muted state.
                   if (this.mTab.hasAttribute("muted")) {
                     this.mTab.linkedBrowser.mute();
@@ -1203,7 +1208,7 @@
                 if (prompts.length) {
                   // NB: This code assumes that the beforeunload prompt
                   //     is the top-most prompt on the tab.
-                  promptBox.removePrompt(prompts[prompts.length - 1]);
+                  prompts[prompts.length - 1].abortPrompt();
                 }
               }
 
@@ -2562,6 +2567,9 @@
               remoteBrowser._outerWindowIDBrowserMap.delete(aOtherBrowser.outerWindowID);
             }
 
+            aOtherBrowser.docShellIsActive = (ourBrowser == this.selectedBrowser &&
+                                              window.windowState != window.STATE_MINIMIZED);
+
             // Swap the docshells
             ourBrowser.swapDocShells(aOtherBrowser);
 
@@ -3081,6 +3089,9 @@
             STATE_LOADED: 2,
             STATE_UNLOADING: 3,
 
+            // re-entrancy guard:
+            _processing: false,
+
             getTabState: function(tab) {
               let state = this.tabState.get(tab);
               if (state === undefined) {
@@ -3223,7 +3234,6 @@
               }
 
               this.lastVisibleTab = this.visibleTab;
-
             },
 
             assert: function(cond) {
@@ -3366,6 +3376,8 @@
               let tab = this.tabbrowser.getTabForBrowser(browser);
               this.setTabState(tab, this.STATE_LOADED);
 
+              this.finishTabSwitch();
+
               if (this.loadingTab === tab) {
                 clearTimeout(this.loadTimer);
                 this.loadTimer = null;
@@ -3434,7 +3446,17 @@
               this.postActions();
             },
 
-            handleEvent: function(event) {
+            handleEvent: function(event, delayed = false) {
+              if (this._processing) {
+                setTimeout(() => this.handleEvent(event, true), 0);
+                return;
+              }
+              if (delayed && this.tabbrowser._switcher != this) {
+                // if we delayed processing this event, we might be out of date, in which
+                // case we drop the delayed events
+                return;
+              }
+              this._processing = true;
               this.preActions();
 
               if (event.type == "MozLayerTreeReady") {
@@ -3448,6 +3470,7 @@
               }
 
               this.postActions();
+              this._processing = false;
             },
 
             /*
@@ -5369,11 +5392,27 @@
         canvas.mozOpaque = true;
         canvas.width = 160 * scale;
         canvas.height = 90 * scale;
-        if (!gMultiProcessBrowser) {
-          // Bug 863512 - Make page thumbnails work in e10s
+        let toDrag;
+        if (gMultiProcessBrowser) {
+          // Create a panel to use it in setDragImage
+          // which will tell xul to render a panel that follows
+          // the pointer while a dnd session is on.
+          var panel = document.createElement("panel");
+          panel.setAttribute("type", "drag");
+          panel.appendChild(canvas);
+          document.documentElement.appendChild(panel);
+          // PageThumb is async with e10s but that's fine
+          // since we can update the panel during the dnd.
           PageThumbs.captureToCanvas(browser, canvas);
+          toDrag = panel;
+        } else {
+          // For the non e10s case we can just use PageThumbs
+          // sync. No need for xul magic, the native dnd will
+          // be fine, so let's use the canvas for setDragImage.
+          PageThumbs.captureToCanvas(browser, canvas);
+          toDrag = canvas;
         }
-        dt.setDragImage(canvas, -16 * scale, -16 * scale);
+        dt.setDragImage(toDrag, -16 * scale, -16 * scale);
 
         // _dragData.offsetX/Y give the coordinates that the mouse should be
         // positioned relative to the corner of the new window created upon
@@ -5738,7 +5777,7 @@
                      xbl:inherits="value=visibleLabel,crop,accesskey,fadein,pinned,selected,visuallyselected"
                      class="tab-text tab-label"
                      role="presentation"/>
-          <xul:image xbl:inherits="soundplaying,pinned,muted"
+          <xul:image xbl:inherits="soundplaying,pinned,muted,visuallyselected"
                      anonid="soundplaying-icon"
                      class="tab-icon-sound"
                      role="presentation"/>
@@ -5845,7 +5884,19 @@
       </property>
 
       <field name="mOverCloseButton">false</field>
-      <field name="_overPlayingIcon">false</field>
+      <property name="_overPlayingIcon" readonly="true">
+        <getter><![CDATA[
+          let iconVisible = this.hasAttribute("soundplaying") ||
+                            this.hasAttribute("muted");
+          let soundPlayingIcon =
+            document.getAnonymousElementByAttribute(this, "anonid", "soundplaying-icon");
+          let overlayIcon =
+            document.getAnonymousElementByAttribute(this, "anonid", "overlay-icon");
+
+          return soundPlayingIcon && soundPlayingIcon.mozMatchesSelector(":hover") ||
+                 (overlayIcon && overlayIcon.mozMatchesSelector(":hover") && iconVisible);
+        ]]></getter>
+      </property>
       <field name="mCorrespondingMenuitem">null</field>
 
       <!--
@@ -5924,25 +5975,15 @@
     <handlers>
       <handler event="mouseover"><![CDATA[
         let anonid = event.originalTarget.getAttribute("anonid");
-        let iconVisible = this.hasAttribute("soundplaying") ||
-                          this.hasAttribute("muted");
         if (anonid == "close-button")
           this.mOverCloseButton = true;
-        else if ((anonid == "soundplaying-icon") ||
-                 ((anonid == "overlay-icon") && iconVisible))
-          this._overPlayingIcon = true;
 
         this._mouseenter();
       ]]></handler>
       <handler event="mouseout"><![CDATA[
         let anonid = event.originalTarget.getAttribute("anonid");
-        let iconVisible = this.hasAttribute("soundplaying") ||
-                          this.hasAttribute("muted");
         if (anonid == "close-button")
           this.mOverCloseButton = false;
-        else if ((anonid == "soundplaying-icon") ||
-                 ((anonid == "overlay-icon") && iconVisible))
-          this._overPlayingIcon = false;
 
         this._mouseleave();
       ]]></handler>
@@ -5970,13 +6011,8 @@
           return;
         }
 
-        let anonid = event.originalTarget.getAttribute("anonid");
-        let iconVisible = this.hasAttribute("soundplaying") ||
-                          this.hasAttribute("muted");
-        if ((anonid == "soundplaying-icon") ||
-            ((anonid == "overlay-icon") && iconVisible)) {
+        if (this._overPlayingIcon) {
           this.toggleMuteAudio();
-          this._overPlayingIcon = false;
         }
       ]]>
       </handler>

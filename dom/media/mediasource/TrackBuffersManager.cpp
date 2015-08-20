@@ -156,8 +156,8 @@ TrackBuffersManager::BufferAppend()
   MOZ_ASSERT(NS_IsMainThread());
   MSE_DEBUG("");
 
-  return ProxyMediaCall(GetTaskQueue(), this,
-                        __func__, &TrackBuffersManager::InitSegmentParserLoop);
+  return InvokeAsync(GetTaskQueue(), this,
+                     __func__, &TrackBuffersManager::InitSegmentParserLoop);
 }
 
 // Abort any pending AppendData.
@@ -211,9 +211,9 @@ TrackBuffersManager::RangeRemoval(TimeUnit aStart, TimeUnit aEnd)
 
   mEnded = false;
 
-  return ProxyMediaCall(GetTaskQueue(), this, __func__,
-                        &TrackBuffersManager::CodedFrameRemovalWithPromise,
-                        TimeInterval(aStart, aEnd));
+  return InvokeAsync(GetTaskQueue(), this, __func__,
+                     &TrackBuffersManager::CodedFrameRemovalWithPromise,
+                     TimeInterval(aStart, aEnd));
 }
 
 TrackBuffersManager::EvictDataResult
@@ -459,27 +459,22 @@ TrackBuffersManager::DoEvictData(const TimeUnit& aPlaybackTime,
   // 30s is a value chosen as it appears to work with YouTube.
   TimeUnit upperLimit =
     std::max(aPlaybackTime, track.mNextSampleTime) + TimeUnit::FromSeconds(30);
-  lastKeyFrameIndex = buffer.Length();
+  uint32_t evictedFramesStartIndex = buffer.Length();
   for (int32_t i = buffer.Length() - 1; i >= 0; i--) {
     const auto& frame = buffer[i];
-    if (frame->mKeyframe) {
-      lastKeyFrameIndex = i;
-      toEvict -= partialEvict;
-      if (toEvict < 0) {
-        break;
-      }
-      partialEvict = 0;
-    }
-    if (frame->mTime <= upperLimit.ToMicroseconds()) {
+    if (frame->mTime <= upperLimit.ToMicroseconds() || toEvict < 0) {
+      // We've reached a frame that shouldn't be evicted -> Evict after it -> i+1.
+      // Or the previous loop reached the eviction threshold -> Evict from it -> i+1.
+      evictedFramesStartIndex = i + 1;
       break;
     }
-    partialEvict += frame->ComputedSizeOfIncludingThis();
+    toEvict -= frame->ComputedSizeOfIncludingThis();
   }
-  if (lastKeyFrameIndex < buffer.Length()) {
+  if (evictedFramesStartIndex < buffer.Length()) {
     MSE_DEBUG("Step2. Evicting %u bytes from trailing data",
               mSizeSourceBuffer - finalSize);
     CodedFrameRemoval(
-      TimeInterval(TimeUnit::FromMicroseconds(buffer[lastKeyFrameIndex]->GetEndTime() + 1),
+      TimeInterval(TimeUnit::FromMicroseconds(buffer[evictedFramesStartIndex]->mTime),
                    TimeUnit::FromInfinity()));
   }
 }
@@ -983,6 +978,13 @@ TrackBuffersManager::OnDemuxerInitDone(nsresult)
     // 6. Set first initialization segment received flag to true.
     mFirstInitializationSegmentReceived = true;
   } else {
+    // Check that audio configuration hasn't changed as this is something
+    // we do not support yet (bug 1185827).
+    if (mAudioTracks.mNumTracks &&
+        (info.mAudio.mChannels != mAudioTracks.mInfo->GetAsAudioInfo()->mChannels ||
+         info.mAudio.mRate != mAudioTracks.mInfo->GetAsAudioInfo()->mRate)) {
+      RejectAppend(NS_ERROR_FAILURE, __func__);
+    }
     mAudioTracks.mLastInfo = new SharedTrackInfo(info.mAudio, streamID);
     mVideoTracks.mLastInfo = new SharedTrackInfo(info.mVideo, streamID);
   }
@@ -1619,8 +1621,6 @@ TrackBuffersManager::RemoveFrames(const TimeIntervals& aIntervals,
     }
     aTrackData.mSizeBuffer -= sample->ComputedSizeOfIncludingThis();
   }
-
-  removedIntervals.SetFuzz(TimeUnit::FromMicroseconds(maxSampleDuration));
 
   MSE_DEBUG("Removing frames from:%u (frames:%u) ([%f, %f))",
             firstRemovedIndex.ref(),

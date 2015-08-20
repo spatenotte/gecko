@@ -363,6 +363,8 @@ public:
         return IsContextLost() ? 0 : mHeight;
     }
 
+    layers::LayersBackend GetCompositorBackendType() const;
+
     void
     GetContextAttributes(dom::Nullable<dom::WebGLContextAttributes>& retval);
 
@@ -1077,6 +1079,8 @@ protected:
     uint32_t  mGLMaxTransformFeedbackSeparateAttribs;
     GLuint  mGLMaxUniformBufferBindings;
     GLsizei mGLMaxSamples;
+    GLuint  mGLMax3DTextureSize;
+    GLuint  mGLMaxArrayTextureLayers;
 
 public:
     GLuint MaxVertexAttribs() const {

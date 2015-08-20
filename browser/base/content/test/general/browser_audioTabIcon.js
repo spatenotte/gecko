@@ -44,14 +44,18 @@ function* test_tooltip(icon, expectedTooltip) {
   leave_icon(icon);
 }
 
-function* test_mute_tab(tab, icon, expectMuted) {
-  let mutedPromise = BrowserTestUtils.waitForEvent(tab, "TabAttrModified", false, (event) => {
+function get_wait_for_mute_promise(tab, expectMuted) {
+  return BrowserTestUtils.waitForEvent(tab, "TabAttrModified", false, event => {
     if (event.detail.changed.indexOf("muted") >= 0) {
       is(tab.hasAttribute("muted"), expectMuted, "The tab should " + (expectMuted ? "" : "not ") + "be muted");
       return true;
     }
     return false;
   });
+}
+
+function* test_mute_tab(tab, icon, expectMuted) {
+  let mutedPromise = test_mute_keybinding(tab, expectMuted);
 
   let activeTab = gBrowser.selectedTab;
 
@@ -64,6 +68,12 @@ function* test_mute_tab(tab, icon, expectMuted) {
   is(gBrowser.selectedTab, activeTab, "Clicking on mute should not change the currently selected tab");
 
   return mutedPromise;
+}
+
+function get_tab_attributes(tab) {
+  const ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
+  let {attributes} = JSON.parse(ss.getTabState(tab));
+  return attributes;
 }
 
 function* test_playing_icon_on_tab(tab, browser, isPinned) {
@@ -79,11 +89,17 @@ function* test_playing_icon_on_tab(tab, browser, isPinned) {
 
   yield test_tooltip(icon, "Mute tab");
 
+  ok(!("muted" in get_tab_attributes(tab)), "No muted attribute should be persisted");
+
   yield test_mute_tab(tab, icon, true);
+
+  ok("muted" in get_tab_attributes(tab), "Muted attribute should be persisted");
 
   yield test_tooltip(icon, "Unmute tab");
 
   yield test_mute_tab(tab, icon, false);
+
+  ok(!("muted" in get_tab_attributes(tab)), "No muted attribute should be persisted");
 
   yield test_tooltip(icon, "Mute tab");
 
@@ -158,7 +174,7 @@ function* test_browser_swapping(tab, browser) {
     yield test_swapped_browser(tab, newBrowser, true)
 
     // FIXME: this is needed to work around bug 1190903.
-    yield new Promise(resolve => setTimeout(resolve, 1000));
+    yield new Promise(resolve => setTimeout(resolve, 3000));
 
     // Now, test swapping with a muted but not playing tab.
     // Note that the tab remains muted, so we only need to pause playback.
@@ -227,6 +243,99 @@ function* test_click_on_pinned_tab_after_mute() {
   }, test_on_browser);
 }
 
+// This test only does something useful in e10s!
+function* test_cross_process_load() {
+  function* test_on_browser(browser) {
+    let tab = gBrowser.getTabForBrowser(browser);
+
+    // Start playback.
+    yield ContentTask.spawn(browser, {}, function* () {
+      let audio = content.document.querySelector("audio");
+      audio.play();
+    });
+
+    // Wait for playback to start.
+    yield wait_for_tab_playing_event(tab, true);
+
+    let soundPlayingStoppedPromise = BrowserTestUtils.waitForEvent(tab, "TabAttrModified", false,
+      event => event.detail.changed.indexOf("soundplaying") >= 0
+    );
+
+    // Go to a different process.
+    browser.loadURI("about:");
+    yield BrowserTestUtils.browserLoaded(browser);
+
+    yield soundPlayingStoppedPromise;
+
+    ok(!tab.hasAttribute("soundplaying"), "Tab should not be playing sound any more");
+  }
+
+  yield BrowserTestUtils.withNewTab({
+    gBrowser,
+    url: PAGE
+  }, test_on_browser);
+}
+
+function* test_mute_keybinding() {
+  function* test_muting_using_keyboard(tab) {
+    let mutedPromise = get_wait_for_mute_promise(tab, true);
+    EventUtils.synthesizeKey("m", {ctrlKey: true});
+    yield mutedPromise;
+    mutedPromise = get_wait_for_mute_promise(tab, false);
+    EventUtils.synthesizeKey("m", {ctrlKey: true});
+    yield mutedPromise;
+  }
+  function* test_on_browser(browser) {
+    let tab = gBrowser.getTabForBrowser(browser);
+
+    // Make sure it's possible to mute before the tab is playing.
+    yield test_muting_using_keyboard(tab);
+
+    // Start playback.
+    yield ContentTask.spawn(browser, {}, function* () {
+      let audio = content.document.querySelector("audio");
+      audio.play();
+    });
+
+    // Wait for playback to start.
+    yield wait_for_tab_playing_event(tab, true);
+
+    // Make sure it's possible to mute after the tab is playing.
+    yield test_muting_using_keyboard(tab);
+
+    // Start playback.
+    yield ContentTask.spawn(browser, {}, function* () {
+      let audio = content.document.querySelector("audio");
+      audio.pause();
+    });
+
+    // Make sure things work if the tab is pinned.
+    gBrowser.pinTab(tab);
+
+    // Make sure it's possible to mute before the tab is playing.
+    yield test_muting_using_keyboard(tab);
+
+    // Start playback.
+    yield ContentTask.spawn(browser, {}, function* () {
+      let audio = content.document.querySelector("audio");
+      audio.play();
+    });
+
+    // Wait for playback to start.
+    yield wait_for_tab_playing_event(tab, true);
+
+    // Make sure it's possible to mute after the tab is playing.
+    yield test_muting_using_keyboard(tab);
+
+    gBrowser.unpinTab(tab);
+  }
+
+  yield BrowserTestUtils.withNewTab({
+    gBrowser,
+    url: PAGE
+  }, test_on_browser);
+}
+
 function* test_on_browser(browser) {
   let tab = gBrowser.getTabForBrowser(browser);
 
@@ -248,8 +357,6 @@ function* test_on_browser(browser) {
     }, () => test_on_browser(browser));
   } else {
     yield test_browser_swapping(tab, browser);
-
-    yield test_click_on_pinned_tab_after_mute();
   }
 }
 
@@ -262,9 +369,16 @@ add_task(function*() {
   });
 });
 
+requestLongerTimeout(2);
 add_task(function* test_page() {
   yield BrowserTestUtils.withNewTab({
     gBrowser,
     url: PAGE
   }, test_on_browser);
 });
+
+add_task(test_click_on_pinned_tab_after_mute);
+
+add_task(test_cross_process_load);
+
+add_task(test_mute_keybinding);

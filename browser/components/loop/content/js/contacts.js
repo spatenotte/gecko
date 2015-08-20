@@ -271,7 +271,7 @@ loop.contacts = (function(_, mozL10n) {
     canEdit: function() {
       // We cannot modify imported contacts.  For the moment, the check for
       // determining whether the contact is imported is based on its category.
-      return this.props.contact.category[0] != "google";
+      return this.props.contact.category[0] !== "google";
     },
 
     render: function() {
@@ -413,11 +413,68 @@ loop.contacts = (function(_, mozL10n) {
       window.removeEventListener("LoopStatusChanged", this._onStatusChanged);
     },
 
+    /*
+     * Filter a user by name, email or phone number.
+     * Takes in an input to filter by and returns a filter function which
+     * expects a contact.
+     *
+     * @returns {Function}
+     */
+    filterContact: function(filter) {
+      return function(contact) {
+        return getPreferred(contact, "name").toLocaleLowerCase().includes(filter) ||
+          getPreferred(contact, "email").value.toLocaleLowerCase().includes(filter) ||
+          getPreferred(contact, "tel").value.toLocaleLowerCase().includes(filter);
+      };
+    },
+
+    /*
+     * Takes all contacts, it groups and filters them before rendering.
+     */
+    _filterContactsList: function() {
+      let shownContacts = _.groupBy(this.contacts, function(contact) {
+        return contact.blocked ? "blocked" : "available";
+      });
+
+      if (this._shouldShowFilter()) {
+        let filter = this.state.filter.trim().toLocaleLowerCase();
+        let filterFn = this.filterContact(filter);
+        if (filter) {
+          if (shownContacts.available) {
+            shownContacts.available = shownContacts.available.filter(filterFn);
+            // Filter can return an empty array.
+            if (!shownContacts.available.length) {
+              shownContacts.available = null;
+            }
+          }
+          if (shownContacts.blocked) {
+            shownContacts.blocked = shownContacts.blocked.filter(filterFn);
+            // Filter can return an empty array.
+            if (!shownContacts.blocked.length) {
+              shownContacts.blocked = null;
+            }
+          }
+        }
+      }
+
+      return shownContacts;
+    },
+
+    /*
+     * Decide to render contacts filter based on the number of contacts.
+     *
+     * @returns {bool}
+     */
+    _shouldShowFilter: function() {
+      return Object.getOwnPropertyNames(this.contacts).length >=
+        MIN_CONTACTS_FOR_FILTERING;
+    },
+
     _onStatusChanged: function() {
       let profile = this.props.mozLoop.userProfile;
       let currUid = this._userProfile ? this._userProfile.uid : null;
       let newUid = profile ? profile.uid : null;
-      if (currUid != newUid) {
+      if (currUid !== newUid) {
         // On profile change (login, logout), reload all contacts.
         this._userProfile = profile;
         // The following will do a forceUpdate() for us.
@@ -531,6 +588,16 @@ loop.contacts = (function(_, mozL10n) {
       this.refresh();
     },
 
+    /*
+     * Callback triggered when clicking the `X` from the contacts filter.
+     * Clears the search query.
+     */
+    _handleFilterClear: function() {
+      this.setState({
+        filter: ""
+      });
+    },
+
     sortContacts: function(contact1, contact2) {
       let comp = contact1.name[0].localeCompare(contact2.name[0]);
       if (comp !== 0) {
@@ -541,9 +608,35 @@ loop.contacts = (function(_, mozL10n) {
       return contact1._guid - contact2._guid;
     },
 
+    _renderFilterClearButton: function() {
+      if (this.state.filter) {
+        return (
+          React.createElement("button", {className: "clear-search", 
+                  onClick: this._handleFilterClear})
+        );
+      }
+
+      return null;
+    },
+
+    _renderContactsFilter: function() {
+      if (this._shouldShowFilter()) {
+        return (
+          React.createElement("div", {className: "contact-filter-container"}, 
+            React.createElement("input", {className: "contact-filter", 
+                   placeholder: mozL10n.get("contacts_search_placesholder"), 
+                   valueLink: this.linkState("filter")}), 
+            this._renderFilterClearButton()
+          )
+        );
+      }
+
+      return null;
+    },
+
     _renderContactsList: function() {
       let cx = React.addons.classSet;
-
+      let shownContacts = this._filterContactsList();
       let viewForItem = item => {
         return (
           React.createElement(ContactDetail, {contact: item, 
@@ -552,92 +645,100 @@ loop.contacts = (function(_, mozL10n) {
         );
       };
 
-      let shownContacts = _.groupBy(this.contacts, function(contact) {
-        return contact.blocked ? "blocked" : "available";
-      });
-
-      let showFilter = Object.getOwnPropertyNames(this.contacts).length >=
-                       MIN_CONTACTS_FOR_FILTERING;
-      if (showFilter) {
-        let filter = this.state.filter.trim().toLocaleLowerCase();
-        if (filter) {
-          let filterFn = contact => {
-            return contact.name[0].toLocaleLowerCase().includes(filter) ||
-                   getPreferred(contact, "email").value.toLocaleLowerCase().includes(filter);
-          };
-          if (shownContacts.available) {
-            shownContacts.available = shownContacts.available.filter(filterFn);
-          }
-          if (shownContacts.blocked) {
-            shownContacts.blocked = shownContacts.blocked.filter(filterFn);
-          }
-        }
+      // If no contacts to show and filter is set, then none match the search.
+      if (!shownContacts.available && !shownContacts.blocked &&
+          this.state.filter) {
+        return (
+          React.createElement("div", {className: "contact-search-list-empty"}, 
+            React.createElement("p", {className: "panel-text-large"}, 
+              mozL10n.get("no_search_results_message_heading")
+            ), 
+            React.createElement("p", {className: "panel-text-medium"}, 
+              mozL10n.get("no_search_results_message_subheading")
+            )
+          )
+        );
       }
 
-      if (shownContacts.available || shownContacts.blocked) {
+      // If no contacts to show and filter is not set, we don't have contacts.
+      if (!shownContacts.available && !shownContacts.blocked &&
+          !this.state.filter) {
         return (
-          React.createElement("div", null, 
-            React.createElement("div", {className: "contact-list-title"}, 
-              mozL10n.get("contact_list_title")
+          React.createElement("div", {className: "contact-list-empty"}, 
+            React.createElement("p", {className: "panel-text-large"}, 
+              mozL10n.get("no_contacts_message_heading")
             ), 
-            React.createElement("ul", {className: "contact-list"}, 
-              shownContacts.available ?
-                shownContacts.available.sort(this.sortContacts).map(viewForItem) :
-                null, 
-              shownContacts.blocked && shownContacts.blocked.length > 0 ?
-                React.createElement("div", {className: "contact-separator"}, mozL10n.get("contacts_blocked_contacts")) :
-                null, 
-              shownContacts.blocked ?
-                shownContacts.blocked.sort(this.sortContacts).map(viewForItem) :
-                null
+            React.createElement("p", {className: "panel-text-medium"}, 
+              mozL10n.get("no_contacts_import_or_add")
             )
           )
         );
       }
 
       return (
-        React.createElement("div", {className: "contact-list-empty"}, 
-          React.createElement("p", {className: "panel-text-large"}, 
-            mozL10n.get("no_contacts_message_heading")
-          ), 
-          React.createElement("p", {className: "panel-text-medium"}, 
-            mozL10n.get("no_contacts_import_or_add")
+        React.createElement("div", null, 
+          !this.state.filter ? React.createElement("div", {className: "contact-list-title"}, 
+                                  mozL10n.get("contact_list_title")
+                                ) : null, 
+          React.createElement("ul", {className: "contact-list"}, 
+            shownContacts.available ?
+              shownContacts.available.sort(this.sortContacts).map(viewForItem) :
+              null, 
+            shownContacts.blocked && shownContacts.blocked.length > 0 ?
+              React.createElement("div", {className: "contact-separator"}, mozL10n.get("contacts_blocked_contacts")) :
+              null, 
+            shownContacts.blocked ?
+              shownContacts.blocked.sort(this.sortContacts).map(viewForItem) :
+              null
           )
         )
       );
     },
 
-    render: function() {
+    _renderAddContactButtons: function() {
       let cx = React.addons.classSet;
-      let showFilter = Object.getOwnPropertyNames(this.contacts).length >=
-                       MIN_CONTACTS_FOR_FILTERING;
+
+      if (this.state.filter) {
+        return null;
+      }
 
       return (
-        React.createElement("div", null, 
-          React.createElement("div", {className: "content-area"}, 
-            showFilter ?
-            React.createElement("input", {className: "contact-filter", 
-                   placeholder: mozL10n.get("contacts_search_placesholder"), 
-                   valueLink: this.linkState("filter")})
-            : null, 
-            React.createElement(GravatarPromo, {handleUse: this.handleUseGravatar})
+        React.createElement(ButtonGroup, {additionalClass: "contact-controls"}, 
+          React.createElement(Button, {additionalClass: "secondary", 
+            caption: this.state.importBusy ? mozL10n.get("importing_contacts_progress_button") :
+                                             mozL10n.get("import_contacts_button3"), 
+              disabled: this.state.importBusy, 
+              onClick: this.handleImportButtonClick}, 
+              React.createElement("div", {className: cx({"contact-import-spinner": true,
+                                 spinner: true,
+              busy: this.state.importBusy})})
           ), 
+          React.createElement(Button, {additionalClass: "primary", 
+            caption: mozL10n.get("new_contact_button"), 
+            onClick: this.handleAddContactButtonClick})
+        )
+      );
+    },
+
+    _renderGravatarPromoMessage: function() {
+      if (this.state.filter) {
+        return null;
+      }
+
+      return (
+        React.createElement("div", {className: "content-area"}, 
+          React.createElement(GravatarPromo, {handleUse: this.handleUseGravatar})
+        )
+      );
+    },
+
+    render: function() {
+      return (
+        React.createElement("div", null, 
+          this._renderContactsFilter(), 
+          this._renderGravatarPromoMessage(), 
           this._renderContactsList(), 
-          React.createElement(ButtonGroup, {additionalClass: "contact-controls"}, 
-            React.createElement(Button, {additionalClass: "secondary", 
-              caption: this.state.importBusy
-                ? mozL10n.get("importing_contacts_progress_button")
-                : mozL10n.get("import_contacts_button3"), 
-                disabled: this.state.importBusy, 
-                onClick: this.handleImportButtonClick}, 
-                React.createElement("div", {className: cx({"contact-import-spinner": true,
-                                   spinner: true,
-                busy: this.state.importBusy})})
-            ), 
-            React.createElement(Button, {additionalClass: "primary", 
-              caption: mozL10n.get("new_contact_button"), 
-              onClick: this.handleAddContactButtonClick})
-          )
+          this._renderAddContactButtons()
         )
       );
     }
@@ -740,37 +841,46 @@ loop.contacts = (function(_, mozL10n) {
     render: function() {
       let cx = React.addons.classSet;
       let phoneOrEmailRequired = !this.state.email && !this.state.tel;
+      let contactFormMode = "contact-form-mode-" + this.props.mode;
+      let contentAreaClassesLiteral = {
+        "content-area": true,
+        "contact-form": true
+      };
+      contentAreaClassesLiteral[contactFormMode] = true;
+      let contentAreaClasses = cx(contentAreaClassesLiteral);
 
       return (
-        React.createElement("div", {className: "content-area contact-form"}, 
-          React.createElement("header", null, this.props.mode == "add"
-                   ? mozL10n.get("add_contact_button")
+        React.createElement("div", {className: contentAreaClasses}, 
+          React.createElement("header", null, this.props.mode === "add"
+                   ? mozL10n.get("add_contact_title")
                    : mozL10n.get("edit_contact_title")), 
-          React.createElement("label", null, mozL10n.get("edit_contact_name_label")), 
-          React.createElement("input", {className: cx({pristine: this.state.pristine}), 
-                 pattern: "\\s*\\S.*", 
-                 ref: "name", 
-                 required: true, 
-                 type: "text", 
-                 valueLink: this.linkState("name")}), 
-          React.createElement("label", null, mozL10n.get("edit_contact_email_label")), 
-          React.createElement("input", {className: cx({pristine: this.state.pristine}), 
-                 ref: "email", 
-                 required: phoneOrEmailRequired, 
-                 type: "email", 
-                 valueLink: this.linkState("email")}), 
-          React.createElement("label", null, mozL10n.get("new_contact_fxos_phone_placeholder")), 
-          React.createElement("input", {className: cx({pristine: this.state.pristine}), 
-                 ref: "tel", 
-                 required: phoneOrEmailRequired, 
-                 type: "tel", 
-                 valueLink: this.linkState("tel")}), 
+          React.createElement("div", {className: cx({"form-content-container": true})}, 
+            React.createElement("input", {className: cx({pristine: this.state.pristine}), 
+                   pattern: "\\s*\\S.*", 
+                   placeholder: mozL10n.get("contact_form_name_placeholder"), 
+                   ref: "name", 
+                   required: true, 
+                   type: "text", 
+                   valueLink: this.linkState("name")}), 
+            React.createElement("input", {className: cx({pristine: this.state.pristine}), 
+                   placeholder: mozL10n.get("contact_form_email_placeholder"), 
+                   ref: "email", 
+                   required: phoneOrEmailRequired, 
+                   type: "email", 
+                   valueLink: this.linkState("email")}), 
+            React.createElement("input", {className: cx({pristine: this.state.pristine}), 
+                   placeholder: mozL10n.get("contact_form_fxos_phone_placeholder"), 
+                   ref: "tel", 
+                   required: phoneOrEmailRequired, 
+                   type: "tel", 
+                   valueLink: this.linkState("tel")})
+          ), 
           React.createElement(ButtonGroup, null, 
             React.createElement(Button, {additionalClass: "button-cancel", 
                     caption: mozL10n.get("cancel_button"), 
                     onClick: this.handleCancelButtonClick}), 
             React.createElement(Button, {additionalClass: "button-accept", 
-                    caption: this.props.mode == "add"
+                    caption: this.props.mode === "add"
                              ? mozL10n.get("add_contact_button")
                              : mozL10n.get("edit_contact_done_button"), 
                     onClick: this.handleAcceptButtonClick})

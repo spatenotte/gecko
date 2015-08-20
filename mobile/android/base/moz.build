@@ -14,6 +14,9 @@ thirdparty_source_dir = TOPSRCDIR + '/mobile/android/thirdparty/'
 constants_jar = add_java_jar('constants')
 constants_jar.sources = [
     'adjust/AdjustHelperInterface.java',
+    'annotation/JNITarget.java',
+    'annotation/RobocopTarget.java',
+    'annotation/WebRTCJNITarget.java',
     'annotation/WrapForJNI.java',
     'SysInfo.java',
 ]
@@ -56,11 +59,8 @@ mgjar.sources += [
     'mozglue/DirectBufferAllocator.java',
     'mozglue/GeckoLoader.java',
     'mozglue/JNIObject.java',
-    'mozglue/JNITarget.java',
     'mozglue/NativeReference.java',
     'mozglue/NativeZip.java',
-    'mozglue/RobocopTarget.java',
-    'mozglue/WebRTCJNITarget.java',
 ]
 mgjar.generated_sources = [] # Keep it this way.
 mgjar.extra_jars += [
@@ -74,6 +74,7 @@ gujar.sources += [
     'util/ActivityResultHandlerMap.java',
     'util/ActivityUtils.java',
     'util/Clipboard.java',
+    'util/ColorUtils.java',
     'util/DrawableUtil.java',
     'util/EventCallback.java',
     'util/FileUtils.java',
@@ -267,6 +268,7 @@ gbjar.sources += [
     'gfx/DisplayPortCalculator.java',
     'gfx/DisplayPortMetrics.java',
     'gfx/DrawTimingQueue.java',
+    'gfx/DynamicToolbarAnimator.java',
     'gfx/FloatSize.java',
     'gfx/FullScreenState.java',
     'gfx/GeckoLayerClient.java',
@@ -276,7 +278,6 @@ gbjar.sources += [
     'gfx/IntSize.java',
     'gfx/JavaPanZoomController.java',
     'gfx/Layer.java',
-    'gfx/LayerMarginsAnimator.java',
     'gfx/LayerRenderer.java',
     'gfx/LayerView.java',
     'gfx/NativePanZoomController.java',
@@ -578,7 +579,7 @@ gbjar.extra_jars += [
 ]
 if CONFIG['MOZ_CRASHREPORTER']:
     gbjar.sources += [ 'CrashReporter.java' ]
-    ANDROID_RES_DIRS += [ SRCDIR + '/crashreporter/res' ]
+    ANDROID_RES_DIRS += [ 'crashreporter/res' ]
 
 if CONFIG['MOZ_ANDROID_SHARE_OVERLAY']:
     gbjar.sources += [
@@ -753,14 +754,18 @@ if CONFIG['MOZ_INSTALL_TRACKING']:
 
 # Putting branding earlier allows branders to override default resources.
 ANDROID_RES_DIRS += [
-    TOPSRCDIR + '/' + CONFIG['MOZ_BRANDING_DIRECTORY'] + '/res',
-    SRCDIR + '/resources',
-    OBJDIR + '/res',
+    '/' + CONFIG['MOZ_BRANDING_DIRECTORY'] + '/res',
+    'resources',
+    '!res',
 ]
 
 ANDROID_GENERATED_RESFILES += [
     'res/raw/suggestedsites.json',
     'res/values/strings.xml',
+]
+
+ANDROID_ASSETS_DIRS += [
+    '/mobile/android/app/assets',
 ]
 
 # We do not expose MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN here because that

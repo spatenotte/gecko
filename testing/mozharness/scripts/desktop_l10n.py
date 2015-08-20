@@ -413,7 +413,7 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, MockMixin, BuildbotMixin,
        """
         if self.revision:
             return self.revision
-        r = re.compile(r"^(gecko|fx)_revision ([0-9a-f]{12}\+?)$")
+        r = re.compile(r"^(gecko|fx)_revision ([0-9a-f]+\+?)$")
         output = self._query_make_ident_output()
         for line in output.splitlines():
             match = r.match(line)
@@ -1028,9 +1028,7 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, MockMixin, BuildbotMixin,
             routes = []
             for template in templates:
                 fmt = {
-                    # TODO: Bug 1133074
-                    #index = self.config.get('taskcluster_index', 'index.garbage.staging')
-                    'index': 'index.garbage.staging.mshal-testing',
+                    'index': self.config.get('taskcluster_index', 'index.garbage.staging'),
                     'project': branch,
                     'head_rev': revision,
                     'build_product': self.config['stage_product'],

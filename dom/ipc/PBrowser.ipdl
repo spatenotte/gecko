@@ -53,7 +53,7 @@ using struct nsRect from "nsRect.h";
 using class mozilla::WidgetSelectionEvent from "ipc/nsGUIEventIPC.h";
 using class mozilla::WidgetTouchEvent from "ipc/nsGUIEventIPC.h";
 using struct mozilla::dom::RemoteDOMEvent from "mozilla/dom/TabMessageUtils.h";
-using mozilla::dom::ScreenOrientation from "mozilla/dom/ScreenOrientation.h";
+using mozilla::dom::ScreenOrientationInternal from "mozilla/dom/ScreenOrientation.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using mozilla::CSSPoint from "Units.h";
 using mozilla::CSSToScreenScale from "Units.h";
@@ -121,7 +121,7 @@ both:
      */
     PRenderFrame();
 
-    PWebBrowserPersistDocument();
+    PWebBrowserPersistDocument(uint64_t aOuterWindowID);
 
 parent:
     /**
@@ -143,6 +143,12 @@ parent:
      * Return native data of root widget
      */
     sync GetWidgetNativeData() returns (WindowsHandle value);
+
+    /**
+     * Sends an NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW to be adopted by the
+     * widget's shareable window on the chrome side. Only used on Windows.
+     */
+    async SetNativeChildOfShareableWindow(uintptr_t childWindow);
 
     /**
      * When content moves focus from a native plugin window that's a child
@@ -518,6 +524,7 @@ parent:
 child:
     NativeSynthesisResponse(uint64_t aObserverId, nsCString aResponse);
 
+
 parent:
 
     /**
@@ -571,7 +578,8 @@ child:
 
     CacheFileDescriptor(nsString path, FileDescriptor fd);
 
-    UpdateDimensions(CSSRect rect, CSSSize size, ScreenOrientation orientation,
+    UpdateDimensions(CSSRect rect, CSSSize size,
+                     ScreenOrientationInternal orientation,
                      LayoutDeviceIntPoint chromeDisp) compressall;
 
     UpdateFrame(FrameMetrics frame);
@@ -717,8 +725,13 @@ child:
     /**
      * Tell the child that the UI resolution changed for the containing
      * window.
+     * To avoid some sync messages from child to parent, we also send the dpi
+     * and default scale with the notification.
+     * If we don't know the dpi and default scale, we just pass in a negative
+     * value (-1) but in the majority of the cases this saves us from two
+     * sync requests from the child to the parent.
      */
-    UIResolutionChanged();
+    UIResolutionChanged(float dpi, double scale);
 
     /**
      * Tell the child that the system theme has changed, and that a repaint

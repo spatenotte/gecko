@@ -467,7 +467,7 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
     collection->UpdateCheckGeneration(mPresContext);
     collection->mNeedsRefreshes = true;
     TimeStamp now = mPresContext->RefreshDriver()->MostRecentRefresh();
-    collection->EnsureStyleRuleFor(now, EnsureStyleRule_IsNotThrottled);
+    collection->EnsureStyleRuleFor(now);
   }
 
   // We want to replace the new style context with the after-change style.
@@ -824,9 +824,7 @@ nsTransitionManager::UpdateCascadeResults(AnimationCollection* aTransitions,
   // on that element (even though animations are lower in the cascade).
   if (aAnimations) {
     TimeStamp now = mPresContext->RefreshDriver()->MostRecentRefresh();
-    // Passing EnsureStyleRule_IsThrottled is OK since we will
-    // unthrottle when animations are finishing.
-    aAnimations->EnsureStyleRuleFor(now, EnsureStyleRule_IsThrottled);
+    aAnimations->EnsureStyleRuleFor(now);
 
     if (aAnimations->mStyleRule) {
       aAnimations->mStyleRule->AddPropertiesToSet(propertiesUsed);
@@ -857,14 +855,10 @@ nsTransitionManager::UpdateCascadeResults(AnimationCollection* aTransitions,
 #endif
   }
 
+  // If there is any change in the cascade result, update animations on layers
+  // with the winning animations.
   if (changed) {
-    mPresContext->RestyleManager()->IncrementAnimationGeneration();
-    aTransitions->UpdateAnimationGeneration(mPresContext);
-    aTransitions->PostUpdateLayerAnimations();
-
-    // Invalidate our style rule.
-    aTransitions->mStyleRuleRefreshTime = TimeStamp();
-    aTransitions->mNeedsRefreshes = true;
+    aTransitions->RequestRestyle(AnimationCollection::RestyleType::Layer);
   }
 }
 
@@ -886,91 +880,4 @@ nsTransitionManager::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 nsTransitionManager::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
-}
-
-/* virtual */ void
-nsTransitionManager::WillRefresh(mozilla::TimeStamp aTime)
-{
-  MOZ_ASSERT(mPresContext,
-             "refresh driver should not notify additional observers "
-             "after pres context has been destroyed");
-  if (!mPresContext->GetPresShell()) {
-    // Someone might be keeping mPresContext alive past the point
-    // where it has been torn down; don't bother doing anything in
-    // this case.  But do get rid of all our transitions so we stop
-    // triggering refreshes.
-    RemoveAllElementCollections();
-    return;
-  }
-
-  FlushTransitions(Can_Throttle);
-}
-
-void
-nsTransitionManager::FlushTransitions(FlushFlags aFlags)
-{
-  if (PR_CLIST_IS_EMPTY(&mElementCollections)) {
-    // no transitions, leave early
-    return;
-  }
-
-  TimeStamp now = mPresContext->RefreshDriver()->MostRecentRefresh();
-  bool didThrottle = false;
-  // Trim transitions that have completed, post restyle events for frames that
-  // are still transitioning, and start transitions with delays.
-  {
-    PRCList *next = PR_LIST_HEAD(&mElementCollections);
-    while (next != &mElementCollections) {
-      AnimationCollection* collection = static_cast<AnimationCollection*>(next);
-      next = PR_NEXT_LINK(next);
-
-      nsAutoAnimationMutationBatch mb(collection->mElement);
-
-      collection->Tick();
-      bool canThrottleTick = aFlags == Can_Throttle &&
-        collection->CanPerformOnCompositorThread(
-          AnimationCollection::CanAnimateFlags(0)) &&
-        collection->CanThrottleAnimation(now);
-
-      MOZ_ASSERT(collection->mElement->GetCrossShadowCurrentDoc() ==
-                   mPresContext->Document(),
-                 "Element::UnbindFromTree should have "
-                 "destroyed the element transitions object");
-
-      // Look for any transitions that can't be throttled because they
-      // may be starting or stopping
-      for (auto iter = collection->mAnimations.cbegin();
-           canThrottleTick && iter != collection->mAnimations.cend();
-           ++iter) {
-        canThrottleTick &= (*iter)->CanThrottle();
-      }
-
-      // We need to restyle even if the transition rule no longer
-      // applies (in which case we just made it not apply).
-      MOZ_ASSERT(collection->mElementProperty ==
-                   nsGkAtoms::transitionsProperty ||
-                 collection->mElementProperty ==
-                   nsGkAtoms::transitionsOfBeforeProperty ||
-                 collection->mElementProperty ==
-                   nsGkAtoms::transitionsOfAfterProperty,
-                 "Unexpected element property; might restyle too much");
-      if (!canThrottleTick) {
-        collection->PostRestyleForAnimation(mPresContext);
-      } else {
-        didThrottle = true;
-      }
-
-      if (collection->mAnimations.IsEmpty()) {
-        collection->Destroy();
-        // |collection| is now a dangling pointer!
-        collection = nullptr;
-      }
-    }
-  }
-
-  if (didThrottle) {
-    mPresContext->Document()->SetNeedStyleFlush();
-  }
-
-  MaybeStartOrStopObservingRefreshDriver();
 }

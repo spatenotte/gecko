@@ -1010,3 +1010,6 @@ bin/libfreebl_32int64_3.so
 ; OS API
 @BINPATH@/components/MozOs.js
 @BINPATH@/components/Os.manifest
+
+@RESPATH@/components/simpleServices.js
+@RESPATH@/components/utils.manifest

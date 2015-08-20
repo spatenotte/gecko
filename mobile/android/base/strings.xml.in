@@ -360,6 +360,8 @@
   <string name="contextmenu_top_sites_pin">&contextmenu_top_sites_pin;</string>
   <string name="contextmenu_top_sites_unpin">&contextmenu_top_sites_unpin;</string>
   <string name="contextmenu_add_search_engine">&contextmenu_add_search_engine;</string>
+  <string name="contextmenu_mark_read">&contextmenu_mark_read;</string>
+  <string name="contextmenu_mark_unread">&contextmenu_mark_unread;</string>
 
   <string name="doorhanger_login_no_username">&doorhanger_login_no_username;</string>
   <string name="doorhanger_login_edit_title">&doorhanger_login_edit_title;</string>
@@ -465,14 +467,20 @@
   <string name="bookmarkdefaults_title_marketplace">@bookmarks_marketplace@</string>
   <string name="bookmarkdefaults_url_marketplace">https://marketplace.firefox.com/</string>
 
+  <string name="bookmarkdefaults_title_restricted_webmaker">@bookmarks_restricted_webmaker@</string>
+  <string name="bookmarkdefaults_url_restricted_webmaker">https://webmaker.org/</string>
+
+  <string name="bookmarkdefaults_title_restricted_support">@bookmarks_restricted_support@</string>
+  <string name="bookmarkdefaults_url_restricted_support">https://support.mozilla.org/kb/kids</string>
+
   <!-- Site identity popup -->
   <string name="identity_connection_secure">&identity_connection_secure;</string>
   <string name="identity_connection_insecure">&identity_connection_insecure;</string>
 
-  <string name="mixed_content_blocked_all">&mixed_content_blocked_all;</string>
-  <string name="mixed_content_blocked_some">&mixed_content_blocked_some;</string>
-  <string name="mixed_content_display_loaded">&mixed_content_display_loaded;</string>
-  <string name="mixed_content_protection_disabled">&mixed_content_protection_disabled;</string>
+  <string name="mixed_content_blocked_all">&mixed_content_blocked_all1;</string>
+  <string name="mixed_content_blocked_some">&mixed_content_blocked_some1;</string>
+  <string name="mixed_content_display_loaded">&mixed_content_display_loaded1;</string>
+  <string name="mixed_content_protection_disabled">&mixed_content_protection_disabled1;</string>
 
   <string name="doorhanger_tracking_title">&doorhanger_tracking_title;</string>
   <string name="doorhanger_tracking_state_enabled">&doorhanger_tracking_state_enabled;</string>

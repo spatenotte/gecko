@@ -99,8 +99,11 @@ hardware (via AudioStream).
 
 namespace mozilla {
 
-class AudioSegment;
+namespace media {
 class AudioSink;
+}
+
+class AudioSegment;
 class TaskQueue;
 
 extern PRLogModuleInfo* gMediaDecoderLog;
@@ -332,7 +335,7 @@ public:
   // shutting down. The decoder monitor must be held while calling this.
   bool IsShutdown();
 
-  void QueueMetadata(int64_t aPublishTime,
+  void QueueMetadata(const media::TimeUnit& aPublishTime,
                      nsAutoPtr<MediaInfo> aInfo,
                      nsAutoPtr<MetadataTags> aTags);
 
@@ -399,8 +402,8 @@ protected:
   void PushFront(AudioData* aSample);
   void PushFront(VideoData* aSample);
 
-  void OnAudioPopped(const MediaData* aSample);
-  void OnVideoPopped(const MediaData* aSample);
+  void OnAudioPopped(const nsRefPtr<MediaData>& aSample);
+  void OnVideoPopped(const nsRefPtr<MediaData>& aSample);
 
   void VolumeChanged();
   void LogicalPlaybackRateChanged();
@@ -510,19 +513,28 @@ protected:
   // state machine thread.
   void UpdateRenderedVideoFrames();
 
-  // Stops the audio thread. The decoder monitor must be held with exactly
-  // one lock count. Called on the state machine thread.
-  void StopAudioThread();
+  // Stops the audio sink and shut it down.
+  // The decoder monitor must be held with exactly one lock count.
+  // Called on the state machine thread.
+  void StopAudioSink();
 
-  // Starts the audio thread. The decoder monitor must be held with exactly
-  // one lock count. Called on the state machine thread.
-  void StartAudioThread();
+  // Create and start the audio sink.
+  // The decoder monitor must be held with exactly one lock count.
+  // Called on the state machine thread.
+  void StartAudioSink();
+
+  void StopDecodedStream();
+
+  void StartDecodedStream();
 
   // Notification method invoked when mPlayState changes.
   void PlayStateChanged();
 
   // Notification method invoked when mLogicallySeeking changes.
   void LogicallySeekingChanged();
+
+  // Notification method invoked when mSameOriginMedia changes.
+  void SameOriginMediaChanged();
 
   // Sets internal state which causes playback of media to pause.
   // The decoder monitor must be held.
@@ -666,6 +678,10 @@ private:
 
   // Rejected by the AudioSink to signal errors.
   void OnAudioSinkError();
+
+  void OnDecodedStreamFinish();
+
+  void OnDecodedStreamError();
 
   // Return true if the video decoder's decode speed can not catch up the
   // play time.
@@ -986,7 +1002,7 @@ private:
   int64_t mFragmentEndTime;
 
   // The audio sink resource.  Used on state machine and audio threads.
-  RefPtr<AudioSink> mAudioSink;
+  RefPtr<media::AudioSink> mAudioSink;
 
   // The reader, don't call its methods with the decoder monitor held.
   // This is created in the state machine's constructor.
@@ -1258,10 +1274,6 @@ private:
 
   bool mDisabledHardwareAcceleration;
 
-  // mDecodingFrozenAtStateDecoding: turn on/off at
-  //                                 SetDormant/Seek,Play.
-  bool mDecodingFrozenAtStateDecoding;
-
   // True if we are back from DECODER_STATE_DORMANT state and
   // LoadedMetadataEvent was already sent.
   bool mSentLoadedMetadataEvent;
@@ -1285,6 +1297,7 @@ private:
   nsRefPtr<MediaResource> mResource;
 
   MozPromiseRequestHolder<GenericPromise> mAudioSinkPromise;
+  MozPromiseRequestHolder<GenericPromise> mDecodedStreamPromise;
 
   MediaEventListener mAudioQueueListener;
   MediaEventListener mVideoQueueListener;

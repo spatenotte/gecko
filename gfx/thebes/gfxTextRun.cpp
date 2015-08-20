@@ -29,6 +29,10 @@
 #include "gfxPlatformGtk.h" // xxx - for UseFcFontList
 #endif
 
+#ifdef XP_WIN
+#include "gfxWindowsPlatform.h"
+#endif
+
 #include "cairo.h"
 
 using namespace mozilla;
@@ -1911,6 +1915,12 @@ gfxFontGroup::GetDefaultFont()
         nsAutoCString fontInitInfo;
         fontInitInfo.AppendPrintf("no fonts - init: %d fonts: %d loader: %d",
                                   numInits, numFonts, loaderState);
+#ifdef XP_WIN
+        bool dwriteEnabled = gfxWindowsPlatform::GetPlatform()->DWriteEnabled();
+        double upTime = (double) GetTickCount();
+        fontInitInfo.AppendPrintf(" backend: %s system-uptime: %9.3f sec",
+                                  dwriteEnabled ? "directwrite" : "gdi", upTime/1000);
+#endif
         gfxCriticalError() << fontInitInfo.get();
 
         char msg[256]; // CHECK buffer length if revising message below
@@ -3259,7 +3269,7 @@ gfxMissingFontRecorder::Flush()
             }
             mNotifiedFonts[i] |= (1 << j);
             if (!fontNeeded.IsEmpty()) {
-                fontNeeded.Append(PRUnichar(','));
+                fontNeeded.Append(char16_t(','));
             }
             uint32_t tag = GetScriptTagForCode(i * 32 + j);
             fontNeeded.Append(char16_t(tag >> 24));
