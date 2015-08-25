@@ -658,7 +658,7 @@ gfxWindowsPlatform::VerifyD2DDevice(bool aAttemptForce)
         mozilla::gfx::Factory::SetDirect3D10Device(mD3D10Device);
     }
 
-    ScopedGfxFeatureReporter reporter1_1("D2D1.1");
+    ScopedGfxFeatureReporter reporter1_1("D2D1.1V");
 
     if (Factory::SupportsD2D1()) {
       reporter1_1.SetSuccessful();
@@ -1668,19 +1668,29 @@ bool CouldD3D11DeviceWork()
     return true;
   }
 
-  if (GetModuleHandleW(L"dlumd32.dll") && GetModuleHandleW(L"igd10umd32.dll")) {
-    nsString displayLinkModuleVersionString;
-    gfxWindowsPlatform::GetDLLVersion(L"dlumd32.dll", displayLinkModuleVersionString);
-    uint64_t displayLinkModuleVersion;
-    if (!ParseDriverVersion(displayLinkModuleVersionString, &displayLinkModuleVersion)) {
-      gfxCriticalError() << "DisplayLink: could not parse version";
-      gANGLESupportsD3D11 = false;
-      return false;
-    }
-    if (displayLinkModuleVersion <= V(8,6,1,36484)) {
-      gfxCriticalError(CriticalLog::DefaultOptions(false)) << "DisplayLink: too old version";
-      gANGLESupportsD3D11 = false;
-      return false;
+  if (GetModuleHandleW(L"igd10umd32.dll")) {
+    const wchar_t* checkModules[] = {L"dlumd32.dll",
+                                     L"dlumd11.dll",
+                                     L"dlumd10.dll"};
+    for (int i=0; i<PR_ARRAY_SIZE(checkModules); i+=1) {
+      if (GetModuleHandleW(checkModules[i])) {
+        nsString displayLinkModuleVersionString;
+        gfxWindowsPlatform::GetDLLVersion(checkModules[i],
+                                          displayLinkModuleVersionString);
+        uint64_t displayLinkModuleVersion;
+        if (!ParseDriverVersion(displayLinkModuleVersionString,
+                                &displayLinkModuleVersion)) {
+          gfxCriticalError() << "DisplayLink: could not parse version "
+                             << checkModules[i];
+          gANGLESupportsD3D11 = false;
+          return false;
+        }
+        if (displayLinkModuleVersion <= V(8,6,1,36484)) {
+          gfxCriticalError(CriticalLog::DefaultOptions(false)) << "DisplayLink: too old version " << displayLinkModuleVersionString.get();
+          gANGLESupportsD3D11 = false;
+          return false;
+        }
+      }
     }
   }
   result = true;

@@ -8,8 +8,10 @@
 #define DecodedStream_h_
 
 #include "nsTArray.h"
+#include "MediaEventSource.h"
 #include "MediaInfo.h"
 
+#include "mozilla/AbstractThread.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MozPromise.h"
@@ -56,6 +58,8 @@ public:
   {
     return mStream == aStream;
   }
+  // Return the graph mStream belongs to.
+  MediaStreamGraph* Graph() const;
 
 private:
   OutputStreamManager* mOwner;
@@ -81,6 +85,12 @@ public:
   void Connect(MediaStream* aStream);
   // Disconnect all output streams from the input stream.
   void Disconnect();
+  // Return the graph these streams belong to or null if empty.
+  MediaStreamGraph* Graph() const
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    return !IsEmpty() ? mStreams[0].Graph() : nullptr;
+  }
 
 private:
   // Keep the input stream so we can connect the output streams that
@@ -92,8 +102,11 @@ private:
 class DecodedStream {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DecodedStream);
 public:
-  DecodedStream(MediaQueue<MediaData>& aAudioQueue,
+  DecodedStream(AbstractThread* aOwnerThread,
+                MediaQueue<MediaData>& aAudioQueue,
                 MediaQueue<MediaData>& aVideoQueue);
+
+  void Shutdown();
 
   // Mimic MDSM::StartAudioThread.
   // Must be called before any calls to SendData().
@@ -105,10 +118,8 @@ public:
   // Mimic MDSM::StopAudioThread.
   void StopPlayback();
 
-  void DestroyData();
-  void RecreateData();
-  void Connect(ProcessedMediaStream* aStream, bool aFinishWhenEnded);
-  void Remove(MediaStream* aStream);
+  void AddOutput(ProcessedMediaStream* aStream, bool aFinishWhenEnded);
+  void RemoveOutput(MediaStream* aStream);
 
   void SetPlaying(bool aPlaying);
   void SetVolume(double aVolume);
@@ -119,31 +130,40 @@ public:
   bool IsFinished() const;
   bool HasConsumers() const;
 
-  void SendData();
-
 protected:
   virtual ~DecodedStream();
 
 private:
-  ReentrantMonitor& GetReentrantMonitor() const;
-  void RecreateData(MediaStreamGraph* aGraph);
+  void CreateData(MozPromiseHolder<GenericPromise>&& aPromise);
+  void DestroyData(UniquePtr<DecodedStreamData> aData);
+  void OnDataCreated(UniquePtr<DecodedStreamData> aData);
   void InitTracks();
   void AdvanceTracks();
   void SendAudio(double aVolume, bool aIsSameOrigin);
   void SendVideo(bool aIsSameOrigin);
+  void SendData();
 
-  UniquePtr<DecodedStreamData> mData;
+  void AssertOwnerThread() const {
+    MOZ_ASSERT(mOwnerThread->IsCurrentThreadIn());
+  }
+
+  void ConnectListener();
+  void DisconnectListener();
+
+  const nsRefPtr<AbstractThread> mOwnerThread;
+
+  /*
+   * Main thread only members.
+   */
   // Data about MediaStreams that are being fed by the decoder.
   OutputStreamManager mOutputStreamManager;
+  // True if MDSM has begun shutdown.
+  bool mShuttingDown;
 
-  // TODO: This is a temp solution to get rid of decoder monitor on the main
-  // thread in MDSM::AddOutputStream and MDSM::RecreateDecodedStream as
-  // required by bug 1146482. DecodedStream needs to release monitor before
-  // calling back into MDSM functions in order to prevent deadlocks.
-  //
-  // Please move all capture-stream related code from MDSM into DecodedStream
-  // and apply "dispatch + mirroring" to get rid of this monitor in the future.
-  mutable ReentrantMonitor mMonitor;
+  /*
+   * Worker thread only members.
+   */
+  UniquePtr<DecodedStreamData> mData;
 
   bool mPlaying;
   double mVolume;
@@ -154,6 +174,11 @@ private:
 
   MediaQueue<MediaData>& mAudioQueue;
   MediaQueue<MediaData>& mVideoQueue;
+
+  MediaEventListener mAudioPushListener;
+  MediaEventListener mVideoPushListener;
+  MediaEventListener mAudioFinishListener;
+  MediaEventListener mVideoFinishListener;
 };
 
 } // namespace mozilla

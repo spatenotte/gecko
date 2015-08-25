@@ -1259,6 +1259,7 @@ PopScope(JSContext* cx, ScopeIter& si)
       case ScopeIter::With:
         si.initialFrame().popWith(cx);
         break;
+      case ScopeIter::Module:
       case ScopeIter::Call:
       case ScopeIter::Eval:
       case ScopeIter::NonSyntactic:
@@ -1770,12 +1771,7 @@ class ReservedRooted : public ReservedRootedBase<T>
 
 template <>
 class ReservedRootedBase<Value> : public ValueOperations<ReservedRooted<Value>>
-{
-    friend class ValueOperations<ReservedRooted<Value>>;
-    const Value* extract() const {
-        return static_cast<const ReservedRooted<Value>*>(this)->address();
-    }
-};
+{};
 
 static MOZ_NEVER_INLINE bool
 Interpret(JSContext* cx, RunState& state)
@@ -3346,7 +3342,6 @@ CASE(JSOP_TABLESWITCH)
 }
 
 CASE(JSOP_ARGUMENTS)
-    MOZ_ASSERT(!REGS.fp()->fun()->hasRest());
     if (!script->ensureHasAnalyzedArgsUsage(cx))
         goto error;
     if (script->needsArgsObj()) {

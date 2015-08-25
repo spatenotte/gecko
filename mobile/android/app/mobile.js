@@ -414,7 +414,7 @@ pref("font.size.inflation.minTwips", 0);
 // When true, zooming will be enabled on all sites, even ones that declare user-scalable=no.
 pref("browser.ui.zoom.force-user-scalable", false);
 
-pref("ui.zoomedview.disabled", false);
+pref("ui.zoomedview.enabled", true);
 pref("ui.zoomedview.limitReadableSize", 8); // value in layer pixels
 pref("ui.zoomedview.defaultZoomFactor", 2);
 pref("ui.zoomedview.simplified", true); // Do not display all the zoomed view controls
@@ -525,7 +525,7 @@ pref("app.update.timerMinimumDelay", 30); // seconds
 // used by update service to decide whether or not to
 // automatically download an update
 pref("app.update.autodownload", "wifi");
-pref("app.update.url.android", "https://aus4.mozilla.org/update/4/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%MOZ_VERSION%/update.xml");
+pref("app.update.url.android", "https://aus5.mozilla.org/update/4/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%MOZ_VERSION%/update.xml");
 
 #ifdef MOZ_UPDATER
 /* prefs used specifically for updating the app */
@@ -547,8 +547,8 @@ pref("layers.offmainthreadcomposition.enabled", true);
 pref("layers.async-video.enabled", true);
 #ifdef MOZ_ANDROID_APZ
 pref("layers.async-pan-zoom.enabled", true);
-pref("apz.allow_zooming", true);
 #endif
+pref("apz.allow_zooming", true);
 pref("layers.progressive-paint", true);
 pref("layers.low-precision-buffer", true);
 pref("layers.low-precision-resolution", "0.25");

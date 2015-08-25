@@ -461,7 +461,10 @@ public:
     static TabChild* GetFrom(nsIPresShell* aPresShell);
     static TabChild* GetFrom(uint64_t aLayersId);
 
-    void DidComposite(uint64_t aTransactionId);
+    void DidComposite(uint64_t aTransactionId,
+                      const TimeStamp& aCompositeStart,
+                      const TimeStamp& aCompositeEnd);
+
     void ClearCachedResources();
 
     static inline TabChild*
@@ -511,6 +514,8 @@ protected:
     virtual bool RecvNavigateByKey(const bool& aForward, const bool& aForDocumentNavigation) override;
 
     virtual bool RecvRequestNotifyAfterRemotePaint() override;
+
+    virtual bool RecvSuppressDisplayport(const bool& aEnabled) override;
 
     virtual bool RecvParentActivated(const bool& aActivated) override;
 
@@ -608,6 +613,7 @@ private:
     RenderFrameChild* mRemoteFrame;
     nsRefPtr<nsIContentChild> mManager;
     uint32_t mChromeFlags;
+    int32_t mActiveSuppressDisplayport;
     uint64_t mLayersId;
     CSSRect mUnscaledOuterRect;
     // When we're tracking a possible tap gesture, this is the "down"

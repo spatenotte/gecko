@@ -552,6 +552,51 @@ BluetoothServiceBluedroid::GattClientWriteDescriptorValueInternal(
                              aDescriptorId, aValue, aRunnable);
 }
 
+// GATT Server
+void
+BluetoothServiceBluedroid::GattServerConnectPeripheralInternal(
+  const nsAString& aAppUuid, const nsAString& aAddress,
+  BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  ENSURE_BLUETOOTH_IS_READY_VOID(aRunnable);
+
+  BluetoothGattManager* gatt = BluetoothGattManager::Get();
+  ENSURE_GATT_MGR_IS_READY_VOID(gatt, aRunnable);
+
+  gatt->ConnectPeripheral(aAppUuid, aAddress, aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::GattServerDisconnectPeripheralInternal(
+  const nsAString& aAppUuid, const nsAString& aAddress,
+  BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  ENSURE_BLUETOOTH_IS_READY_VOID(aRunnable);
+
+  BluetoothGattManager* gatt = BluetoothGattManager::Get();
+  ENSURE_GATT_MGR_IS_READY_VOID(gatt, aRunnable);
+
+  gatt->DisconnectPeripheral(aAppUuid, aAddress, aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::UnregisterGattServerInternal(
+  int aServerIf, BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  ENSURE_BLUETOOTH_IS_READY_VOID(aRunnable);
+
+  BluetoothGattManager* gatt = BluetoothGattManager::Get();
+  ENSURE_GATT_MGR_IS_READY_VOID(gatt, aRunnable);
+
+  gatt->UnregisterServer(aServerIf, aRunnable);
+}
+
 nsresult
 BluetoothServiceBluedroid::GetAdaptersInternal(
   BluetoothReplyRunnable* aRunnable)
@@ -1123,6 +1168,109 @@ BluetoothServiceBluedroid::IsScoConnected(BluetoothReplyRunnable* aRunnable)
   }
 
   DispatchReplySuccess(aRunnable, BluetoothValue(hfp->IsScoConnected()));
+}
+
+void
+BluetoothServiceBluedroid::ReplyTovCardPulling(
+  BlobParent* aBlobParent,
+  BlobChild* aBlobChild,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to vCardPulling failed"));
+    return;
+  }
+
+  pbap->ReplyToPullvCardEntry(aBlobParent);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyTovCardPulling(
+  Blob* aBlob,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to vCardPulling failed"));
+    return;
+  }
+
+  pbap->ReplyToPullvCardEntry(aBlob);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyToPhonebookPulling(
+  BlobParent* aBlobParent,
+  BlobChild* aBlobChild,
+  uint16_t aPhonebookSize,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to Phonebook Pulling failed"));
+    return;
+  }
+
+  pbap->ReplyToPullPhonebook(aBlobParent, aPhonebookSize);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyToPhonebookPulling(
+  Blob* aBlob,
+  uint16_t aPhonebookSize,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to Phonebook Pulling failed"));
+    return;
+  }
+
+  pbap->ReplyToPullPhonebook(aBlob, aPhonebookSize);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyTovCardListing(
+  BlobParent* aBlobParent,
+  BlobChild* aBlobChild,
+  uint16_t aPhonebookSize,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to vCard Listing failed"));
+    return;
+  }
+
+  pbap->ReplyToPullvCardListing(aBlobParent, aPhonebookSize);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyTovCardListing(
+  Blob* aBlob,
+  uint16_t aPhonebookSize,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to vCard Listing failed"));
+    return;
+  }
+
+  pbap->ReplyToPullvCardListing(aBlob, aPhonebookSize);
+  DispatchReplySuccess(aRunnable);
 }
 
 void

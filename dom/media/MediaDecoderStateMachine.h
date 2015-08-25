@@ -171,6 +171,7 @@ public:
 
   void DispatchShutdown()
   {
+    mDecodedStream->Shutdown();
     nsCOMPtr<nsIRunnable> runnable =
       NS_NewRunnableMethod(this, &MediaDecoderStateMachine::Shutdown);
     OwnerThread()->Dispatch(runnable.forget());
@@ -319,15 +320,12 @@ public:
     if (mReader) {
       mReader->BreakCycles();
     }
-    mDecodedStream->DestroyData();
     mResource = nullptr;
     mDecoder = nullptr;
   }
 
-  // Copy queued audio/video data in the reader to any output MediaStreams that
-  // need it.
-  void SendStreamData();
-  void FinishStreamData();
+  // Discard audio/video data that are already played by MSG.
+  void DiscardStreamData();
   bool HaveEnoughDecodedAudio(int64_t aAmpleAudioUSecs);
   bool HaveEnoughDecodedVideo();
 
@@ -494,7 +492,7 @@ protected:
   void UpdatePlaybackPositionInternal(int64_t aTime);
 
   // Decode monitor must be held.
-  void CheckTurningOffHardwareDecoder(VideoData* aData);
+  bool CheckFrameValidity(VideoData* aData);
 
   // Sets VideoQueue images into the VideoFrameContainer. Called on the shared
   // state machine thread. Decode monitor must be held. The first aMaxFrames
@@ -1271,8 +1269,6 @@ private:
   // True if we need to call FinishDecodeFirstFrame() upon frame decoding
   // successeeding.
   bool mDecodingFirstFrame;
-
-  bool mDisabledHardwareAcceleration;
 
   // True if we are back from DECODER_STATE_DORMANT state and
   // LoadedMetadataEvent was already sent.

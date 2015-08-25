@@ -134,11 +134,17 @@ loop.contacts = (function(_, mozL10n) {
                   onClick={this.handleCloseButtonClick} />
           <p dangerouslySetInnerHTML={{__html: message}}
              onClick={this.handleLinkClick}></p>
-          <ButtonGroup>
-            <Button caption={mozL10n.get("gravatars_promo_button_nothanks")}
+          <div className="contacts-gravatar-avatars">
+            <img src="loop/shared/img/avatars.svg#orange-avatar" />
+            <span className="contacts-gravatar-arrow" />
+            <img src="loop/shared/img/firefox-avatar.svg" />
+          </div>
+          <ButtonGroup additionalClass="contacts-gravatar-buttons">
+            <Button additionalClass="secondary"
+                    caption={mozL10n.get("gravatars_promo_button_nothanks2")}
                     onClick={this.handleCloseButtonClick}/>
-            <Button additionalClass="button-accept"
-                    caption={mozL10n.get("gravatars_promo_button_use")}
+            <Button additionalClass="secondary"
+                    caption={mozL10n.get("gravatars_promo_button_use2")}
                     onClick={this.handleUseButtonClick}/>
           </ButtonGroup>
         </div>
@@ -324,10 +330,9 @@ loop.contacts = (function(_, mozL10n) {
 
     propTypes: {
       mozLoop: React.PropTypes.object.isRequired,
-      notifications: React.PropTypes.instanceOf(
-                     loop.shared.models.NotificationCollection).isRequired,
-      // Callback to handle entry to the add/edit contact form.
-      startForm: React.PropTypes.func.isRequired
+      notifications: React.PropTypes.instanceOf(loop.shared.models.NotificationCollection).isRequired,
+      switchToContactAdd: React.PropTypes.func.isRequired,
+      switchToContactEdit: React.PropTypes.func.isRequired
     },
 
     /**
@@ -526,13 +531,13 @@ loop.contacts = (function(_, mozL10n) {
     },
 
     handleAddContactButtonClick: function() {
-      this.props.startForm("contacts_add");
+      this.props.switchToContactAdd();
     },
 
     handleContactAction: function(contact, actionName) {
       switch (actionName) {
         case "edit":
-          this.props.startForm("contacts_edit", contact);
+          this.props.switchToContactEdit(contact);
           break;
         case "remove":
           this.props.mozLoop.confirm({
@@ -624,7 +629,7 @@ loop.contacts = (function(_, mozL10n) {
         return (
           <div className="contact-filter-container">
             <input className="contact-filter"
-                   placeholder={mozL10n.get("contacts_search_placesholder")}
+                   placeholder={mozL10n.get("contacts_search_placesholder2")}
                    valueLink={this.linkState("filter")} />
             {this._renderFilterClearButton()}
           </div>
@@ -666,10 +671,10 @@ loop.contacts = (function(_, mozL10n) {
         return (
           <div className="contact-list-empty">
             <p className="panel-text-large">
-              {mozL10n.get("no_contacts_message_heading")}
+              {mozL10n.get("no_contacts_message_heading2")}
             </p>
             <p className="panel-text-medium">
-              {mozL10n.get("no_contacts_import_or_add")}
+              {mozL10n.get("no_contacts_import_or_add2")}
             </p>
           </div>
         );
@@ -714,7 +719,7 @@ loop.contacts = (function(_, mozL10n) {
               busy: this.state.importBusy})} />
           </Button>
           <Button additionalClass="primary"
-            caption={mozL10n.get("new_contact_button")}
+            caption={mozL10n.get("new_contact_button2")}
             onClick={this.handleAddContactButtonClick} />
         </ButtonGroup>
       );
@@ -726,9 +731,7 @@ loop.contacts = (function(_, mozL10n) {
       }
 
       return (
-        <div className="content-area">
-          <GravatarPromo handleUse={this.handleUseGravatar}/>
-        </div>
+        <GravatarPromo handleUse={this.handleUseGravatar} />
       );
     },
 
@@ -744,13 +747,87 @@ loop.contacts = (function(_, mozL10n) {
     }
   });
 
+  const ContactsControllerView = React.createClass({
+    propTypes: {
+      initialSelectedTabComponent: React.PropTypes.string,
+      mozLoop: React.PropTypes.object.isRequired,
+      notifications: React.PropTypes.object.isRequired
+    },
+
+    getInitialState: function() {
+      return {
+        currentComponent: this.props.initialSelectedTabComponent || "contactList",
+        contactFormData: {}
+      };
+    },
+
+    /* XXX We should have success/Fail callbacks that the children call instead of this
+    * Children should not have knowledge of other views
+    * However, this is being implemented in this way so the view can be directed appropriately
+    * without making it too complex
+    */
+    switchComponentView: function(componentName) {
+      return function() {
+        this.setState({currentComponent: componentName});
+      }.bind(this);
+    },
+
+    handleAddEditContact: function(componentName) {
+      return function(contactFormData) {
+        this.setState({
+          contactFormData: contactFormData || {},
+          currentComponent: componentName
+        });
+      }.bind(this);
+    },
+
+    /* XXX Consider whether linkedStated makes sense for this */
+    render: function() {
+      switch(this.state.currentComponent) {
+        case "contactAdd":
+          return (
+            <ContactDetailsForm
+              contactFormData={this.state.contactFormData}
+              mode="add"
+              mozLoop={this.props.mozLoop}
+              ref="contacts_add"
+              switchToInitialView={this.switchComponentView("contactList")} />
+          );
+        case "contactEdit":
+          return (
+            <ContactDetailsForm
+              contactFormData={this.state.contactFormData}
+              mode="edit"
+              mozLoop={this.props.mozLoop}
+              ref="contacts_edit"
+              switchToInitialView={this.switchComponentView("contactList")} />
+          );
+        case "contactList":
+        default:
+          return (
+            <ContactsList
+              mozLoop={this.props.mozLoop}
+              notifications={this.props.notifications}
+              ref="contacts_list"
+              switchToContactAdd={this.handleAddEditContact("contactAdd")}
+              switchToContactEdit={this.handleAddEditContact("contactEdit")} />
+          );
+      }
+    }
+  });
+
   const ContactDetailsForm = React.createClass({
     mixins: [React.addons.LinkedStateMixin],
 
     propTypes: {
+      contactFormData: React.PropTypes.object.isRequired,
       mode: React.PropTypes.string,
-      // Callback used to change the selected tab - it is passed the tab name.
-      selectTab: React.PropTypes.func.isRequired
+      mozLoop: React.PropTypes.object.isRequired,
+      switchToInitialView: React.PropTypes.func.isRequired
+    },
+
+    componentDidMount: function() {
+      this.initForm(this.props.contactFormData);
     },
 
     getInitialState: function() {
@@ -765,12 +842,14 @@ loop.contacts = (function(_, mozL10n) {
 
     initForm: function(contact) {
       let state = this.getInitialState();
-      if (contact) {
+      // Test for an empty contact object
+      if (_.keys(contact).length > 0) {
         state.contact = contact;
         state.name = contact.name[0];
         state.email = getPreferred(contact, "email").value;
         state.tel = getPreferred(contact, "tel").value;
       }
+
       this.setState(state);
     },
 
@@ -788,10 +867,7 @@ loop.contacts = (function(_, mozL10n) {
         return;
       }
 
-      this.props.selectTab("contacts");
-
-      let contactsAPI = navigator.mozLoop.contacts;
-
+      let contactsAPI = this.props.mozLoop.contacts;
       switch (this.props.mode) {
         case "edit":
           this.state.contact.name[0] = this.state.name.trim();
@@ -808,7 +884,7 @@ loop.contacts = (function(_, mozL10n) {
           break;
         case "add":
           var contact = {
-            id: navigator.mozLoop.generateUUID(),
+            id: this.props.mozLoop.generateUUID(),
             name: [this.state.name.trim()],
             email: [{
               pref: true,
@@ -832,10 +908,12 @@ loop.contacts = (function(_, mozL10n) {
           });
           break;
       }
+
+      this.props.switchToInitialView();
     },
 
     handleCancelButtonClick: function() {
-      this.props.selectTab("contacts");
+      this.props.switchToInitialView();
     },
 
     render: function() {
@@ -895,6 +973,7 @@ loop.contacts = (function(_, mozL10n) {
     ContactsList: ContactsList,
     ContactDetail: ContactDetail,
     ContactDetailsForm: ContactDetailsForm,
+    ContactsControllerView: ContactsControllerView,
     _getPreferred: getPreferred,
     _setPreferred: setPreferred
   };
