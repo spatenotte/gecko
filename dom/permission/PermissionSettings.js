@@ -5,7 +5,7 @@
 "use strict";
 
 function debug(aMsg) {
-  //dump("-*- PermissionSettings.js: " + aMsg + "\n");
+  dump("-*- PermissionSettings.js: " + aMsg + "\n");
 }
 
 const Cc = Components.classes;
@@ -46,6 +46,7 @@ PermissionSettings.prototype = {
       case Ci.nsIPermissionManager.UNKNOWN_ACTION:
         return "unknown";
       case Ci.nsIPermissionManager.ALLOW_ACTION:
+        debug("Allowed permission");
         return "allow";
       case Ci.nsIPermissionManager.DENY_ACTION:
         return "deny";
