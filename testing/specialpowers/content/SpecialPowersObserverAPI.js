@@ -30,6 +30,7 @@ this.SpecialPowersObserverAPI = function SpecialPowersObserverAPI() {
   this._crashDumpDir = null;
   this._processCrashObserversRegistered = false;
   this._chromeScriptListeners = [];
+  this._extensions = new Map();
 }
 
 function parseKeyValuePairs(text) {
@@ -229,6 +230,14 @@ SpecialPowersObserverAPI.prototype = {
     return output;
   },
 
+  _sendReply: function(aMessage, aReplyName, aReplyMsg) {
+    let mm = aMessage.target
+                     .QueryInterface(Ci.nsIFrameLoaderOwner)
+                     .frameLoader
+                     .messageManager;
+    mm.sendAsyncMessage(aReplyName, aReplyMsg);
+  },
+
   /**
    * messageManager callback function
    * This will get requests from our API in the window and process them in chrome for it
@@ -314,7 +323,9 @@ SpecialPowersObserverAPI.prototype = {
         let msg = aMessage.json;
 
         let secMan = Services.scriptSecurityManager;
-        let principal = secMan.getAppCodebasePrincipal(this._getURI(msg.url), msg.appId, msg.isInBrowserElement);
+        // TODO: Bug 1196665 - Add originAttributes into SpecialPowers
+        let attrs = {appId: msg.appId, inBrowser: msg.isInBrowserElement};
+        let principal = secMan.createCodebasePrincipal(this._getURI(msg.url), attrs);
 
         switch (msg.op) {
           case "add":
@@ -543,6 +554,64 @@ SpecialPowersObserverAPI.prototype = {
           observe(null, "idle-daily", "Caller:SpecialPowers");
 
         return undefined;	// See comment at the beginning of this function.
+      }
+
+      case "SPLoadExtension": {
+        let {Extension} = Components.utils.import("resource://gre/modules/Extension.jsm", {});
+
+        let id = aMessage.data.id;
+        let uri = Services.io.newURI(aMessage.data.url, null, null);
+        let extension = new Extension({
+          id,
+          resourceURI: uri
+        });
+
+        let resultListener = (...args) => {
+          this._sendReply(aMessage, "SPExtensionMessage", {id, type: "testResult", args});
+        };
+
+        let messageListener = (...args) => {
+          args.shift();
+          this._sendReply(aMessage, "SPExtensionMessage", {id, type: "testMessage", args});
+        };
+
+        // Register pass/fail handlers.
+        extension.on("test-result", resultListener);
+        extension.on("test-eq", resultListener);
+        extension.on("test-log", resultListener);
+        extension.on("test-done", resultListener);
+
+        extension.on("test-message", messageListener);
+
+        this._extensions.set(id, extension);
+        return undefined;
+      }
+
+      case "SPStartupExtension": {
+        let id = aMessage.data.id;
+        let extension = this._extensions.get(id);
+        extension.startup().then(() => {
+          this._sendReply(aMessage, "SPExtensionMessage", {id, type: "extensionStarted", args: []});
+        }).catch(e => {
+          this._sendReply(aMessage, "SPExtensionMessage", {id, type: "extensionFailed", args: []});
+        });
+        return undefined;
+      }
+
+      case "SPExtensionMessage": {
+        let id = aMessage.data.id;
+        let extension = this._extensions.get(id);
+        extension.testMessage(...aMessage.data.args);
+        return undefined;
+      }
+
+      case "SPUnloadExtension": {
+        let id = aMessage.data.id;
+        let extension = this._extensions.get(id);
+        this._extensions.delete(id);
+        extension.shutdown();
+        this._sendReply(aMessage, "SPExtensionMessage", {id, type: "extensionUnloaded", args: []});
+        return undefined;
       }
 
       default:

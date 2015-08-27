@@ -491,6 +491,7 @@ loop.roomViews = (function(mozL10n) {
             disabled={checked}
             label={checkboxLabel}
             onChange={this.handleCheckboxChange}
+            useEllipsis={true}
             value={location} />
           <form onSubmit={this.handleFormSubmit}>
             <input className="room-context-name"
@@ -508,7 +509,7 @@ loop.roomViews = (function(mozL10n) {
             <textarea className="room-context-comments"
               onKeyDown={this.handleTextareaKeyDown}
               placeholder={mozL10n.get("context_edit_comments_placeholder")}
-              rows="3" type="text"
+              rows="2" type="text"
               valueLink={this.linkState("newRoomDescription")} />
           </form>
           <button className="btn btn-info"
@@ -724,6 +725,16 @@ loop.roomViews = (function(mozL10n) {
           return null;
         }
         default: {
+          var settingsMenuItems = [
+            {
+              id: "edit",
+              enabled: !this.state.showEditContext,
+              visible: this.state.contextEnabled,
+              onClick: this.handleEditContextClick
+            },
+            { id: "feedback" },
+            { id: "help" }
+          ];
           return (
             <div className="room-conversation-wrapper desktop-room-wrapper">
               <sharedViews.MediaLayoutView
@@ -746,11 +757,11 @@ loop.roomViews = (function(mozL10n) {
                 <sharedViews.ConversationToolbar
                   audio={{enabled: !this.state.audioMuted, visible: true}}
                   dispatcher={this.props.dispatcher}
-                  edit={{ visible: this.state.contextEnabled, enabled: !this.state.showEditContext }}
                   hangup={this.leaveRoom}
-                  onEditClick={this.handleEditContextClick}
+                  mozLoop={this.props.mozLoop}
                   publishStream={this.publishStream}
                   screenShare={screenShareData}
+                  settingsMenuItems={settingsMenuItems}
                   video={{enabled: !this.state.videoMuted, visible: true}} />
                 <DesktopRoomInvitationView
                   dispatcher={this.props.dispatcher}

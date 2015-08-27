@@ -385,7 +385,6 @@
   // Update the text chat store with the room info.
   textChatStore.updateRoomInfo(new sharedActions.UpdateRoomInfo({
     roomName: "A Very Long Conversation Name",
-    roomOwner: "fake",
     roomUrl: "http://showcase",
     urls: [{
       description: "A wonderful page!",
@@ -1028,6 +1027,7 @@
                   React.createElement(ConversationToolbar, {audio: { enabled: true, visible: true}, 
                                        hangup: noop, 
                                        publishStream: noop, 
+                                       settingsMenuItems: [{ id: "feedback" }], 
                                        video: { enabled: true, visible: true}})
                 )
               ), 
@@ -1039,6 +1039,7 @@
                   React.createElement(ConversationToolbar, {audio: { enabled: true, visible: true}, 
                                        hangup: noop, 
                                        publishStream: noop, 
+                                       settingsMenuItems: [{ id: "feedback" }], 
                                        video: { enabled: false, visible: true}})
                 )
               ), 
@@ -1050,6 +1051,7 @@
                   React.createElement(ConversationToolbar, {audio: { enabled: false, visible: true}, 
                                        hangup: noop, 
                                        publishStream: noop, 
+                                       settingsMenuItems: [{ id: "feedback" }], 
                                        video: { enabled: true, visible: true}})
                 )
               )
