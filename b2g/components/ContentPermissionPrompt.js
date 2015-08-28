@@ -8,6 +8,10 @@ function debug(str) {
   //dump("-*- ContentPermissionPrompt: " + str + "\n");
 }
 
+function debug2(str) {
+  dump("-*- ContentPermissionPrompt: " + str + "\n");
+}
+
 const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
@@ -50,6 +54,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
  * @return true if prompt is required
  */
 function shouldPrompt(aPerm, aAction) {
+  debug2('Permission: ' + JSON.stringify(aPerm));
+  debug2('Action: ' + JSON.stringify(aAction));
   return ((aAction == Ci.nsIPermissionManager.PROMPT_ACTION) ||
           (aAction == Ci.nsIPermissionManager.UNKNOWN_ACTION &&
            PROMPT_FOR_UNKNOWN.indexOf(aPerm) >= 0));
