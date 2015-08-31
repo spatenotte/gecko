@@ -88,6 +88,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "Langpacks",
 XPCOMUtils.defineLazyModuleGetter(this, "ImportExport",
                                   "resource://gre/modules/ImportExport.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
+                                  "resource://gre/modules/AppConstants.jsm");
+
 #ifdef MOZ_WIDGET_GONK
 XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
   Cu.import("resource://gre/modules/systemlibs.js");
@@ -104,10 +107,14 @@ let debug = Cu.import("resource://gre/modules/AndroidLog.jsm", {})
               .AndroidLog.d.bind(null, "Webapps");
 #else
 // Elsewhere, report debug messages only if dom.mozApps.debug is set to true.
-// The pref is only checked once, on startup, so restart after changing it.
-let debug = Services.prefs.getBoolPref("dom.mozApps.debug")
-              ? (aMsg) => dump("-*- Webapps.jsm : " + aMsg + "\n")
-              : (aMsg) => {};
+let debug;
+function debugPrefObserver() {
+  debug = Services.prefs.getBoolPref("dom.mozApps.debug")
+            ? (aMsg) => dump("-*- Webapps.jsm : " + aMsg + "\n")
+            : (aMsg) => {};
+}
+debugPrefObserver();
+Services.prefs.addObserver("dom.mozApps.debug", debugPrefObserver, false);
 #endif
 
 function getNSPRErrorCode(err) {
@@ -781,9 +788,9 @@ this.DOMApplicationRegistry = {
           }
         }
 
-#ifdef MOZ_B2G
-        yield this.installSystemApps();
-#endif
+        if (AppConstants.MOZ_B2GDROID || AppConstants.MOZ_B2G) {
+          yield this.installSystemApps();
+        }
 
         // At first run, install preloaded apps and set up their permissions.
         for (let id in this.webapps) {
@@ -858,9 +865,13 @@ this.DOMApplicationRegistry = {
       root = aManifest.entry_points[aEntryPoint];
     }
 
-    if (!root.messages || !Array.isArray(root.messages) ||
-        root.messages.length == 0) {
-      dump("Could not register invalid system message entry\n");
+    if (!root.messages) {
+      // This application just doesn't use system messages.
+      return;
+    }
+
+    if (!Array.isArray(root.messages) || root.messages.length == 0) {
+      dump("Could not register invalid system message entry for " + aApp.manifestURL + "\n");
       try {
         dump(JSON.stringify(root.messages) + "\n");
       } catch(e) {}
@@ -874,7 +885,7 @@ this.DOMApplicationRegistry = {
       let handlerPageURI = launchPathURI;
       let messageName;
       if (typeof(aMessage) !== "object" || Object.keys(aMessage).length !== 1) {
-        dump("Could not register invalid system message entry\n");
+        dump("Could not register invalid system message entry for " + aApp.manifestURL + "\n");
         try {
           dump(JSON.stringify(aMessage) + "\n");
         } catch(e) {}
