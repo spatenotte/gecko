@@ -46,6 +46,11 @@ XPCOMUtils.defineLazyServiceGetter(this,
 XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
                                   "resource://gre/modules/SystemAppProxy.jsm");
 
+XPCOMUtils.defineLazyServiceGetter(this,
+                                   "PrivacyMonitor",
+                                   "@mozilla.org/privacy-monitor;1",
+                                   "PrivacyMonitor");
+
 /**
  * Determine if a permission should be prompt to user or not.
  *
@@ -54,8 +59,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
  * @return true if prompt is required
  */
 function shouldPrompt(aPerm, aAction) {
-  debug2('Permission: ' + JSON.stringify(aPerm));
-  debug2('Action: ' + JSON.stringify(aAction));
   return ((aAction == Ci.nsIPermissionManager.PROMPT_ACTION) ||
           (aAction == Ci.nsIPermissionManager.UNKNOWN_ACTION &&
            PROMPT_FOR_UNKNOWN.indexOf(aPerm) >= 0));
@@ -137,6 +140,11 @@ ContentPermissionPrompt.prototype = {
 
   handleExistingPermission: function handleExistingPermission(request,
                                                               typesInfo) {
+
+    // Calling WebIDL for logging requests
+    debug2("Calling WebIDL");
+    PrivacyMonitor.logPermissionRequest(request, typesInfo);
+
     typesInfo.forEach(function(type) {
       type.action =
         Services.perms.testExactPermissionFromPrincipal(request.principal,

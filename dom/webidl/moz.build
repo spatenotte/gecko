@@ -375,6 +375,7 @@ WEBIDL_FILES = [
     'Presentation.webidl',
     'PresentationDeviceInfoManager.webidl',
     'PresentationSession.webidl',
+    'PrivacyMonitor.webidl',
     'ProcessingInstruction.webidl',
     'ProfileTimelineMarker.webidl',
     'Promise.webidl',

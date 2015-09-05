@@ -80,6 +80,7 @@ DIRS += [
     'offline',
     'os',
     'power',
+    'privacymonitor',
     'quota',
     'security',
     'settings',
