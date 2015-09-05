@@ -875,7 +875,7 @@ APZCTreeManager::UpdateWheelTransaction(WidgetInputEvent& aEvent)
 
   switch (aEvent.mMessage) {
    case eMouseMove:
-   case NS_DRAGDROP_OVER: {
+   case eDragOver: {
      WidgetMouseEvent* mouseEvent = aEvent.AsMouseEvent();
      if (!mouseEvent->IsReal()) {
        return;
@@ -894,7 +894,7 @@ APZCTreeManager::UpdateWheelTransaction(WidgetInputEvent& aEvent)
    case eMouseDoubleClick:
    case eMouseClick:
    case eContextMenu:
-   case NS_DRAGDROP_DROP:
+   case eDrop:
      txn->EndTransaction();
      return;
    default:
@@ -1548,17 +1548,13 @@ APZCTreeManager::FindRootApzcForLayersId(uint64_t aLayersId) const
 {
   mTreeLock.AssertCurrentThreadOwns();
 
-  struct RootForLayersIdMatcher {
-    uint64_t mLayersId;
-    bool operator()(const HitTestingTreeNode* aNode) const {
-      AsyncPanZoomController* apzc = aNode->GetApzc();
-      return apzc
-          && apzc->GetLayersId() == mLayersId
-          && apzc->IsRootForLayersId();
-    }
-  };
   const HitTestingTreeNode* resultNode = BreadthFirstSearch(mRootNode.get(),
-      RootForLayersIdMatcher{aLayersId});
+      [aLayersId](const HitTestingTreeNode* aNode) {
+        AsyncPanZoomController* apzc = aNode->GetApzc();
+        return apzc
+            && apzc->GetLayersId() == aLayersId
+            && apzc->IsRootForLayersId();
+      });
   return resultNode ? resultNode->GetApzc() : nullptr;
 }
 
@@ -1567,17 +1563,13 @@ APZCTreeManager::FindRootContentApzcForLayersId(uint64_t aLayersId) const
 {
   mTreeLock.AssertCurrentThreadOwns();
 
-  struct RootContentForLayersIdMatcher {
-    uint64_t mLayersId;
-    bool operator()(const HitTestingTreeNode* aNode) const {
-      AsyncPanZoomController* apzc = aNode->GetApzc();
-      return apzc
-          && apzc->GetLayersId() == mLayersId
-          && apzc->IsRootContent();
-    }
-  };
   const HitTestingTreeNode* resultNode = BreadthFirstSearch(mRootNode.get(),
-      RootContentForLayersIdMatcher{aLayersId});
+      [aLayersId](const HitTestingTreeNode* aNode) {
+        AsyncPanZoomController* apzc = aNode->GetApzc();
+        return apzc
+            && apzc->GetLayersId() == aLayersId
+            && apzc->IsRootContent();
+      });
   return resultNode ? resultNode->GetApzc() : nullptr;
 }
 

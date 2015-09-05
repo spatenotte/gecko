@@ -430,7 +430,7 @@ AudioNodeStream::AccumulateInputChunk(uint32_t aInputIndex, const AudioChunk& aC
                                       AudioChunk* aBlock,
                                       nsTArray<float>* aDownmixBuffer)
 {
-  nsAutoTArray<const void*,GUESS_AUDIO_CHANNELS> channels;
+  nsAutoTArray<const float*,GUESS_AUDIO_CHANNELS> channels;
   UpMixDownMixChunk(&aChunk, aBlock->mChannelData.Length(), channels, *aDownmixBuffer);
 
   for (uint32_t c = 0; c < channels.Length(); ++c) {
@@ -453,15 +453,17 @@ AudioNodeStream::AccumulateInputChunk(uint32_t aInputIndex, const AudioChunk& aC
 void
 AudioNodeStream::UpMixDownMixChunk(const AudioChunk* aChunk,
                                    uint32_t aOutputChannelCount,
-                                   nsTArray<const void*>& aOutputChannels,
+                                   nsTArray<const float*>& aOutputChannels,
                                    nsTArray<float>& aDownmixBuffer)
 {
   static const float silenceChannel[WEBAUDIO_BLOCK_SIZE] = {0.f};
 
-  aOutputChannels.AppendElements(aChunk->mChannelData);
+  for (uint32_t i = 0; i < aChunk->mChannelData.Length(); i++) {
+    aOutputChannels.AppendElement(static_cast<const float*>(aChunk->mChannelData[i]));
+  }
   if (aOutputChannels.Length() < aOutputChannelCount) {
     if (mChannelInterpretation == ChannelInterpretation::Speakers) {
-      AudioChannelsUpMix(&aOutputChannels, aOutputChannelCount, nullptr);
+      AudioChannelsUpMix(&aOutputChannels, aOutputChannelCount, SilentChannel::ZeroChannel<float>());
       NS_ASSERTION(aOutputChannelCount == aOutputChannels.Length(),
                    "We called GetAudioChannelsSuperset to avoid this");
     } else {
@@ -535,6 +537,12 @@ AudioNodeStream::ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags)
       } else {
         mEngine->ProcessBlocksOnPorts(this, mInputChunks, mLastChunks, &finished);
       }
+    }
+    for (auto& chunk : mInputChunks) {
+      // If the buffer is shared then it won't be reused, so release the
+      // reference now.  Keep the channel data array to save a free/alloc
+      // pair.
+      chunk.ReleaseBufferIfShared();
     }
     for (uint16_t i = 0; i < outputCount; ++i) {
       NS_ASSERTION(mLastChunks[i].GetDuration() == WEBAUDIO_BLOCK_SIZE,
@@ -610,22 +618,6 @@ AudioNodeStream::AdvanceOutputSegment()
                                 segment->GetDuration(), 0, tmpSegment);
   }
 }
-
-void
-AudioNodeStream::ReleaseSharedBuffers()
-{
-  // A shared buffer can't be reused, so release the reference now.  Keep
-  // the channel data arrays to save unnecessary free/alloc.
-  // Release shared output buffers first, as they may be shared with input
-  // buffers which can be re-used if there are no other references.
-  for (auto& chunk : mLastChunks) {
-    chunk.ReleaseBufferIfShared();
-  }
-  for (auto& chunk : mInputChunks) {
-    chunk.ReleaseBufferIfShared();
-  }
-}
-
 
 StreamTime
 AudioNodeStream::GetCurrentPosition()

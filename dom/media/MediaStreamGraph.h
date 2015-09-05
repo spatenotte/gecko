@@ -461,6 +461,9 @@ public:
   }
   void RemoveVideoOutputImpl(VideoFrameContainer* aContainer)
   {
+    // Ensure that any frames currently queued for playback by the compositor
+    // are removed.
+    aContainer->ClearFutureFrames();
     mVideoOutputs.RemoveElement(aContainer);
   }
   void ChangeExplicitBlockerCountImpl(GraphTime aTime, int32_t aDelta)
@@ -897,9 +900,7 @@ protected:
     // Resampler if the rate of the input track does not match the
     // MediaStreamGraph's.
     nsAutoRef<SpeexResamplerState> mResampler;
-#ifdef DEBUG
     int mResamplerChannelCount;
-#endif
     StreamTime mStart;
     // End-time of data already flushed to the track (excluding mData)
     StreamTime mEndOfFlushedData;
