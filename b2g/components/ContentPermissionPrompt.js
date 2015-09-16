@@ -35,6 +35,7 @@ Cu.import("resource://gre/modules/PermissionsTable.jsm");
 
 var permissionManager = Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager);
 var secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
+var privacyMonitor = Cc["@mozilla.org/privacy-monitor;1"].getService().wrappedJSObject;
 
 let permissionSpecificChecker = {};
 
@@ -45,11 +46,6 @@ XPCOMUtils.defineLazyServiceGetter(this,
 
 XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
                                   "resource://gre/modules/SystemAppProxy.jsm");
-
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "PrivacyMonitor",
-                                   "@mozilla.org/privacy-monitor;1",
-                                   "PrivacyMonitor");
 
 /**
  * Determine if a permission should be prompt to user or not.
@@ -143,7 +139,7 @@ ContentPermissionPrompt.prototype = {
 
     // Calling WebIDL for logging requests
     debug2("Calling WebIDL");
-    PrivacyMonitor.logPermissionRequest(request, typesInfo);
+    privacyMonitor.logPermissionRequest(request, typesInfo);
 
     typesInfo.forEach(function(type) {
       type.action =

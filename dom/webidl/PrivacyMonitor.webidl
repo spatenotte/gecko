@@ -1,6 +1,6 @@
 [JSImplementation="@mozilla.org/privacy-monitor;1",
 NavigatorProperty="privacyMonitor"]
-interface PrivacyMonitor : EventTarget {
+interface PrivacyMonitor{
   //Promise<> readDB();
-  void logPermissionRequest(request, typesInfo);
+  void logPermissionRequest(object request, object typesInfo);
 };
