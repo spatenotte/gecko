@@ -139,7 +139,9 @@ ContentPermissionPrompt.prototype = {
 
     // Calling WebIDL for logging requests
     debug2("Calling WebIDL");
-    privacyMonitor.logPermissionRequest(request, typesInfo);
+    debug2("Type of appID: " + typeof(request.principal.appId));
+    debug2("Type of typesInfo: " + typeof(typesInfo));
+    privacyMonitor.logPermissionRequest(request.principal.appId, typesInfo);
 
     typesInfo.forEach(function(type) {
       type.action =

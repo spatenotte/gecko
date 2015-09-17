@@ -24,8 +24,10 @@ PrivacyMonitor.prototype = {
                                     interfaces: [Ci.PrivacyMonitor],
                                     flags: Ci.nsIClassInfo.DOM_OBJECT}),
   
-  logPermissionRequest: function logPermissionRequest(request, typesInfo) {
-    let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(request.principal.appId);
+  logPermissionRequest: function logPermissionRequest(appID, typesInfo) {
+    debug2("Hellooooooooo");
+    let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(appID);
+    debug2("debugdlgjbdougbdog");
 
     for (let i in typesInfo) {
       debug2("Prompting for: " + typesInfo[i].permission);

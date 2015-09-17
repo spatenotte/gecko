@@ -2,5 +2,5 @@
 NavigatorProperty="privacyMonitor"]
 interface PrivacyMonitor{
   //Promise<> readDB();
-  void logPermissionRequest(object request, object typesInfo);
+  void logPermissionRequest(long appID, object typesInfo);
 };
