@@ -22,17 +22,23 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.ProtocolException;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
+import java.util.MissingResourceException;
 import java.util.UUID;
+import java.util.zip.CRC32;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Build;
+import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
-
 
 /**
  * SwitchBoard is the core class of the KeepSafe Switchboard mobile A/B testing framework.
@@ -64,7 +70,8 @@ public class SwitchBoard {
 	/** Production server for getting the actual config file. http://staging.domain/path_to/SwitchboardDriver.php */
 	private static String DYNAMIC_CONFIG_SERVER_DEFAULT_URL;
 	
-	
+	public static final String ACTION_CONFIG_FETCHED = ".SwitchBoard.CONFIG_FETCHED";
+
 	private static final String kUpdateServerUrl = "updateServerUrl";
 	private static final String kConfigServerUrl = "configServerUrl";
 	
@@ -188,8 +195,18 @@ public class SwitchBoard {
 			
 			String device = Build.DEVICE;
 			String manufacturer = Build.MANUFACTURER;
-			String lang = Locale.getDefault().getISO3Language();
-			String country = Locale.getDefault().getISO3Country();			
+			String lang = "unknown";
+			try {
+				lang = Locale.getDefault().getISO3Language();
+			} catch (MissingResourceException e) {
+				e.printStackTrace();
+			}
+			String country = "unknown";
+			try {
+				country = Locale.getDefault().getISO3Country();
+			} catch (MissingResourceException e) {
+				e.printStackTrace();
+			}
 			String packageName = c.getPackageName();
 			String versionName = "none";
 			try {
@@ -217,8 +234,20 @@ public class SwitchBoard {
 		} catch (NullPointerException e) {
 			e.printStackTrace();
 		}
+
+		//notify listeners that the config fetch has completed
+		Intent i = new Intent(ACTION_CONFIG_FETCHED);
+		LocalBroadcastManager.getInstance(c).sendBroadcast(i);
 	}
-	
+
+	public static boolean isInBucket(Context c, int low, int high) {
+		int userBucket = getUserBucket(c);
+		if (userBucket >= low && userBucket < high)
+			return true;
+		else
+			return false;
+	}
+
 	/**
 	 * Looks up in config if user is in certain experiment. Returns false as a default value when experiment
 	 * does not exist.
@@ -268,6 +297,37 @@ public class SwitchBoard {
 		
 	}
 	
+	/**
+	 * @returns a list of all active experiments.
+	 */
+	public static List<String> getActiveExperiments(Context c) {
+		ArrayList<String> returnList = new ArrayList<String>();
+
+		// lookup experiment in config
+		String config = Preferences.getDynamicConfigJson(c);
+
+		// if it does not exist
+		if (config == null) {
+			return returnList;
+		}
+
+		try {
+			JSONObject experiments = new JSONObject(config);
+			Iterator<?> iter = experiments.keys();
+			while (iter.hasNext()) {
+				String key = (String)iter.next();
+				JSONObject experiment = experiments.getJSONObject(key);
+				if (experiment.getBoolean(IS_EXPERIMENT_ACTIVE)) {
+					returnList.add(key);
+				}
+			}
+		} catch (JSONException e) {
+			// Something went wrong!
+		}
+
+		return returnList;
+	}
+
 	/**
 	 * Checks if a certain experiment exists. 
 	 * @param c ApplicationContext
@@ -369,5 +429,19 @@ public class SwitchBoard {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Return the bucket number of the user. There are 100 possible buckets.
+	 */
+	private static int getUserBucket(Context c) {
+		//get uuid
+		DeviceUuidFactory df = new DeviceUuidFactory(c);
+		String uuid = df.getDeviceUuid().toString();
+
+		CRC32 crc = new CRC32();
+		crc.update(uuid.getBytes());
+		long checksum = crc.getValue();
+		return (int)(checksum % 100L);
 	}
 }

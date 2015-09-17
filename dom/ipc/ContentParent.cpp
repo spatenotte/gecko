@@ -56,6 +56,7 @@
 #include "mozilla/dom/cellbroadcast/CellBroadcastParent.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
 #include "mozilla/dom/icc/IccParent.h"
+#include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
 #include "mozilla/dom/mobileconnection/MobileConnectionParent.h"
 #include "mozilla/dom/mobilemessage/SmsParent.h"
 #include "mozilla/dom/power/PowerManagerService.h"
@@ -141,6 +142,7 @@
 #include "nsIXULRuntime.h"
 #include "gfxDrawable.h"
 #include "ImageOps.h"
+#include "mozilla/dom/nsMixedContentBlocker.h"
 #include "nsMemoryInfoDumper.h"
 #include "nsMemoryReporterManager.h"
 #include "nsServiceManagerUtils.h"
@@ -153,7 +155,6 @@
 #include "SandboxHal.h"
 #include "ScreenManagerParent.h"
 #include "SourceSurfaceRawData.h"
-#include "StructuredCloneIPCHelper.h"
 #include "TabParent.h"
 #include "URIUtils.h"
 #include "nsIWebBrowserChrome.h"
@@ -164,6 +165,7 @@
 #include "prio.h"
 #include "private/pprio.h"
 #include "ContentProcessManager.h"
+#include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/psm/PSMContentListener.h"
 #include "nsPluginHost.h"
 #include "nsPluginTags.h"
@@ -3022,7 +3024,7 @@ ContentParent::OnNewProcessCreated(uint32_t aPid,
     InfallibleTArray<nsString> unusedDictionaries;
     ClipboardCapabilities clipboardCaps;
     DomainPolicyClone domainPolicy;
-    OwningSerializedStructuredCloneBuffer initialData;
+    StructuredCloneData initialData;
 
     RecvGetXPCOMProcessAttributes(&isOffline, &isConnected,
                                   &isLangRTL, &unusedDictionaries,
@@ -3310,7 +3312,7 @@ ContentParent::RecvGetXPCOMProcessAttributes(bool* aIsOffline,
                                              InfallibleTArray<nsString>* dictionaries,
                                              ClipboardCapabilities* clipboardCaps,
                                              DomainPolicyClone* domainPolicy,
-                                             OwningSerializedStructuredCloneBuffer* initialData)
+                                             StructuredCloneData* aInitialData)
 {
     nsCOMPtr<nsIIOService> io(do_GetIOService());
     MOZ_ASSERT(io, "No IO service?");
@@ -3357,12 +3359,11 @@ ContentParent::RecvGetXPCOMProcessAttributes(bool* aIsOffline,
             return false;
         }
 
-        JSAutoStructuredCloneBuffer buffer;
-        if (!buffer.write(jsapi.cx(), init)) {
+        ErrorResult rv;
+        aInitialData->Write(jsapi.cx(), init, rv);
+        if (NS_WARN_IF(rv.Failed())) {
             return false;
         }
-
-        buffer.steal(&initialData->data, &initialData->dataLength);
     }
 
     return true;
@@ -4176,6 +4177,17 @@ ContentParent::RecvIsSecureURI(const uint32_t& type,
 }
 
 bool
+ContentParent::RecvAccumulateMixedContentHSTS(const URIParams& aURI, const bool& aActive)
+{
+    nsCOMPtr<nsIURI> ourURI = DeserializeURI(aURI);
+    if (!ourURI) {
+        return false;
+    }
+    nsMixedContentBlocker::AccumulateMixedContentHSTS(ourURI, aActive);
+    return true;
+}
+
+bool
 ContentParent::RecvLoadURIExternal(const URIParams& uri)
 {
     nsCOMPtr<nsIExternalProtocolService> extProtService(do_GetService(NS_EXTERNALPROTOCOLSERVICE_CONTRACTID));
@@ -4241,7 +4253,7 @@ ContentParent::RecvSyncMessage(const nsString& aMsg,
                                const ClonedMessageData& aData,
                                InfallibleTArray<CpowEntry>&& aCpows,
                                const IPC::Principal& aPrincipal,
-                               nsTArray<OwningSerializedStructuredCloneBuffer>* aRetvals)
+                               nsTArray<StructuredCloneData>* aRetvals)
 {
     return nsIContentParent::RecvSyncMessage(aMsg, aData, Move(aCpows),
                                              aPrincipal, aRetvals);
@@ -4252,7 +4264,7 @@ ContentParent::RecvRpcMessage(const nsString& aMsg,
                               const ClonedMessageData& aData,
                               InfallibleTArray<CpowEntry>&& aCpows,
                               const IPC::Principal& aPrincipal,
-                              nsTArray<OwningSerializedStructuredCloneBuffer>* aRetvals)
+                              nsTArray<StructuredCloneData>* aRetvals)
 {
     return nsIContentParent::RecvRpcMessage(aMsg, aData, Move(aCpows), aPrincipal,
                                             aRetvals);
@@ -4490,7 +4502,7 @@ ContentParent::DoLoadMessageManagerScript(const nsAString& aURL,
 bool
 ContentParent::DoSendAsyncMessage(JSContext* aCx,
                                   const nsAString& aMessage,
-                                  StructuredCloneIPCHelper& aHelper,
+                                  StructuredCloneData& aHelper,
                                   JS::Handle<JSObject *> aCpows,
                                   nsIPrincipal* aPrincipal)
 {
@@ -5352,6 +5364,17 @@ ContentParent::RecvEndDriverCrashGuard(const uint32_t& aGuardType)
 {
   mDriverCrashGuard = nullptr;
   return true;
+}
+
+bool
+ContentParent::RecvGetDeviceStorageLocation(const nsString& aType,
+                                            nsString* aPath) {
+#ifdef MOZ_WIDGET_ANDROID
+  mozilla::AndroidBridge::GetExternalPublicDirectory(aType, *aPath);
+  return true;
+#else
+  return false;
+#endif
 }
 
 } // namespace dom

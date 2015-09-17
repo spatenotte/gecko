@@ -9,7 +9,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/FxAccounts.jsm");
 
-let fxAccountsCommon = {};
+var fxAccountsCommon = {};
 Cu.import("resource://gre/modules/FxAccountsCommon.js", fxAccountsCommon);
 
 // for master-password utilities
@@ -102,7 +102,7 @@ function updateDisplayedEmail(user) {
   }
 }
 
-let wrapper = {
+var wrapper = {
   iframe: null,
 
   init: function (url, urlParams) {
@@ -127,12 +127,15 @@ let wrapper = {
       url += (url.includes("?") ? "&" : "?") + urlParamStr;
     }
     this.url = url;
-    iframe.src = url;
+    // Set the iframe's location with loadURI/LOAD_FLAGS_BYPASS_HISTORY to
+    // avoid having a new history entry being added.
+    let webNav = iframe.frameLoader.docShell.QueryInterface(Ci.nsIWebNavigation);
+    webNav.loadURI(url, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY, null, null, null);
   },
 
   retry: function () {
     let webNav = this.iframe.frameLoader.docShell.QueryInterface(Ci.nsIWebNavigation);
-    webNav.loadURI(this.url, null, null, null, null);
+    webNav.loadURI(this.url, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY, null, null, null);
   },
 
   iframeListener: {

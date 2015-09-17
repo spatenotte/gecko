@@ -2699,7 +2699,7 @@ ExtractSimdValue(ModuleValidator& m, ParseNode* pn)
 {
     MOZ_ASSERT(IsSimdLiteral(m, pn));
 
-    AsmJSSimdType type;
+    AsmJSSimdType type = AsmJSSimdType_int32x4;
     JS_ALWAYS_TRUE(IsSimdTuple(m, pn, &type));
 
     ParseNode* arg = CallArgList(pn);
@@ -9914,6 +9914,8 @@ CheckHeapLengthCondition(ModuleValidator& m, ParseNode* cond, PropertyName* newB
     ParseNode* maskNode = BitwiseRight(cond1);
     if (!IsLiteralInt(m, maskNode, mask))
         return m.fail(maskNode, "expecting integer literal mask");
+    if (*mask == UINT32_MAX)
+        return m.fail(maskNode, "invalid mask value");
     if ((*mask & 0xffffff) != 0xffffff)
         return m.fail(maskNode, "mask value must have the bits 0xffffff set");
 
@@ -11039,7 +11041,7 @@ CheckFunctions(ModuleValidator& m, ScopedJSDeletePtr<ModuleCompileResults>* resu
 
         // If failure was triggered by a helper thread, report error.
         if (void* maybeFunc = HelperThreadState().maybeAsmJSFailedFunction()) {
-            ModuleValidator::Func* func = reinterpret_cast<ModuleValidator::Func*>(maybeFunc);
+            AsmFunction* func = reinterpret_cast<AsmFunction*>(maybeFunc);
             return m.failOffset(func->srcBegin(), "allocation failure during compilation");
         }
 
@@ -12376,17 +12378,18 @@ CheckModule(ExclusiveContext* cx, AsmJSParser& parser, ParseNode* stmtList,
     if (!CheckModuleGlobals(m))
         return false;
 
+    m.startFunctionBodies();
+
 #if !defined(ENABLE_SHARED_ARRAY_BUFFER)
     MOZ_ASSERT(!m.module().hasArrayView() || !m.module().isSharedView());
 #endif
-
-    m.startFunctionBodies();
 
     ScopedJSDeletePtr<ModuleCompileResults> mcd;
     if (!CheckFunctions(m, &mcd))
         return false;
 
-    m.finishFunctionBodies(&mcd);
+    if (!m.finishFunctionBodies(&mcd))
+        return false;
 
     if (!CheckFuncPtrTables(m))
         return false;

@@ -24,6 +24,7 @@
 #include "jit/EagerSimdUnbox.h"
 #include "jit/EdgeCaseAnalysis.h"
 #include "jit/EffectiveAddressAnalysis.h"
+#include "jit/InstructionReordering.h"
 #include "jit/IonAnalysis.h"
 #include "jit/IonBuilder.h"
 #include "jit/IonOptimizationLevels.h"
@@ -436,15 +437,16 @@ typedef Vector<OnIonCompilationInfo> OnIonCompilationVector;
 // Debugger::onIonCompilation should be called.
 static inline void
 PrepareForDebuggerOnIonCompilationHook(JSContext* cx, jit::MIRGraph& graph,
-                                       AutoScriptVector* scripts, OnIonCompilationInfo* info)
+                                       MutableHandle<ScriptVector> scripts,
+                                       OnIonCompilationInfo* info)
 {
     info->numBlocks = 0;
     if (!Debugger::observesIonCompilation(cx))
         return;
 
     // fireOnIonCompilation failures are ignored, do the same here.
-    info->scriptIndex = scripts->length();
-    if (!scripts->reserve(graph.numBlocks() + scripts->length())) {
+    info->scriptIndex = scripts.length();
+    if (!scripts.reserve(graph.numBlocks() + scripts.length())) {
         cx->clearPendingException();
         return;
     }
@@ -452,7 +454,7 @@ PrepareForDebuggerOnIonCompilationHook(JSContext* cx, jit::MIRGraph& graph,
     // Collect the list of scripts which are inlined in the MIRGraph.
     info->numBlocks = graph.numBlocks();
     for (jit::MBasicBlockIterator block(graph.begin()); block != graph.end(); block++)
-        scripts->infallibleAppend(block->info().script());
+        scripts.infallibleAppend(block->info().script());
 
     // Spew the JSON graph made for the Debugger at the end of the LifoAlloc
     // used by the compiler. This would not prevent unexpected GC from the
@@ -461,7 +463,7 @@ PrepareForDebuggerOnIonCompilationHook(JSContext* cx, jit::MIRGraph& graph,
     jit::JSONSpewer spewer(info->graph);
     spewer.spewDebuggerGraph(&graph);
     if (info->graph.hadOutOfMemory()) {
-        scripts->resize(info->scriptIndex);
+        scripts.resize(info->scriptIndex);
         info->numBlocks = 0;
     }
 }
@@ -517,7 +519,7 @@ FinishAllOffThreadCompilations(JSCompartment* comp)
     }
 }
 
-class AutoLazyLinkExitFrame
+class MOZ_RAII AutoLazyLinkExitFrame
 {
     JitActivation* jitActivation_;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
@@ -540,7 +542,7 @@ class AutoLazyLinkExitFrame
 
 static bool
 LinkCodeGen(JSContext* cx, IonBuilder* builder, CodeGenerator *codegen,
-            AutoScriptVector* scripts, OnIonCompilationInfo* info)
+            MutableHandle<ScriptVector> scripts, OnIonCompilationInfo* info)
 {
     RootedScript script(cx, builder->script());
     TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
@@ -557,7 +559,7 @@ LinkCodeGen(JSContext* cx, IonBuilder* builder, CodeGenerator *codegen,
 
 static bool
 LinkBackgroundCodeGen(JSContext* cx, IonBuilder* builder,
-                      AutoScriptVector* scripts, OnIonCompilationInfo* info)
+                      MutableHandle<ScriptVector> scripts, OnIonCompilationInfo* info)
 {
     CodeGenerator* codegen = builder->backgroundCodegen();
     if (!codegen)
@@ -591,7 +593,7 @@ jit::LazyLink(JSContext* cx, HandleScript calleeScript)
     }
 
     // See PrepareForDebuggerOnIonCompilationHook
-    AutoScriptVector debugScripts(cx);
+    Rooted<ScriptVector> debugScripts(cx, ScriptVector(cx));
     OnIonCompilationInfo info(builder->alloc().lifoAlloc());
 
     {
@@ -1377,6 +1379,111 @@ jit::ToggleBarriers(JS::Zone* zone, bool needs)
 namespace js {
 namespace jit {
 
+static void
+OptimizeSinCos(MIRGenerator *mir, MIRGraph &graph)
+{
+    // Now, we are looking for:
+    // var y = sin(x);
+    // var z = cos(x);
+    // Graph before:
+    // - 1 op
+    // - 6 mathfunction op1 Sin
+    // - 7 mathfunction op1 Cos
+    // Graph will look like:
+    // - 1 op
+    // - 5 sincos op1
+    // - 6 mathfunction sincos5 Sin
+    // - 7 mathfunction sincos5 Cos
+    for (MBasicBlockIterator block(graph.begin()); block != graph.end(); block++) {
+        for (MInstructionIterator iter(block->begin()), end(block->end()); iter != end; ) {
+            MInstruction *ins = *iter++;
+            if (!ins->isMathFunction() || ins->isRecoveredOnBailout())
+                continue;
+
+            MMathFunction *insFunc = ins->toMathFunction();
+            if (insFunc->function() != MMathFunction::Sin && insFunc->function() != MMathFunction::Cos)
+                continue;
+
+            // Check if sin/cos is already optimized.
+            if (insFunc->getOperand(0)->type() == MIRType_SinCosDouble)
+                continue;
+
+            // insFunc is either a |sin(x)| or |cos(x)| instruction. The
+            // following loop iterates over the uses of |x| to check if both
+            // |sin(x)| and |cos(x)| instructions exist.
+            bool hasSin = false;
+            bool hasCos = false;
+            for (MUseDefIterator uses(insFunc->input()); uses; uses++)
+            {
+                if (!uses.def()->isInstruction())
+                    continue;
+
+                // We should replacing the argument of the sin/cos just when it
+                // is dominated by the |block|.
+                if (!block->dominates(uses.def()->block()))
+                    continue;
+
+                MInstruction *insUse = uses.def()->toInstruction();
+                if (!insUse->isMathFunction() || insUse->isRecoveredOnBailout())
+                    continue;
+
+                MMathFunction *mathIns = insUse->toMathFunction();
+                if (!hasSin && mathIns->function() == MMathFunction::Sin) {
+                    hasSin = true;
+                    JitSpew(JitSpew_Sincos, "Found sin in block %d.", mathIns->block()->id());
+                }
+                else if (!hasCos && mathIns->function() == MMathFunction::Cos) {
+                    hasCos = true;
+                    JitSpew(JitSpew_Sincos, "Found cos in block %d.", mathIns->block()->id());
+                }
+
+                if (hasCos && hasSin)
+                    break;
+            }
+
+            if (!hasCos || !hasSin) {
+                JitSpew(JitSpew_Sincos, "No sin/cos pair found.");
+                continue;
+            }
+
+            JitSpew(JitSpew_Sincos, "Found, at least, a pair sin/cos. Adding sincos in block %d",
+                    block->id());
+            // Adding the MSinCos and replacing the parameters of the
+            // sin(x)/cos(x) to sin(sincos(x))/cos(sincos(x)).
+            MSinCos *insSinCos = MSinCos::New(graph.alloc(),
+                                              insFunc->input(),
+                                              insFunc->toMathFunction()->cache());
+            insSinCos->setImplicitlyUsedUnchecked();
+            block->insertBefore(insFunc, insSinCos);
+            for (MUseDefIterator uses(insFunc->input()); uses; )
+            {
+                MDefinition* def = uses.def();
+                uses++;
+                if (!def->isInstruction())
+                    continue;
+
+                // We should replacing the argument of the sin/cos just when it
+                // is dominated by the |block|.
+                if (!block->dominates(def->block()))
+                    continue;
+
+                MInstruction *insUse = def->toInstruction();
+                if (!insUse->isMathFunction() || insUse->isRecoveredOnBailout())
+                    continue;
+
+                MMathFunction *mathIns = insUse->toMathFunction();
+                if (mathIns->function() != MMathFunction::Sin && mathIns->function() != MMathFunction::Cos)
+                    continue;
+
+                mathIns->replaceOperand(0, insSinCos);
+                JitSpew(JitSpew_Sincos, "Replacing %s by sincos in block %d",
+                        mathIns->function() == MMathFunction::Sin ? "sin" : "cos",
+                        mathIns->block()->id());
+            }
+        }
+    }
+}
+
 bool
 OptimizeMIR(MIRGenerator* mir)
 {
@@ -1649,6 +1756,16 @@ OptimizeMIR(MIRGenerator* mir)
         AssertExtendedGraphCoherency(graph);
 
         if (mir->shouldCancel("Effective Address Analysis"))
+            return false;
+    }
+
+    if (mir->optimizationInfo().sincosEnabled()) {
+        AutoTraceLog log(logger, TraceLogger_Sincos);
+        OptimizeSinCos(mir, graph);
+        gs.spewPass("Sincos optimization");
+        AssertExtendedGraphCoherency(graph);
+
+        if (mir->shouldCancel("Sincos optimization"))
             return false;
     }
 
@@ -2109,7 +2226,7 @@ IonCompile(JSContext* cx, JSScript* script,
     }
 
     // See PrepareForDebuggerOnIonCompilationHook
-    AutoScriptVector debugScripts(cx);
+    Rooted<ScriptVector> debugScripts(cx, ScriptVector(cx));
     OnIonCompilationInfo debugInfo(alloc);
 
     ScopedJSDeletePtr<CodeGenerator> codegen;

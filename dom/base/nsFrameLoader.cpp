@@ -92,7 +92,7 @@
 #include "nsSandboxFlags.h"
 #include "mozilla/layers/CompositorChild.h"
 
-#include "mozilla/dom/StructuredCloneIPCHelper.h"
+#include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/WebBrowserPersistLocalDocument.h"
 
 #ifdef MOZ_XUL
@@ -634,7 +634,7 @@ AllDescendantsOfType(nsIDocShellTreeItem* aParentItem, int32_t aType)
  * A class that automatically sets mInShow to false when it goes
  * out of scope.
  */
-class MOZ_STACK_CLASS AutoResetInShow {
+class MOZ_RAII AutoResetInShow {
   private:
     nsFrameLoader* mFrameLoader;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
@@ -989,7 +989,7 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
   return NS_OK;
 }
 
-class MOZ_STACK_CLASS AutoResetInFrameSwap final
+class MOZ_RAII AutoResetInFrameSwap final
 {
 public:
   AutoResetInFrameSwap(nsFrameLoader* aThisFrameLoader,
@@ -2447,10 +2447,10 @@ public:
   nsAsyncMessageToChild(JSContext* aCx,
                         nsFrameLoader* aFrameLoader,
                         const nsAString& aMessage,
-                        StructuredCloneIPCHelper& aHelper,
+                        StructuredCloneData& aData,
                         JS::Handle<JSObject *> aCpows,
                         nsIPrincipal* aPrincipal)
-    : nsSameProcessAsyncMessageBase(aCx, aMessage, aHelper, aCpows, aPrincipal)
+    : nsSameProcessAsyncMessageBase(aCx, aMessage, aData, aCpows, aPrincipal)
     , mFrameLoader(aFrameLoader)
   {
   }
@@ -2472,7 +2472,7 @@ public:
 bool
 nsFrameLoader::DoSendAsyncMessage(JSContext* aCx,
                                   const nsAString& aMessage,
-                                  StructuredCloneIPCHelper& aHelper,
+                                  StructuredCloneData& aData,
                                   JS::Handle<JSObject *> aCpows,
                                   nsIPrincipal* aPrincipal)
 {
@@ -2480,7 +2480,7 @@ nsFrameLoader::DoSendAsyncMessage(JSContext* aCx,
   if (tabParent) {
     ClonedMessageData data;
     nsIContentParent* cp = tabParent->Manager();
-    if (!BuildClonedMessageDataForParent(cp, aHelper, data)) {
+    if (!BuildClonedMessageDataForParent(cp, aData, data)) {
       return false;
     }
     InfallibleTArray<mozilla::jsipc::CpowEntry> cpows;
@@ -2494,7 +2494,7 @@ nsFrameLoader::DoSendAsyncMessage(JSContext* aCx,
 
   if (mChildMessageManager) {
     nsCOMPtr<nsIRunnable> ev = new nsAsyncMessageToChild(aCx, this, aMessage,
-                                                         aHelper, aCpows,
+                                                         aData, aCpows,
                                                          aPrincipal);
     NS_DispatchToCurrentThread(ev);
     return true;

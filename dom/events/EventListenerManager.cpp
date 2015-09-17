@@ -55,7 +55,7 @@ using namespace hal;
 
 #define EVENT_TYPE_EQUALS(ls, message, userType, typeString, allEvents) \
   ((ls->mEventMessage == message &&                                     \
-    (ls->mEventMessage != NS_USER_DEFINED_EVENT ||                      \
+    (ls->mEventMessage != eUnidentifiedEvent ||                         \
     (mIsMainThreadELM && ls->mTypeAtom == userType) ||                  \
     (!mIsMainThreadELM && ls->mTypeString.Equals(typeString)))) ||      \
    (allEvents && ls->mAllEvents))
@@ -73,19 +73,19 @@ static uint32_t
 MutationBitForEventType(EventMessage aEventType)
 {
   switch (aEventType) {
-    case NS_MUTATION_SUBTREEMODIFIED:
+    case eLegacySubtreeModified:
       return NS_EVENT_BITS_MUTATION_SUBTREEMODIFIED;
-    case NS_MUTATION_NODEINSERTED:
+    case eLegacyNodeInserted:
       return NS_EVENT_BITS_MUTATION_NODEINSERTED;
-    case NS_MUTATION_NODEREMOVED:
+    case eLegacyNodeRemoved:
       return NS_EVENT_BITS_MUTATION_NODEREMOVED;
-    case NS_MUTATION_NODEREMOVEDFROMDOCUMENT:
+    case eLegacyNodeRemovedFromDocument:
       return NS_EVENT_BITS_MUTATION_NODEREMOVEDFROMDOCUMENT;
-    case NS_MUTATION_NODEINSERTEDINTODOCUMENT:
+    case eLegacyNodeInsertedIntoDocument:
       return NS_EVENT_BITS_MUTATION_NODEINSERTEDINTODOCUMENT;
-    case NS_MUTATION_ATTRMODIFIED:
+    case eLegacyAttrModified:
       return NS_EVENT_BITS_MUTATION_ATTRMODIFIED;
-    case NS_MUTATION_CHARACTERDATAMODIFIED:
+    case eLegacyCharacterDataModified:
       return NS_EVENT_BITS_MUTATION_CHARACTERDATAMODIFIED;
     default:
       break;
@@ -293,14 +293,14 @@ EventListenerManager::AddEventListenerInternal(
     mMayHaveCapturingListeners = true;
   }
 
-  if (aEventMessage == NS_AFTERPAINT) {
+  if (aEventMessage == eAfterPaint) {
     mMayHavePaintEventListener = true;
     nsPIDOMWindow* window = GetInnerWindowForTarget();
     if (window) {
       window->SetHasPaintEventListeners();
     }
-  } else if (aEventMessage >= NS_MUTATION_START &&
-             aEventMessage <= NS_MUTATION_END) {
+  } else if (aEventMessage >= eLegacyMutationEventFirst &&
+             aEventMessage <= eLegacyMutationEventLast) {
     // For mutation listeners, we need to update the global bit on the DOM window.
     // Otherwise we won't actually fire the mutation event.
     mMayHaveMutationListeners = true;
@@ -311,20 +311,20 @@ EventListenerManager::AddEventListenerInternal(
       if (doc) {
         doc->WarnOnceAbout(nsIDocument::eMutationEvent);
       }
-      // If aEventMessage is NS_MUTATION_SUBTREEMODIFIED, we need to listen all
+      // If aEventMessage is eLegacySubtreeModified, we need to listen all
       // mutations. nsContentUtils::HasMutationListeners relies on this.
       window->SetMutationListeners(
-        (aEventMessage == NS_MUTATION_SUBTREEMODIFIED) ?
+        (aEventMessage == eLegacySubtreeModified) ?
           kAllMutationBits : MutationBitForEventType(aEventMessage));
     }
   } else if (aTypeAtom == nsGkAtoms::ondeviceorientation) {
-    EnableDevice(NS_DEVICE_ORIENTATION);
+    EnableDevice(eDeviceOrientation);
   } else if (aTypeAtom == nsGkAtoms::ondeviceproximity || aTypeAtom == nsGkAtoms::onuserproximity) {
-    EnableDevice(NS_DEVICE_PROXIMITY);
+    EnableDevice(eDeviceProximity);
   } else if (aTypeAtom == nsGkAtoms::ondevicelight) {
-    EnableDevice(NS_DEVICE_LIGHT);
+    EnableDevice(eDeviceLight);
   } else if (aTypeAtom == nsGkAtoms::ondevicemotion) {
-    EnableDevice(NS_DEVICE_MOTION);
+    EnableDevice(eDeviceMotion);
 #ifdef MOZ_B2G
   } else if (aTypeAtom == nsGkAtoms::onmoztimechange) {
     nsCOMPtr<nsPIDOMWindow> window = GetTargetAsInnerWindow();
@@ -334,12 +334,12 @@ EventListenerManager::AddEventListenerInternal(
   } else if (aTypeAtom == nsGkAtoms::onmoznetworkupload) {
     nsCOMPtr<nsPIDOMWindow> window = GetTargetAsInnerWindow();
     if (window) {
-      window->EnableNetworkEvent(NS_NETWORK_UPLOAD_EVENT);
+      window->EnableNetworkEvent(eNetworkUpload);
     }
   } else if (aTypeAtom == nsGkAtoms::onmoznetworkdownload) {
     nsCOMPtr<nsPIDOMWindow> window = GetTargetAsInnerWindow();
     if (window) {
-      window->EnableNetworkEvent(NS_NETWORK_DOWNLOAD_EVENT);
+      window->EnableNetworkEvent(eNetworkDownload);
     }
 #endif // MOZ_B2G
   } else if (aTypeAtom == nsGkAtoms::ontouchstart ||
@@ -383,8 +383,8 @@ EventListenerManager::AddEventListenerInternal(
       window->SetHasMouseEnterLeaveEventListeners();
     }
 #ifdef MOZ_GAMEPAD
-  } else if (aEventMessage >= NS_GAMEPAD_START &&
-             aEventMessage <= NS_GAMEPAD_END) {
+  } else if (aEventMessage >= eGamepadEventFirst &&
+             aEventMessage <= eGamepadEventLast) {
     nsPIDOMWindow* window = GetInnerWindowForTarget();
     if (window) {
       window->SetHasGamepadEventListener();
@@ -419,11 +419,11 @@ bool
 EventListenerManager::IsDeviceType(EventMessage aEventMessage)
 {
   switch (aEventMessage) {
-    case NS_DEVICE_ORIENTATION:
-    case NS_DEVICE_MOTION:
-    case NS_DEVICE_LIGHT:
-    case NS_DEVICE_PROXIMITY:
-    case NS_USER_PROXIMITY:
+    case eDeviceOrientation:
+    case eDeviceMotion:
+    case eDeviceLight:
+    case eDeviceProximity:
+    case eUserProximity:
       return true;
     default:
       break;
@@ -440,17 +440,17 @@ EventListenerManager::EnableDevice(EventMessage aEventMessage)
   }
 
   switch (aEventMessage) {
-    case NS_DEVICE_ORIENTATION:
+    case eDeviceOrientation:
       window->EnableDeviceSensor(SENSOR_ORIENTATION);
       break;
-    case NS_DEVICE_PROXIMITY:
-    case NS_USER_PROXIMITY:
+    case eDeviceProximity:
+    case eUserProximity:
       window->EnableDeviceSensor(SENSOR_PROXIMITY);
       break;
-    case NS_DEVICE_LIGHT:
+    case eDeviceLight:
       window->EnableDeviceSensor(SENSOR_LIGHT);
       break;
-    case NS_DEVICE_MOTION:
+    case eDeviceMotion:
       window->EnableDeviceSensor(SENSOR_ACCELERATION);
       window->EnableDeviceSensor(SENSOR_LINEAR_ACCELERATION);
       window->EnableDeviceSensor(SENSOR_GYROSCOPE);
@@ -470,19 +470,19 @@ EventListenerManager::DisableDevice(EventMessage aEventMessage)
   }
 
   switch (aEventMessage) {
-    case NS_DEVICE_ORIENTATION:
+    case eDeviceOrientation:
       window->DisableDeviceSensor(SENSOR_ORIENTATION);
       break;
-    case NS_DEVICE_MOTION:
+    case eDeviceMotion:
       window->DisableDeviceSensor(SENSOR_ACCELERATION);
       window->DisableDeviceSensor(SENSOR_LINEAR_ACCELERATION);
       window->DisableDeviceSensor(SENSOR_GYROSCOPE);
       break;
-    case NS_DEVICE_PROXIMITY:
-    case NS_USER_PROXIMITY:
+    case eDeviceProximity:
+    case eUserProximity:
       window->DisableDeviceSensor(SENSOR_PROXIMITY);
       break;
-    case NS_DEVICE_LIGHT:
+    case eDeviceLight:
       window->DisableDeviceSensor(SENSOR_LIGHT);
       break;
     default:
@@ -510,9 +510,9 @@ EventListenerManager::RemoveEventListenerInternal(
   uint32_t typeCount = 0;
   bool deviceType = IsDeviceType(aEventMessage);
 #ifdef MOZ_B2G
-  bool timeChangeEvent = (aEventMessage == NS_MOZ_TIME_CHANGE_EVENT);
-  bool networkEvent = (aEventMessage == NS_NETWORK_UPLOAD_EVENT ||
-                       aEventMessage == NS_NETWORK_DOWNLOAD_EVENT);
+  bool timeChangeEvent = (aEventMessage == eTimeChange);
+  bool networkEvent = (aEventMessage == eNetworkUpload ||
+                       aEventMessage == eNetworkDownload);
 #endif // MOZ_B2G
 
   for (uint32_t i = 0; i < count; ++i) {
@@ -569,13 +569,13 @@ EventListenerManager::ListenerCanHandle(Listener* aListener,
                                         WidgetEvent* aEvent)
 {
   // This is slightly different from EVENT_TYPE_EQUALS in that it returns
-  // true even when aEvent->mMessage == NS_USER_DEFINED_EVENT and
-  // aListener=>mEventMessage != NS_USER_DEFINED_EVENT as long as the atoms are
+  // true even when aEvent->mMessage == eUnidentifiedEvent and
+  // aListener=>mEventMessage != eUnidentifiedEvent as long as the atoms are
   // the same
   if (aListener->mAllEvents) {
     return true;
   }
-  if (aEvent->mMessage == NS_USER_DEFINED_EVENT) {
+  if (aEvent->mMessage == eUnidentifiedEvent) {
     if (mIsMainThreadELM) {
       return aListener->mTypeAtom == aEvent->userType;
     }
@@ -1226,8 +1226,8 @@ EventListenerManager::HasMutationListeners()
     uint32_t count = mListeners.Length();
     for (uint32_t i = 0; i < count; ++i) {
       Listener* listener = &mListeners.ElementAt(i);
-      if (listener->mEventMessage >= NS_MUTATION_START &&
-          listener->mEventMessage <= NS_MUTATION_END) {
+      if (listener->mEventMessage >= eLegacyMutationEventFirst &&
+          listener->mEventMessage <= eLegacyMutationEventLast) {
         return true;
       }
     }
@@ -1244,9 +1244,9 @@ EventListenerManager::MutationListenerBits()
     uint32_t count = mListeners.Length();
     for (uint32_t i = 0; i < count; ++i) {
       Listener* listener = &mListeners.ElementAt(i);
-      if (listener->mEventMessage >= NS_MUTATION_START &&
-          listener->mEventMessage <= NS_MUTATION_END) {
-        if (listener->mEventMessage == NS_MUTATION_SUBTREEMODIFIED) {
+      if (listener->mEventMessage >= eLegacyMutationEventFirst &&
+          listener->mEventMessage <= eLegacyMutationEventLast) {
+        if (listener->mEventMessage == eLegacySubtreeModified) {
           return kAllMutationBits;
         }
         bits |= MutationBitForEventType(listener->mEventMessage);

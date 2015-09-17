@@ -1283,7 +1283,8 @@ struct nsStyleGridTemplate {
   }
 
   inline bool operator!=(const nsStyleGridTemplate& aOther) const {
-    return mLineNameLists != aOther.mLineNameLists ||
+    return mIsSubgrid != aOther.mIsSubgrid ||
+           mLineNameLists != aOther.mLineNameLists ||
            mMinTrackSizingFunctions != aOther.mMinTrackSizingFunctions ||
            mMaxTrackSizingFunctions != aOther.mMaxTrackSizingFunctions;
   }
@@ -1365,7 +1366,8 @@ struct nsStylePosition {
       FreeByObjectID(nsPresArena::nsStylePosition_id, this);
   }
 
-  nsChangeHint CalcDifference(const nsStylePosition& aOther) const;
+  nsChangeHint CalcDifference(const nsStylePosition& aOther,
+                              nsStyleContext* aContext) const;
   static nsChangeHint MaxDifference() {
     return NS_CombineHint(NS_STYLE_HINT_REFLOW,
                           nsChangeHint(nsChangeHint_RecomputePosition |
@@ -2374,11 +2376,6 @@ struct nsStyleTableBorder {
            nsChangeHint_ReflowChangesSizeOrPosition |
            nsChangeHint_ClearAncestorIntrinsics;
   }
-
-  // Return the mCaptionSide value, with physical values resolved to
-  // the appropriate logical value for the given writing mode.
-  // (The definition of this is in WritingModes.h.)
-  inline uint8_t LogicalCaptionSide(mozilla::WritingMode aWM) const;
 
   nscoord       mBorderSpacingCol;// [inherited]
   nscoord       mBorderSpacingRow;// [inherited]

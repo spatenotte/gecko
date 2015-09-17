@@ -850,6 +850,8 @@ fi
 MOZ_PATH_PROG(RPMBUILD, rpmbuild, :)
 AC_SUBST(RPMBUILD)
 
+MOZ_PATH_PROG(GENISOIMAGE, genisoimage, :)
+
 if test "$COMPILE_ENVIRONMENT"; then
 
 dnl ========================================================
@@ -1483,7 +1485,6 @@ if test "$GNU_CC"; then
     # -Wall - turn on a lot of warnings
     # -Wchar-subscripts - catches array index using signed char
     # -Wcomment - catches nested comments
-    # -Wdeclaration-after-statement - MSVC doesn't like these
     # -Wempty-body - catches bugs, e.g. "if (c); foo();", few false positives
     # -Wendif-labels - catches `#else FOO` and `#endif FOO` not in comment
     # -Wenum-compare - catches comparison of different enum types
@@ -1503,7 +1504,6 @@ if test "$GNU_CC"; then
     # -Wunknown-pragmas - catches unexpected #pragma directives
     #
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wall"
-    _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wdeclaration-after-statement"
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wempty-body"
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wpointer-to-int-cast"
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wsign-compare"
@@ -1533,8 +1533,11 @@ if test "$GNU_CC"; then
 
     # Turn off the following warnings that -Wall turns on:
     # -Wno-unused - lots of violations in third-party code
+    # -Wno-unused-local-typedef - catches unused typedefs, which are commonly used in assertion macros
     #
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wno-unused"
+
+    MOZ_CXX_SUPPORTS_WARNING(-Wno-, unused-local-typedef, ac_cxx_has_wno_unused_local_typedef)
 
     if test -z "$INTEL_CC" -a -z "$CLANG_CC"; then
        # Don't use -Wcast-align with ICC or clang
@@ -1592,6 +1595,7 @@ if test "$GNU_CXX"; then
     # -Woverloaded-virtual - function declaration hides virtual function from base class
     # -Wparentheses - catches `if (a=b)` and operator precedence bugs
     # -Wpointer-arith - catches pointer arithmetic using NULL or sizeof(void)
+    # -Wrange-loop-analysis - catches copies during range-based for loops.
     # -Wreturn-type - catches missing returns, zero false positives
     # -Wsequence-point - catches undefined order behavior like `a = a++`
     # -Wsign-compare - catches comparison of signed and unsigned types
@@ -1623,18 +1627,21 @@ if test "$GNU_CXX"; then
         _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Werror=unused-label"
 
         MOZ_CXX_SUPPORTS_WARNING(-Werror=, non-literal-null-conversion, ac_cxx_has_werror_non_literal_null_conversion)
+        MOZ_CXX_SUPPORTS_WARNING(-Werror=, range-loop-analysis, ac_cxx_has_range_loop_analysis)
         MOZ_CXX_SUPPORTS_WARNING(-Werror=, sometimes-uninitialized, ac_cxx_has_sometimes_uninitialized)
     fi
 
     # Turn off the following warnings that -Wall turns on:
     # -Wno-invalid-offsetof - we use offsetof on non-POD types frequently
     # -Wno-inline-new-delete - we inline 'new' and 'delete' in mozalloc
+    # -Wno-unused-local-typedef - catches unused typedefs, which are commonly used in assertion macros
     #   for performance reasons, and because GCC and clang accept it (though
     #   clang warns about it).
     #
     _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Wno-invalid-offsetof"
 
     MOZ_CXX_SUPPORTS_WARNING(-Wno-, inline-new-delete, ac_cxx_has_wno_inline_new_delete)
+    MOZ_CXX_SUPPORTS_WARNING(-Wno-, unused-local-typedef, ac_cxx_has_wno_unused_local_typedef)
 
     if test -z "$INTEL_CXX" -a -z "$CLANG_CXX"; then
        # Don't use -Wcast-align with ICC or clang
@@ -1832,7 +1839,7 @@ case "$host" in
         HOST_CFLAGS="$HOST_CFLAGS -mwindows"
     fi
     HOST_CFLAGS="$HOST_CFLAGS -DXP_WIN32 -DXP_WIN -DWIN32 -D_WIN32 -DNO_X11 -D_CRT_SECURE_NO_WARNINGS"
-    HOST_NSPR_MDCPUCFG='\"md/_winnt.cfg\"'
+    HOST_NSPR_MDCPUCFG='"md/_winnt.cfg"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O2}"
     HOST_BIN_SUFFIX=.exe
     case "$host" in
@@ -1858,13 +1865,13 @@ case "$host" in
 
 *-darwin*)
     HOST_CFLAGS="$HOST_CFLAGS -DXP_UNIX -DXP_MACOSX -DNO_X11"
-    HOST_NSPR_MDCPUCFG='\"md/_darwin.cfg\"'
+    HOST_NSPR_MDCPUCFG='"md/_darwin.cfg"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O3}"
     ;;
 
 *-linux*|*-kfreebsd*-gnu|*-gnu*)
     HOST_CFLAGS="$HOST_CFLAGS -DXP_UNIX"
-    HOST_NSPR_MDCPUCFG='\"md/_linux.cfg\"'
+    HOST_NSPR_MDCPUCFG='"md/_linux.cfg"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O3}"
     ;;
 
@@ -8775,6 +8782,7 @@ fi
 AC_SUBST(MOZ_APP_STATIC_INI)
 
 AC_SUBST(MOZ_PKG_SPECIAL)
+AC_SUBST(MOZ_SIMPLE_PACKAGE_NAME)
 
 AC_SUBST(MOZILLA_OFFICIAL)
 
@@ -8980,6 +8988,8 @@ AC_SUBST(SOCORRO_SYMBOL_UPLOAD_TOKEN_FILE)
 AC_SUBST(MOZ_ENABLE_SZIP)
 AC_SUBST(MOZ_SZIP_FLAGS)
 
+AC_SUBST(DMG_TOOL)
+
 dnl Host JavaScript runtime, if any, to use during cross compiles.
 AC_SUBST(JS_BINARY)
 
@@ -9130,95 +9140,7 @@ MOZ_CREATE_CONFIG_STATUS()
 if test "$COMPILE_ENVIRONMENT" -a -z "$LIBXUL_SDK_DIR"; then
   MOZ_SUBCONFIGURE_ICU()
   MOZ_SUBCONFIGURE_FFI()
-fi
-
-# Run jemalloc configure script
-
-if test -z "$MOZ_NATIVE_JEMALLOC" -a "$MOZ_MEMORY" && test -n "$MOZ_JEMALLOC4" -o -n "$MOZ_REPLACE_MALLOC"; then
-  ac_configure_args="--build=$build --host=$target --enable-stats --with-jemalloc-prefix=je_ --disable-valgrind"
-  # We're using memalign for _aligned_malloc in memory/build/mozmemory_wrap.c
-  # on Windows, so just export memalign on all platforms.
-  ac_configure_args="$ac_configure_args ac_cv_func_memalign=yes"
-  if test -n "$MOZ_REPLACE_MALLOC"; then
-    # When using replace_malloc, we always want valloc exported from jemalloc.
-    ac_configure_args="$ac_configure_args ac_cv_func_valloc=yes"
-    if test "${OS_ARCH}" = Darwin; then
-      # We also need to enable pointer validation on Mac because jemalloc's
-      # zone allocator is not used.
-      ac_configure_args="$ac_configure_args --enable-ivsalloc"
-    fi
-  fi
-  if test -n "$MOZ_JEMALLOC4"; then
-    case "${OS_ARCH}" in
-      WINNT|Darwin)
-        # We want jemalloc functions to be kept hidden on both Mac and Windows
-        # See memory/build/mozmemory_wrap.h for details.
-        ac_configure_args="$ac_configure_args --without-export"
-        ;;
-    esac
-    if test "${OS_ARCH}" = WINNT; then
-      # Lazy lock initialization doesn't play well with lazy linking of
-      # mozglue.dll on Windows XP (leads to startup crash), so disable it.
-      ac_configure_args="$ac_configure_args --disable-lazy-lock"
-    fi
-  elif test "${OS_ARCH}" = Darwin; then
-    # When building as a replace-malloc lib, disabling the zone allocator
-    # forces to use pthread_atfork.
-    ac_configure_args="$ac_configure_args --disable-zone-allocator"
-  fi
-  _MANGLE="malloc posix_memalign aligned_alloc calloc realloc free memalign valloc malloc_usable_size"
-  JEMALLOC_WRAPPER=
-  if test -z "$MOZ_REPLACE_MALLOC"; then
-    case "$OS_ARCH" in
-      Linux|DragonFly|FreeBSD|NetBSD|OpenBSD)
-        MANGLE=$_MANGLE
-        ;;
-    esac
-  elif test -z "$MOZ_JEMALLOC4"; then
-    MANGLE=$_MANGLE
-    JEMALLOC_WRAPPER=replace_
-  fi
-  if test -n "$MANGLE"; then
-    MANGLED=
-    for mangle in ${MANGLE}; do
-      if test -n "$MANGLED"; then
-        MANGLED="$mangle:$JEMALLOC_WRAPPER$mangle,$MANGLED"
-      else
-        MANGLED="$mangle:$JEMALLOC_WRAPPER$mangle"
-      fi
-    done
-    ac_configure_args="$ac_configure_args --with-mangling=$MANGLED"
-  fi
-  unset CONFIG_FILES
-  if test -z "$MOZ_TLS"; then
-    ac_configure_args="$ac_configure_args --disable-tls"
-  fi
-  EXTRA_CFLAGS="$CFLAGS"
-  for var in AS CC CXX CPP LD AR RANLIB STRIP CPPFLAGS EXTRA_CFLAGS LDFLAGS; do
-    ac_configure_args="$ac_configure_args $var='`eval echo \\${${var}}`'"
-  done
-  # Force disable DSS support in jemalloc.
-  ac_configure_args="$ac_configure_args ac_cv_func_sbrk=false"
-
-  # Make Linux builds munmap freed chunks instead of recycling them.
-  ac_configure_args="$ac_configure_args --enable-munmap"
-
-  # Disable cache oblivious behavior that appears to have a performance
-  # impact on Firefox.
-  ac_configure_args="$ac_configure_args --disable-cache-oblivious"
-
-  if ! test -e memory/jemalloc; then
-    mkdir -p memory/jemalloc
-  fi
-
-  # jemalloc's configure runs git to determine the version. But when building
-  # from a gecko git clone, the git commands it uses is going to pick gecko's
-  # information, not jemalloc's, which is useless. So pretend we don't have git
-  # at all. That will make jemalloc's configure pick the in-tree VERSION file.
-  (PATH="$srcdir/memory/jemalloc/helper:$PATH";
-  AC_OUTPUT_SUBDIRS(memory/jemalloc/src)
-  ) || exit 1
-  ac_configure_args="$_SUBDIR_CONFIG_ARGS"
+  MOZ_SUBCONFIGURE_JEMALLOC()
 fi
 
 # Run freetype configure script

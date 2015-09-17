@@ -1,19 +1,20 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* globals getBrowserForTab */
 
 "use strict";
 
 const EventEmitter = require("devtools/toolkit/event-emitter");
 const eventEmitter = new EventEmitter();
 const events = require("sdk/event/core");
-const { getOuterId } = require("sdk/window/utils");
-const { getBrowserForTab } = require("sdk/tabs/utils");
+loader.lazyRequireGetter(this, "getOuterId", "sdk/window/utils", true);
+loader.lazyRequireGetter(this, "getBrowserForTab", "sdk/tabs/utils", true);
 
 const l10n = require("gcli/l10n");
 require("devtools/server/actors/inspector");
 const { RulersHighlighter, HighlighterEnvironment } =
-  require("devtools/server/actors/highlighter");
+  require("devtools/server/actors/highlighters");
 
 const highlighters = new WeakMap();
 const visibleHighlighters = new Set();

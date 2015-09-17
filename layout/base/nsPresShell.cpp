@@ -475,7 +475,7 @@ public:
         // will return a real frame and we don't have to worry about
         // destroying it by flushing later.
         mPresShell->FlushPendingNotifications(Flush_Layout);
-      } else if (aVisitor.mEvent->mMessage == NS_WHEEL_WHEEL &&
+      } else if (aVisitor.mEvent->mMessage == eWheel &&
                  aVisitor.mEventStatus != nsEventStatus_eConsumeNoDefault) {
         nsIFrame* frame = mPresShell->GetCurrentEventFrame();
         if (frame) {
@@ -493,7 +493,7 @@ public:
       nsIFrame* frame = mPresShell->GetCurrentEventFrame();
       if (!frame &&
           (aVisitor.mEvent->mMessage == eMouseUp ||
-           aVisitor.mEvent->mMessage == NS_TOUCH_END)) {
+           aVisitor.mEvent->mMessage == eTouchEnd)) {
         // Redirect BUTTON_UP and TOUCH_END events to the root frame to ensure
         // that capturing is released.
         frame = mPresShell->GetRootFrame();
@@ -2910,11 +2910,15 @@ PresShell::CreateReferenceRenderingContext()
   if (mPresContext->IsScreen()) {
     rc = new gfxContext(gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget());
   } else {
-    // We assume the devCtx has positive width and height for this call
+    // We assume the devCtx has positive width and height for this call.
+    // However, width and height, may be outside of the reasonable range
+    // so rc may still be null.
     rc = devCtx->CreateRenderingContext();
+    if (!rc) {
+      return nullptr;
+    }
   }
 
-  MOZ_ASSERT(rc, "shouldn't break promise to return non-null");
   return rc.forget();
 }
 
@@ -5320,7 +5324,7 @@ bool PresShell::AsyncPanZoomEnabled()
       return widget->AsyncPanZoomEnabled();
     }
   }
-  return false;
+  return gfxPlatform::AsyncPanZoomEnabled();
 }
 
 void PresShell::SetIgnoreViewportScrolling(bool aIgnore)
@@ -6042,6 +6046,9 @@ PresShell::Paint(nsView*        aViewToPaint,
   // we only want to do that when we have real content to paint.
   // See Bug 798245
   if (mIsFirstPaint && !mPaintingSuppressed) {
+#ifdef MOZ_WIDGET_ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "GeckoBug1151102", "PresShell doing a first-paint");
+#endif
     layerManager->SetIsFirstPaint();
     mIsFirstPaint = false;
   }
@@ -6670,16 +6677,16 @@ DispatchPointerFromMouseOrTouch(PresShell* aShell,
     // loop over all touches and dispatch pointer events on each touch
     // copy the event
     switch (touchEvent->mMessage) {
-    case NS_TOUCH_MOVE:
+    case eTouchMove:
       pointerMessage = ePointerMove;
       break;
-    case NS_TOUCH_END:
+    case eTouchEnd:
       pointerMessage = ePointerUp;
       break;
-    case NS_TOUCH_START:
+    case eTouchStart:
       pointerMessage = ePointerDown;
       break;
-    case NS_TOUCH_CANCEL:
+    case eTouchCancel:
       pointerMessage = ePointerCancel;
       break;
     default:
@@ -7152,7 +7159,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       if (presShell != this) {
         nsIFrame* frame = presShell->GetRootFrame();
         if (!frame) {
-          if (aEvent->mMessage == NS_QUERY_TEXT_CONTENT ||
+          if (aEvent->mMessage == eQueryTextContent ||
               aEvent->IsContentCommandEvent()) {
             return NS_OK;
           }
@@ -7278,8 +7285,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     }
 
     // all touch events except for touchstart use a captured target
-    if (aEvent->mClass == eTouchEventClass &&
-        aEvent->mMessage != NS_TOUCH_START) {
+    if (aEvent->mClass == eTouchEventClass && aEvent->mMessage != eTouchStart) {
       captureRetarget = true;
     }
 
@@ -7295,7 +7301,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     if (!captureRetarget && !isWindowLevelMouseExit) {
       nsPoint eventPoint;
       uint32_t flags = 0;
-      if (aEvent->mMessage == NS_TOUCH_START) {
+      if (aEvent->mMessage == eTouchStart) {
         flags |= INPUT_IGNORE_ROOT_SCROLL_FRAME;
         WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
         // if this is a continuing session, ensure that all these events are
@@ -7472,9 +7478,9 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     PresShell* shell =
         static_cast<PresShell*>(frame->PresContext()->PresShell());
     switch (aEvent->mMessage) {
-      case NS_TOUCH_MOVE:
-      case NS_TOUCH_CANCEL:
-      case NS_TOUCH_END: {
+      case eTouchMove:
+      case eTouchCancel:
+      case eTouchEnd: {
         // get the correct shell to dispatch to
         WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
         for (dom::Touch* touch : touchEvent->touches) {
@@ -8056,9 +8062,9 @@ PresShell::DispatchTouchEventToDOM(WidgetEvent* aEvent,
   // calling preventDefault on touchstart or the first touchmove for a
   // point prevents mouse events. calling it on the touchend should
   // prevent click dispatching.
-  bool canPrevent = (aEvent->mMessage == NS_TOUCH_START) ||
-                    (aEvent->mMessage == NS_TOUCH_MOVE && aTouchIsNew) ||
-                    (aEvent->mMessage == NS_TOUCH_END);
+  bool canPrevent = (aEvent->mMessage == eTouchStart) ||
+                    (aEvent->mMessage == eTouchMove && aTouchIsNew) ||
+                    (aEvent->mMessage == eTouchEnd);
   bool preventDefault = false;
   nsEventStatus tmpStatus = nsEventStatus_eIgnore;
   WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
@@ -8966,6 +8972,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
 
   nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
 
+  // CreateReferenceRenderingContext can return nullptr
   nsRenderingContext rcx(CreateReferenceRenderingContext());
 
 #ifdef DEBUG
@@ -10899,6 +10906,7 @@ nsIPresShell::SyncWindowProperties(nsView* aView)
 {
   nsIFrame* frame = aView->GetFrame();
   if (frame && mPresContext) {
+    // CreateReferenceRenderingContext can return nullptr
     nsRenderingContext rcx(CreateReferenceRenderingContext());
     nsContainerFrame::SyncWindowProperties(mPresContext, frame, aView, &rcx, 0);
   }

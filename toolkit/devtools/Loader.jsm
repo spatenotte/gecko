@@ -8,7 +8,7 @@
  * Manages the addon-sdk loader instance used to load the developer tools.
  */
 
-let { Constructor: CC, classes: Cc, interfaces: Ci, utils: Cu } = Components;
+var { Constructor: CC, classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -17,8 +17,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "NetUtil", "resource://gre/modules/NetUt
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils", "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
-let { Loader } = Cu.import("resource://gre/modules/commonjs/toolkit/loader.js", {});
-let promise = Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
+var { Loader } = Cu.import("resource://gre/modules/commonjs/toolkit/loader.js", {});
+var promise = Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
 
 this.EXPORTED_SYMBOLS = ["DevToolsLoader", "devtools", "BuiltinProvider",
                          "SrcdirProvider", "require", "loader"];
@@ -27,10 +27,11 @@ this.EXPORTED_SYMBOLS = ["DevToolsLoader", "devtools", "BuiltinProvider",
  * Providers are different strategies for loading the devtools.
  */
 
-let loaderModules = {
+var loaderModules = {
   "Services": Object.create(Services),
   "toolkit/loader": Loader,
-  "PromiseDebugging": PromiseDebugging
+  PromiseDebugging,
+  ThreadSafeChromeUtils,
 };
 XPCOMUtils.defineLazyGetter(loaderModules, "Debugger", () => {
   // addDebuggerToGlobal only allows adding the Debugger object to a global. The
@@ -64,7 +65,7 @@ XPCOMUtils.defineLazyGetter(loaderModules, "indexedDB", () => {
   }
 });
 
-let sharedGlobalBlacklist = ["sdk/indexed-db"];
+var sharedGlobalBlacklist = ["sdk/indexed-db"];
 
 // Used when the tools should be loaded from the Firefox package itself (the default)
 function BuiltinProvider() {}
@@ -140,6 +141,7 @@ SrcdirProvider.prototype = {
     let devtoolsURI = this.fileURI(devtoolsDir);
     let toolkitURI = this.fileURI(toolkitDir);
     let serverURI = this.fileURI(OS.Path.join(toolkitDir, "server"));
+    let webideURI = this.fileURI(OS.Path.join(devtoolsDir, "webide", "modules"));
     let webconsoleURI = this.fileURI(OS.Path.join(toolkitDir, "webconsole"));
     let appActorURI = this.fileURI(OS.Path.join(toolkitDir, "apps", "app-actor-front.js"));
     let cssLogicURI = this.fileURI(OS.Path.join(toolkitDir, "styleinspector", "css-logic"));
@@ -151,7 +153,7 @@ SrcdirProvider.prototype = {
     let asyncUtilsURI = this.fileURI(OS.Path.join(toolkitDir, "async-utils.js"));
     let contentObserverURI = this.fileURI(OS.Path.join(toolkitDir), "content-observer.js");
     let gcliURI = this.fileURI(OS.Path.join(toolkitDir, "gcli", "source", "lib", "gcli"));
-    let projecteditorURI = this.fileURI(OS.Path.join(devtoolsDir, "projecteditor"));
+    let projecteditorURI = this.fileURI(OS.Path.join(devtoolsDir, "projecteditor", "lib"));
     let promiseURI = this.fileURI(OS.Path.join(modulesDir, "Promise-backend.js"));
     let acornURI = this.fileURI(OS.Path.join(toolkitDir, "acorn"));
     let acornWalkURI = OS.Path.join(acornURI, "walk.js");
@@ -167,6 +169,7 @@ SrcdirProvider.prototype = {
         "devtools": devtoolsURI,
         "devtools/toolkit": toolkitURI,
         "devtools/server": serverURI,
+        "devtools/webide": webideURI,
         "devtools/toolkit/webconsole": webconsoleURI,
         "devtools/app-actor-front": appActorURI,
         "devtools/styleinspector/css-logic": cssLogicURI,

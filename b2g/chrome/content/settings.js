@@ -187,7 +187,7 @@ Components.utils.import('resource://gre/modules/ctypes.jsm');
 
 // =================== DevTools ====================
 
-let developerHUD;
+var developerHUD;
 SettingsListener.observe('devtools.overlay', false, (value) => {
   if (value) {
     if (!developerHUD) {
@@ -205,7 +205,7 @@ SettingsListener.observe('devtools.overlay', false, (value) => {
 
 #ifdef MOZ_WIDGET_GONK
 
-let LogShake;
+var LogShake;
 (function() {
   let scope = {};
   Cu.import('resource://gre/modules/LogShake.jsm', scope);
@@ -538,7 +538,7 @@ SettingsListener.observe("theme.selected",
 })();
 
 // =================== Various simple mapping  ======================
-let settingsToObserve = {
+var settingsToObserve = {
   'accessibility.screenreader_quicknav_modes': {
     prefName: 'accessibility.accessfu.quicknav_modes',
     resetToPref: true,
@@ -573,6 +573,10 @@ let settingsToObserve = {
   'devtools.remote.wifi.visible': {
     resetToPref: true
   },
+  'devtools.telemetry.supported_performance_marks': {
+    resetToPref: true
+  },
+
   'dom.mozApps.use_reviewer_certs': false,
   'dom.mozApps.signed_apps_installable_from': 'https://marketplace.firefox.com',
   'dom.presentation.discovery.enabled': false,

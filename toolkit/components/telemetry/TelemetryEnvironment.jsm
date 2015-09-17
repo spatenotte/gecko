@@ -40,7 +40,7 @@ const CHANGE_THROTTLE_INTERVAL_MS = 5 * 60 * 1000;
 /**
  * This is a policy object used to override behavior for testing.
  */
-let Policy = {
+var Policy = {
   now: () => new Date(),
 };
 
@@ -111,7 +111,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["devtools.chrome.enabled", {what: RECORD_PREF_VALUE}],
   ["devtools.debugger.enabled", {what: RECORD_PREF_VALUE}],
   ["devtools.debugger.remote-enabled", {what: RECORD_PREF_VALUE}],
-  ["dom.ipc.plugins.asyncInit", {what: RECORD_PREF_VALUE}],
+  ["dom.ipc.plugins.asyncInit.enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE, requiresRestart: true}],
   ["experiments.manifest.uri", {what: RECORD_PREF_VALUE}],
@@ -147,6 +147,8 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["privacy.trackingprotection.enabled", {what: RECORD_PREF_VALUE}],
   ["privacy.donottrackheader.enabled", {what: RECORD_PREF_VALUE}],
   ["services.sync.serverURL", {what: RECORD_PREF_STATE}],
+  ["security.mixed_content.block_active_content", {what: RECORD_PREF_VALUE}],
+  ["security.mixed_content.block_display_content", {what: RECORD_PREF_VALUE}],
   ["xpinstall.signatures.required", {what: RECORD_PREF_VALUE}],
 ]);
 
@@ -1077,10 +1079,14 @@ EnvironmentCache.prototype = {
   _getCpuData: function () {
     let cpuData = {
       count: getSysinfoProperty("cpucount", null),
-      vendor: null, // TODO: bug 1128472
-      family: null, // TODO: bug 1128472
-      model: null, // TODO: bug 1128472
-      stepping: null, // TODO: bug 1128472
+      cores: getSysinfoProperty("cpucores", null),
+      vendor: getSysinfoProperty("cpuvendor", null),
+      family: getSysinfoProperty("cpufamily", null),
+      model: getSysinfoProperty("cpumodel", null),
+      stepping: getSysinfoProperty("cpustepping", null),
+      l2cacheKB: getSysinfoProperty("cpucachel2", null),
+      l3cacheKB: getSysinfoProperty("cpucachel3", null),
+      speedMHz: getSysinfoProperty("cpuspeed", null),
     };
 
     const CPU_EXTENSIONS = ["hasMMX", "hasSSE", "hasSSE2", "hasSSE3", "hasSSSE3",
@@ -1223,8 +1229,16 @@ EnvironmentCache.prototype = {
       memoryMB = Math.round(memoryMB / 1024 / 1024);
     }
 
+    let virtualMB = getSysinfoProperty("virtualmemsize", null);
+    if (virtualMB) {
+      // Send the total virtual memory size in megabytes. Rounding because
+      // sysinfo doesn't always provide RAM in multiples of 1024.
+      virtualMB = Math.round(virtualMB / 1024 / 1024);
+    }
+
     return {
       memoryMB: memoryMB,
+      virtualMaxMB: virtualMB,
 #ifdef XP_WIN
       isWow64: getSysinfoProperty("isWow64", null),
 #endif

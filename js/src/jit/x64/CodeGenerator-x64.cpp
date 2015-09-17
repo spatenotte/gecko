@@ -183,11 +183,11 @@ CodeGeneratorX64::visitCompareBAndBranch(LCompareBAndBranch* lir)
 }
 
 void
-CodeGeneratorX64::visitCompareV(LCompareV* lir)
+CodeGeneratorX64::visitCompareBitwise(LCompareBitwise* lir)
 {
     MCompare* mir = lir->mir();
-    const ValueOperand lhs = ToValue(lir, LCompareV::LhsInput);
-    const ValueOperand rhs = ToValue(lir, LCompareV::RhsInput);
+    const ValueOperand lhs = ToValue(lir, LCompareBitwise::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareBitwise::RhsInput);
     const Register output = ToRegister(lir->output());
 
     MOZ_ASSERT(IsEqualityOp(mir->jsop()));
@@ -197,12 +197,12 @@ CodeGeneratorX64::visitCompareV(LCompareV* lir)
 }
 
 void
-CodeGeneratorX64::visitCompareVAndBranch(LCompareVAndBranch* lir)
+CodeGeneratorX64::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
 {
     MCompare* mir = lir->cmpMir();
 
-    const ValueOperand lhs = ToValue(lir, LCompareVAndBranch::LhsInput);
-    const ValueOperand rhs = ToValue(lir, LCompareVAndBranch::RhsInput);
+    const ValueOperand lhs = ToValue(lir, LCompareBitwiseAndBranch::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareBitwiseAndBranch::RhsInput);
 
     MOZ_ASSERT(mir->jsop() == JSOP_EQ || mir->jsop() == JSOP_STRICTEQ ||
                mir->jsop() == JSOP_NE || mir->jsop() == JSOP_STRICTNE);
@@ -673,19 +673,19 @@ CodeGeneratorX64::visitAsmJSAtomicBinopHeap(LAsmJSAtomicBinopHeap* ins)
     }
     uint32_t before = masm.size();
     if (value->isConstant()) {
-        masm.atomicBinopToTypedIntArray(op, accessType == Scalar::Uint32 ? Scalar::Int32 : accessType,
-                                        Imm32(ToInt32(value)),
-                                        srcAddr,
-                                        temp,
-                                        InvalidReg,
-                                        ToAnyRegister(ins->output()));
+        atomicBinopToTypedIntArray(op, accessType == Scalar::Uint32 ? Scalar::Int32 : accessType,
+                                   Imm32(ToInt32(value)),
+                                   srcAddr,
+                                   temp,
+                                   InvalidReg,
+                                   ToAnyRegister(ins->output()));
     } else {
-        masm.atomicBinopToTypedIntArray(op, accessType == Scalar::Uint32 ? Scalar::Int32 : accessType,
-                                        ToRegister(value),
-                                        srcAddr,
-                                        temp,
-                                        InvalidReg,
-                                        ToAnyRegister(ins->output()));
+        atomicBinopToTypedIntArray(op, accessType == Scalar::Uint32 ? Scalar::Int32 : accessType,
+                                   ToRegister(value),
+                                   srcAddr,
+                                   temp,
+                                   InvalidReg,
+                                   ToAnyRegister(ins->output()));
     }
     MOZ_ASSERT(mir->offset() == 0,
                "The AsmJS signal handler doesn't yet support emulating "
@@ -718,9 +718,9 @@ CodeGeneratorX64::visitAsmJSAtomicBinopHeapForEffect(LAsmJSAtomicBinopHeapForEff
 
     uint32_t before = masm.size();
     if (value->isConstant())
-        masm.atomicBinopToTypedIntArray(op, accessType, Imm32(ToInt32(value)), srcAddr);
+        atomicBinopToTypedIntArray(op, accessType, Imm32(ToInt32(value)), srcAddr);
     else
-        masm.atomicBinopToTypedIntArray(op, accessType, ToRegister(value), srcAddr);
+        atomicBinopToTypedIntArray(op, accessType, ToRegister(value), srcAddr);
     MOZ_ASSERT(mir->offset() == 0,
                "The AsmJS signal handler doesn't yet support emulating "
                "atomic accesses in the case of a fault from an unwrapped offset");

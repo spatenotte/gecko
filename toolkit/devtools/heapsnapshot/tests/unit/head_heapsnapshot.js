@@ -20,6 +20,7 @@ const DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
 const HeapAnalysesClient =
   require("devtools/toolkit/heapsnapshot/HeapAnalysesClient");
 const Services = require("Services");
+const { CensusTreeNode } = require("devtools/toolkit/heapsnapshot/census-tree-node");
 
 // Always log packets when running tests. runxpcshelltests.py will throw
 // the output away anyway, unless you give it the --verbose flag.
@@ -105,13 +106,10 @@ function getFilePath(aName, aAllowMissing=false, aUsePlatformPathSeparator=false
   return path;
 }
 
-function saveNewHeapSnapshot(fileName=`core-dump-${Math.random()}.tmp`) {
-  const filePath = getFilePath(fileName, true, true);
+function saveNewHeapSnapshot() {
+  const filePath = ChromeUtils.saveHeapSnapshot({ runtime: true });
   ok(filePath, "Should get a file path to save the core dump to.");
-
-  ChromeUtils.saveHeapSnapshot(filePath, { runtime: true });
   ok(true, "Saved a heap snapshot to " + filePath);
-
   return filePath;
 }
 
@@ -134,16 +132,10 @@ function saveNewHeapSnapshot(fileName=`core-dump-${Math.random()}.tmp`) {
  *
  * @returns Census
  */
-function saveHeapSnapshotAndTakeCensus(dbg=null, censusOptions=undefined,
-                                       // Add the Math.random() so that parallel
-                                       // tests are less likely to mess with
-                                       // each other.
-                                       fileName="core-dump-" + (Math.random()) + ".tmp") {
-  const filePath = getFilePath(fileName, true, true);
-  ok(filePath, "Should get a file path to save the core dump to.");
-
+function saveHeapSnapshotAndTakeCensus(dbg=null, censusOptions=undefined) {
   const snapshotOptions = dbg ? { debugger: dbg } : { runtime: true };
-  ChromeUtils.saveHeapSnapshot(filePath, snapshotOptions);
+  const filePath = ChromeUtils.saveHeapSnapshot(snapshotOptions);
+  ok(filePath, "Should get a file path to save the core dump to.");
   ok(true, "Should have saved a heap snapshot to " + filePath);
 
   const snapshot = ChromeUtils.readHeapSnapshot(filePath);
@@ -152,4 +144,9 @@ function saveHeapSnapshotAndTakeCensus(dbg=null, censusOptions=undefined,
 
   equal(typeof snapshot.takeCensus, "function", "snapshot should have a takeCensus method");
   return snapshot.takeCensus(censusOptions);
+}
+
+function compareCensusViewData (breakdown, report, expected, assertion) {
+  let data = new CensusTreeNode(breakdown, report);
+  equal(JSON.stringify(data), JSON.stringify(expected), assertion);
 }

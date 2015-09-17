@@ -12,8 +12,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
-let DEBUG = false;
-let VERBOSE = false;
+var DEBUG = false;
+var VERBOSE = false;
 
 try {
   DEBUG   =
@@ -381,6 +381,7 @@ SettingsManager.prototype = {
       debug("WARNING: MORE THAN " + kObserverSoftLimit + " OBSERVERS FOR " +
             aName + ": " + length + " FROM" + (new Error).stack);
 #ifdef DEBUG
+      debug("JS STOPS EXECUTING AT THIS POINT IN DEBUG BUILDS!");
       throw Components.results.NS_ERROR_ABORT;
 #endif
     }

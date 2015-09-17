@@ -311,6 +311,7 @@ class BuildOptionParser(object):
         'asan': 'builds/releng_sub_%s_configs/%s_asan.py',
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
         'b2g-debug': 'b2g/releng_sub_%s_configs/%s_debug.py',
+        'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
@@ -825,15 +826,18 @@ or run without that action (ie: --no-{action})"
         mach_env = {}
         if c.get('upload_env'):
             mach_env.update(c['upload_env'])
-            mach_env['UPLOAD_HOST'] = mach_env['UPLOAD_HOST'] % {
-                'stage_server': c['stage_server']
-            }
-            mach_env['UPLOAD_USER'] = mach_env['UPLOAD_USER'] % {
-                'stage_username': c['stage_username']
-            }
-            mach_env['UPLOAD_SSH_KEY'] = mach_env['UPLOAD_SSH_KEY'] % {
-                'stage_ssh_key': c['stage_ssh_key']
-            }
+            if 'UPLOAD_HOST' in mach_env:
+                mach_env['UPLOAD_HOST'] = mach_env['UPLOAD_HOST'] % {
+                    'stage_server': c['stage_server']
+                }
+            if 'UPLOAD_USER' in mach_env:
+                mach_env['UPLOAD_USER'] = mach_env['UPLOAD_USER'] % {
+                    'stage_username': c['stage_username']
+                }
+            if 'UPLOAD_SSH_KEY' in mach_env:
+                mach_env['UPLOAD_SSH_KEY'] = mach_env['UPLOAD_SSH_KEY'] % {
+                    'stage_ssh_key': c['stage_ssh_key']
+                }
 
         if self.query_is_nightly():
             mach_env['LATEST_MAR_DIR'] = c['latest_mar_dir'] % {
@@ -1241,7 +1245,7 @@ or run without that action (ie: --no-{action})"
 
     def _query_props_set_by_mach(self, console_output=True, error_level=FATAL):
         mach_properties_path = os.path.join(
-            self.query_abs_dirs()['abs_obj_dir'], 'mach_build_properties.json'
+            self.query_abs_dirs()['abs_obj_dir'], 'dist', 'mach_build_properties.json'
         )
         self.info("setting properties set by mach build. Looking in path: %s"
                   % mach_properties_path)
@@ -1262,9 +1266,7 @@ or run without that action (ie: --no-{action})"
                 if prop != 'UNKNOWN':
                     self.set_buildbot_property(key, prop, write_to_file=True)
         else:
-            self.log("Could not determine path for build properties. "
-                     "Does this exist: `%s` ?" % mach_properties_path,
-                     level=error_level)
+            self.info("No mach_build_properties.json found - not importing properties.")
 
     def generate_build_props(self, console_output=True, halt_on_failure=False):
         """sets props found from mach build and, in addition, buildid,
@@ -1644,7 +1646,7 @@ or run without that action (ie: --no-{action})"
         self._run_tooltool()
         self._create_mozbuild_dir()
         mach_props = os.path.join(
-            self.query_abs_dirs()['abs_obj_dir'], 'mach_build_properties.json'
+            self.query_abs_dirs()['abs_obj_dir'], 'dist', 'mach_build_properties.json'
         )
         if os.path.exists(mach_props):
             self.info("Removing previous mach property file: %s" % mach_props)

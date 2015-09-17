@@ -578,12 +578,20 @@ struct IMENotification final
     {
       return mOffset + Length() <= INT32_MAX;
     }
-    void Clear()
+    bool IsCollapsed() const
+    {
+      return mString->IsEmpty();
+    }
+    void ClearSelectionData()
     {
       mOffset = UINT32_MAX;
       mString->Truncate();
       mWritingMode = 0;
       mReversed = false;
+    }
+    void Clear()
+    {
+      ClearSelectionData();
       mCausedByComposition = false;
       mCausedBySelectionEvent = false;
     }
@@ -597,8 +605,14 @@ struct IMENotification final
       *mString = aOther.String();
       mWritingMode = aOther.mWritingMode;
       mReversed = aOther.mReversed;
-      mCausedByComposition = aOther.mCausedByComposition;
-      mCausedBySelectionEvent = aOther.mCausedBySelectionEvent;
+      AssignReason(aOther.mCausedByComposition,
+                   aOther.mCausedBySelectionEvent);
+    }
+    void AssignReason(bool aCausedByComposition,
+                      bool aCausedBySelectionEvent)
+    {
+      mCausedByComposition = aCausedByComposition;
+      mCausedBySelectionEvent = aCausedBySelectionEvent;
     }
   };
 
@@ -762,15 +776,6 @@ struct IMENotification final
   {
     MOZ_RELEASE_ASSERT(mMessage == NOTIFY_IME_OF_SELECTION_CHANGE);
     mSelectionChangeData.Assign(aSelectionChangeData);
-  }
-  void SetData(const SelectionChangeDataBase& aSelectionChangeData,
-               bool aCausedByComposition,
-               bool aCausedBySelectionEvent)
-  {
-    MOZ_RELEASE_ASSERT(mMessage == NOTIFY_IME_OF_SELECTION_CHANGE);
-    mSelectionChangeData.Assign(aSelectionChangeData);
-    mSelectionChangeData.mCausedByComposition = aCausedByComposition;
-    mSelectionChangeData.mCausedBySelectionEvent = aCausedBySelectionEvent;
   }
 
   void SetData(const TextChangeDataBase& aTextChangeData)

@@ -199,13 +199,11 @@ nsCSSProps::AddRefTable(void)
 
 #ifdef DEBUG
     {
-      // Assert that if CSS_PROPERTY_ALWAYS_ENABLED_IN_UA_SHEETS or
-      // CSS_PROPERTY_ALWAYS_ENABLED_IN_CHROME_OR_CERTIFIED_APP is used on
-      // a shorthand property that all of its component longhands also
-      // has the flag.
+      // Assert that if CSS_PROPERTY_ALWAYS_ENABLED_IN_UA_SHEETS is used
+      // on a shorthand property that all of its component longhands
+      // also has the flag.
       static uint32_t flagsToCheck[] = {
-        CSS_PROPERTY_ALWAYS_ENABLED_IN_UA_SHEETS,
-        CSS_PROPERTY_ALWAYS_ENABLED_IN_CHROME_OR_CERTIFIED_APP
+        CSS_PROPERTY_ALWAYS_ENABLED_IN_UA_SHEETS
       };
       for (nsCSSProperty shorthand = eCSSProperty_COUNT_no_shorthands;
            shorthand < eCSSProperty_COUNT;
@@ -894,12 +892,6 @@ const KTableValue nsCSSProps::kBoxSizingKTable[] = {
 };
 
 const KTableValue nsCSSProps::kCaptionSideKTable[] = {
-  eCSSKeyword_block_start,          NS_STYLE_CAPTION_SIDE_BSTART,
-  eCSSKeyword_block_end,            NS_STYLE_CAPTION_SIDE_BEND,
-  eCSSKeyword_inline_start,         NS_STYLE_CAPTION_SIDE_ISTART,
-  eCSSKeyword_inline_end,           NS_STYLE_CAPTION_SIDE_IEND,
-  eCSSKeyword_block_start_outside,  NS_STYLE_CAPTION_SIDE_BSTART_OUTSIDE,
-  eCSSKeyword_block_end_outside,    NS_STYLE_CAPTION_SIDE_BEND_OUTSIDE,
   eCSSKeyword_top,                  NS_STYLE_CAPTION_SIDE_TOP,
   eCSSKeyword_right,                NS_STYLE_CAPTION_SIDE_RIGHT,
   eCSSKeyword_bottom,               NS_STYLE_CAPTION_SIDE_BOTTOM,

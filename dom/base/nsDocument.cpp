@@ -3886,7 +3886,7 @@ void
 nsDocument::DeleteShell()
 {
   mExternalResourceMap.HideViewers();
-  if (IsEventHandlingEnabled()) {
+  if (IsEventHandlingEnabled() && !AnimationsPaused()) {
     RevokeAnimationFrameNotifications();
   }
   if (nsPresContext* presContext = mPresShell->GetPresContext()) {
@@ -3948,13 +3948,7 @@ nsDocument::SetSubDocumentFor(Element* aElement, nsIDocument* aSubDoc)
     // aSubDoc is nullptr, remove the mapping
 
     if (mSubDocuments) {
-      SubDocMapEntry *entry =
-        static_cast<SubDocMapEntry*>
-                   (PL_DHashTableSearch(mSubDocuments, aElement));
-
-      if (entry) {
-        PL_DHashTableRawRemove(mSubDocuments, entry);
-      }
+      mSubDocuments->Remove(aElement);
     }
   } else {
     if (!mSubDocuments) {
@@ -3962,9 +3956,9 @@ nsDocument::SetSubDocumentFor(Element* aElement, nsIDocument* aSubDoc)
 
       static const PLDHashTableOps hash_table_ops =
       {
-        PL_DHashVoidPtrKeyStub,
-        PL_DHashMatchEntryStub,
-        PL_DHashMoveEntryStub,
+        PLDHashTable::HashVoidPtrKeyStub,
+        PLDHashTable::MatchEntryStub,
+        PLDHashTable::MoveEntryStub,
         SubDocClearEntry,
         SubDocInitEntry
       };
@@ -3973,8 +3967,8 @@ nsDocument::SetSubDocumentFor(Element* aElement, nsIDocument* aSubDoc)
     }
 
     // Add a mapping to the hash table
-    SubDocMapEntry *entry = static_cast<SubDocMapEntry*>
-      (PL_DHashTableAdd(mSubDocuments, aElement, fallible));
+    auto entry =
+      static_cast<SubDocMapEntry*>(mSubDocuments->Add(aElement, fallible));
 
     if (!entry) {
       return NS_ERROR_OUT_OF_MEMORY;
@@ -4000,9 +3994,8 @@ nsIDocument*
 nsDocument::GetSubDocumentFor(nsIContent *aContent) const
 {
   if (mSubDocuments && aContent->IsElement()) {
-    SubDocMapEntry *entry =
-      static_cast<SubDocMapEntry*>
-                 (PL_DHashTableSearch(mSubDocuments, aContent->AsElement()));
+    auto entry = static_cast<SubDocMapEntry*>
+                            (mSubDocuments->Search(aContent->AsElement()));
 
     if (entry) {
       return entry->mSubDocument;
@@ -4638,7 +4631,7 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
     // our layout history state now.
     mLayoutHistoryState = GetLayoutHistoryState();
 
-    if (mPresShell && !EventHandlingSuppressed()) {
+    if (mPresShell && !EventHandlingSuppressed() && !AnimationsPaused()) {
       RevokeAnimationFrameNotifications();
     }
 
@@ -7898,9 +7891,9 @@ nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
   // pixel an integer, and we want the adjusted value.
   float fullZoom = context ? context->DeviceContext()->GetFullZoom() : 1.0;
   fullZoom = (fullZoom == 0.0) ? 1.0 : fullZoom;
-  nsIWidget *widget = nsContentUtils::WidgetForDocument(this);
-  float widgetScale = widget ? widget->GetDefaultScale().scale : 1.0f;
-  CSSToLayoutDeviceScale layoutDeviceScale(widgetScale * fullZoom);
+  CSSToLayoutDeviceScale layoutDeviceScale(
+    (float)nsPresContext::AppUnitsPerCSSPixel() /
+    context->AppUnitsPerDevPixel());
 
   CSSToScreenScale defaultScale = layoutDeviceScale
                                 * LayoutDeviceToScreenScale(1.0);
@@ -8593,9 +8586,6 @@ nsDocument::RetrieveRelevantHeaders(nsIChannel *aChannel)
     // The misspelled key 'referer' is as per the HTTP spec
     rv = httpChannel->GetRequestHeader(NS_LITERAL_CSTRING("referer"),
                                        mReferrer);
-    if (NS_FAILED(rv)) {
-      mReferrer.Truncate();
-    }
 
     static const char *const headers[] = {
       "default-style",
@@ -9311,7 +9301,10 @@ nsDocument::OnPageHide(bool aPersisted,
     mAnimationController->OnPageHide();
   }
 
-  if (aPersisted) {
+  // We do not stop the animations (bug 1024343)
+  // when the page is refreshing while being dragged out
+  nsDocShell* docShell = mDocumentContainer.get();
+  if (aPersisted && !(docShell && docShell->InFrameSwap())) {
     SetImagesNeedAnimating(false);
   }
 
@@ -9436,7 +9429,7 @@ nsDocument::MutationEventDispatched(nsINode* aTarget)
 
     int32_t realTargetCount = realTargets.Count();
     for (int32_t k = 0; k < realTargetCount; ++k) {
-      InternalMutationEvent mutation(true, NS_MUTATION_SUBTREEMODIFIED);
+      InternalMutationEvent mutation(true, eLegacySubtreeModified);
       (new AsyncEventDispatcher(realTargets[k], mutation))->
         RunDOMEventWhenSafe();
     }
@@ -10327,7 +10320,8 @@ nsIDocument::ScheduleFrameRequestCallback(FrameRequestCallback& aCallback,
   DebugOnly<FrameRequest*> request =
     mFrameRequestCallbacks.AppendElement(FrameRequest(aCallback, newHandle));
   NS_ASSERTION(request, "This is supposed to be infallible!");
-  if (!alreadyRegistered && mPresShell && IsEventHandlingEnabled()) {
+  if (!alreadyRegistered && mPresShell && IsEventHandlingEnabled() &&
+      !AnimationsPaused()) {
     mPresShell->GetPresContext()->RefreshDriver()->
       ScheduleFrameRequestCallbacks(this);
   }

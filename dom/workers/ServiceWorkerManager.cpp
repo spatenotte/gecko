@@ -3727,7 +3727,7 @@ public:
         }
       }
 
-      rv = httpChannel->VisitRequestHeaders(this);
+      rv = httpChannel->VisitNonDefaultRequestHeaders(this);
       NS_ENSURE_SUCCESS(rv, rv);
 
       nsCOMPtr<nsIUploadChannel2> uploadChannel = do_QueryInterface(httpChannel);
@@ -3839,7 +3839,7 @@ private:
     init.mRequest.Construct();
     init.mRequest.Value() = request;
     init.mBubbles = false;
-    init.mCancelable = false;
+    init.mCancelable = true;
     init.mIsReload.Construct(mIsReload);
     nsRefPtr<FetchEvent> event =
       FetchEvent::Constructor(globalObj, NS_LITERAL_STRING("fetch"), init, result);
@@ -3854,12 +3854,94 @@ private:
     nsRefPtr<EventTarget> target = do_QueryObject(aWorkerPrivate->GlobalScope());
     nsresult rv2 = target->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
     if (NS_WARN_IF(NS_FAILED(rv2)) || !event->WaitToRespond()) {
-      nsCOMPtr<nsIRunnable> runnable = new ResumeRequest(mInterceptedChannel);
+      nsCOMPtr<nsIRunnable> runnable;
+      if (event->DefaultPrevented(aCx)) {
+        runnable = new CancelChannelRunnable(mInterceptedChannel, NS_ERROR_INTERCEPTION_CANCELED);
+      } else {
+        runnable = new ResumeRequest(mInterceptedChannel);
+      }
+
       MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToMainThread(runnable)));
     }
     return true;
   }
 };
+
+namespace {
+
+class ContinueDispatchFetchEventRunnable : public nsRunnable
+{
+  WorkerPrivate* mWorkerPrivate;
+  nsMainThreadPtrHandle<nsIInterceptedChannel> mChannel;
+  nsMainThreadPtrHandle<ServiceWorker> mServiceWorker;
+  nsAutoPtr<ServiceWorkerClientInfo> mClientInfo;
+  bool mIsReload;
+public:
+  ContinueDispatchFetchEventRunnable(WorkerPrivate* aWorkerPrivate,
+                                     nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel,
+                                     nsMainThreadPtrHandle<ServiceWorker>& aServiceWorker,
+                                     nsAutoPtr<ServiceWorkerClientInfo>& aClientInfo,
+                                     bool aIsReload)
+    : mWorkerPrivate(aWorkerPrivate)
+    , mChannel(aChannel)
+    , mServiceWorker(aServiceWorker)
+    , mClientInfo(aClientInfo)
+    , mIsReload(aIsReload)
+  {
+  }
+
+  void
+  HandleError()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    NS_WARNING("Unexpected error while dispatching fetch event!");
+    DebugOnly<nsresult> rv = mChannel->ResetInterception();
+    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to resume intercepted network request");
+  }
+
+  NS_IMETHOD
+  Run() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    nsCOMPtr<nsIChannel> channel;
+    nsresult rv = mChannel->GetChannel(getter_AddRefs(channel));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      HandleError();
+      return NS_OK;
+    }
+
+    // The channel might have encountered an unexpected error while ensuring
+    // the upload stream is cloneable.  Check here and reset the interception
+    // if that happens.
+    nsresult status;
+    rv = channel->GetStatus(&status);
+    if (NS_WARN_IF(NS_FAILED(rv) || NS_FAILED(status))) {
+      HandleError();
+      return NS_OK;
+    }
+
+    nsRefPtr<FetchEventRunnable> event =
+      new FetchEventRunnable(mWorkerPrivate, mChannel, mServiceWorker,
+                             mClientInfo, mIsReload);
+    rv = event->Init();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      HandleError();
+      return NS_OK;
+    }
+
+    AutoJSAPI jsapi;
+    jsapi.Init();
+    if (NS_WARN_IF(!event->Dispatch(jsapi.cx()))) {
+      HandleError();
+      return NS_OK;
+    }
+
+    return NS_OK;
+  }
+};
+
+} // anonymous namespace
 
 NS_IMPL_ISUPPORTS_INHERITED(FetchEventRunnable, WorkerRunnable, nsIHttpHeaderVisitor)
 
@@ -3934,21 +4016,28 @@ ServiceWorkerManager::DispatchFetchEvent(const OriginAttributes& aOriginAttribut
   nsMainThreadPtrHandle<ServiceWorker> serviceWorkerHandle(
     new nsMainThreadPtrHolder<ServiceWorker>(sw));
 
-  // clientInfo is null if we don't have a controlled document
-  nsRefPtr<FetchEventRunnable> event =
-    new FetchEventRunnable(sw->GetWorkerPrivate(), handle, serviceWorkerHandle,
-                           clientInfo, aIsReload);
-  aRv = event->Init();
+  nsCOMPtr<nsIRunnable> continueRunnable =
+    new ContinueDispatchFetchEventRunnable(sw->GetWorkerPrivate(), handle,
+                                           serviceWorkerHandle, clientInfo,
+                                           aIsReload);
+
+  nsCOMPtr<nsIChannel> innerChannel;
+  aRv = aChannel->GetChannel(getter_AddRefs(innerChannel));
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
 
-  AutoJSAPI api;
-  api.Init();
-  if (NS_WARN_IF(!event->Dispatch(api.cx()))) {
-    aRv.Throw(NS_ERROR_FAILURE);
+  nsCOMPtr<nsIUploadChannel2> uploadChannel = do_QueryInterface(innerChannel);
+
+  // If there is no upload stream, then continue immediately
+  if (!uploadChannel) {
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(continueRunnable->Run()));
     return;
   }
+
+  // Otherwise, ensure the upload stream can be cloned directly.  This may
+  // require some async copying, so provide a callback.
+  aRv = uploadChannel->EnsureUploadStreamIsCloneable(continueRunnable);
 }
 
 bool

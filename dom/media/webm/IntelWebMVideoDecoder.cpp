@@ -21,8 +21,8 @@
 #include "vpx/vpx_decoder.h"
 
 #undef LOG
-PRLogModuleInfo* GetDemuxerLog();
-#define LOG(...) MOZ_LOG(GetDemuxerLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
+extern PRLogModuleInfo* GetPDMLog();
+#define LOG(...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 namespace mozilla {
 
@@ -366,7 +366,7 @@ IntelWebMVideoDecoder::PopSample()
   }
 
   MOZ_ASSERT(!mSampleQueue.empty());
-  sample = mSampleQueue.front();
+  sample = mSampleQueue.front().forget();
   mSampleQueue.pop_front();
   return sample.forget();
 }

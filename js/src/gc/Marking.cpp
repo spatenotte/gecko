@@ -9,6 +9,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerRange.h"
 #include "mozilla/ReentrancyGuard.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/TypeTraits.h"
 
 #include "jsgc.h"
@@ -1248,14 +1249,9 @@ bool
 GCMarker::drainMarkStack(SliceBudget& budget)
 {
 #ifdef DEBUG
-    struct AutoCheckCompartment {
-        bool& flag;
-        explicit AutoCheckCompartment(bool& comparmentCheckFlag) : flag(comparmentCheckFlag) {
-            MOZ_ASSERT(!flag);
-            flag = true;
-        }
-        ~AutoCheckCompartment() { flag = false; }
-    } acc(strictCompartmentChecking);
+    MOZ_ASSERT(!strictCompartmentChecking);
+    strictCompartmentChecking = true;
+    auto acc = mozilla::MakeScopeExit([&] {strictCompartmentChecking = false;});
 #endif
 
     if (budget.isOverBudget())
@@ -1794,7 +1790,7 @@ GCMarker::markDelayedChildren(ArenaHeader* aheader)
             TenuredCell* t = i.getCell();
             if (always || t->isMarked()) {
                 t->markIfUnmarked();
-                JS_TraceChildren(this, t, MapAllocToTraceKind(aheader->getAllocKind()));
+                js::TraceChildren(this, t, MapAllocToTraceKind(aheader->getAllocKind()));
             }
         }
     } else {
@@ -2039,7 +2035,6 @@ js::TenuringTracer::moveToTenured(JSObject* src)
             CrashAtUnhandlableOOM("Failed to allocate object while tenuring.");
     }
     JSObject* dst = reinterpret_cast<JSObject*>(t);
-
     tenuredSize += moveObjectToTenured(dst, src, dstKind);
 
     RelocationOverlay* overlay = RelocationOverlay::fromCell(src);
@@ -2051,6 +2046,7 @@ js::TenuringTracer::moveToTenured(JSObject* src)
     }
 
     TracePromoteToTenured(src, dst);
+    MemProfiler::MoveNurseryToTenured(src, dst);
     return dst;
 }
 
@@ -2591,40 +2587,51 @@ UnmarkGrayTracer::onChild(const JS::GCCellPtr& thing)
 
     do {
         MOZ_ASSERT(!shape->isMarked(js::gc::GRAY));
-        TraceChildren(&childTracer, shape, JS::TraceKind::Shape);
+        shape->traceChildren(&childTracer);
         shape = childTracer.previousShape;
         childTracer.previousShape = nullptr;
     } while (shape);
     unmarkedAny |= childTracer.unmarkedAny;
 }
 
-bool
-js::UnmarkGrayCellRecursively(gc::Cell* cell, JS::TraceKind kind)
+template <typename T>
+static bool
+TypedUnmarkGrayCellRecursively(T* t)
 {
-    MOZ_ASSERT(cell);
+    MOZ_ASSERT(t);
 
-    JSRuntime* rt = cell->runtimeFromMainThread();
+    JSRuntime* rt = t->runtimeFromMainThread();
     MOZ_ASSERT(!rt->isHeapBusy());
 
     bool unmarkedArg = false;
-    if (cell->isTenured()) {
-        if (!cell->asTenured().isMarked(GRAY))
+    if (t->isTenured()) {
+        if (!t->asTenured().isMarked(GRAY))
             return false;
 
-        cell->asTenured().unmark(GRAY);
+        t->asTenured().unmark(GRAY);
         unmarkedArg = true;
     }
 
     UnmarkGrayTracer trc(rt);
-    TraceChildren(&trc, cell, kind);
+    t->traceChildren(&trc);
 
     return unmarkedArg || trc.unmarkedAny;
+}
+
+struct UnmarkGrayCellRecursivelyFunctor {
+    template <typename T> bool operator()(T* t) { return TypedUnmarkGrayCellRecursively(t); }
+};
+
+bool
+js::UnmarkGrayCellRecursively(Cell* cell, JS::TraceKind kind)
+{
+    return DispatchTraceKindTyped(UnmarkGrayCellRecursivelyFunctor(), cell, kind);
 }
 
 bool
 js::UnmarkGrayShapeRecursively(Shape* shape)
 {
-    return js::UnmarkGrayCellRecursively(shape, JS::TraceKind::Shape);
+    return TypedUnmarkGrayCellRecursively(shape);
 }
 
 JS_FRIEND_API(bool)

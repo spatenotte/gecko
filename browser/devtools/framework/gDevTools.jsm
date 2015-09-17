@@ -83,6 +83,9 @@ DevTools.prototype = {
    *        (string|required)
    * - label: Localized name for the tool to be displayed to the user
    *          (string|required)
+   * - hideInOptions: Boolean indicating whether or not this tool should be
+                      shown in toolbox options or not. Defaults to false.
+   *                  (boolean)
    * - build: Function that takes an iframe, which has been populated with the
    *          markup from |url|, and also the toolbox containing the panel.
    *          And returns an instance of ToolPanel (function|required)
@@ -511,14 +514,14 @@ DevTools.prototype = {
  * It is an instance of a DevTools class that holds a set of tools. It has the
  * same lifetime as the browser.
  */
-let gDevTools = new DevTools();
+var gDevTools = new DevTools();
 this.gDevTools = gDevTools;
 
 /**
  * gDevToolsBrowser exposes functions to connect the gDevTools instance with a
  * Firefox instance.
  */
-let gDevToolsBrowser = {
+var gDevToolsBrowser = {
   /**
    * A record of the windows whose menus we altered, so we can undo the changes
    * as the window is closed

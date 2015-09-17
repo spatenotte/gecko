@@ -508,9 +508,9 @@ nsContentUtils::Init()
   if (!sEventListenerManagersHash) {
     static const PLDHashTableOps hash_table_ops =
     {
-      PL_DHashVoidPtrKeyStub,
-      PL_DHashMatchEntryStub,
-      PL_DHashMoveEntryStub,
+      PLDHashTable::HashVoidPtrKeyStub,
+      PLDHashTable::MatchEntryStub,
+      PLDHashTable::MoveEntryStub,
       EventListenerManagerHashClearEntry,
       EventListenerManagerHashInitEntry
     };
@@ -3460,6 +3460,8 @@ nsContentUtils::MaybeReportInterceptionErrorToConsole(nsIDocument* aDocument,
     messageName = "ClientRequestOpaqueInterception";
   } else if (aError == NS_ERROR_BAD_OPAQUE_REDIRECT_INTERCEPTION) {
     messageName = "BadOpaqueRedirectInterception";
+  } else if (aError == NS_ERROR_INTERCEPTION_CANCELED) {
+    messageName = "InterceptionCanceled";
   }
 
   if (messageName) {
@@ -3682,7 +3684,7 @@ nsContentUtils::GetEventMessage(nsIAtom* aName)
     }
   }
 
-  return NS_USER_DEFINED_EVENT;
+  return eUnidentifiedEvent;
 }
 
 // static
@@ -3705,7 +3707,7 @@ nsContentUtils::GetEventMessageAndAtom(const nsAString& aName,
   if (sStringEventTable->Get(aName, &mapping)) {
     *aEventMessage =
       mapping.mEventClassID == aEventClassID ? mapping.mMessage :
-                                               NS_USER_DEFINED_EVENT;
+                                               eUnidentifiedEvent;
     return mapping.mAtom;
   }
 
@@ -3718,11 +3720,11 @@ nsContentUtils::GetEventMessageAndAtom(const nsAString& aName,
     }
   }
 
-  *aEventMessage = NS_USER_DEFINED_EVENT;
+  *aEventMessage = eUnidentifiedEvent;
   nsCOMPtr<nsIAtom> atom = do_GetAtom(NS_LITERAL_STRING("on") + aName);
   sUserDefinedEvents->AppendObject(atom);
   mapping.mAtom = atom;
-  mapping.mMessage = NS_USER_DEFINED_EVENT;
+  mapping.mMessage = eUnidentifiedEvent;
   mapping.mType = EventNameType_None;
   mapping.mEventClassID = eBasicEventClass;
   sStringEventTable->Put(aName, mapping);
@@ -4085,7 +4087,7 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
 
   if (HasMutationListeners(aChild,
         NS_EVENT_BITS_MUTATION_NODEREMOVED, aParent)) {
-    InternalMutationEvent mutation(true, NS_MUTATION_NODEREMOVED);
+    InternalMutationEvent mutation(true, eLegacyNodeRemoved);
     mutation.mRelatedNode = do_QueryInterface(aParent);
 
     mozAutoSubtreeModified subtree(aOwnerDoc, aParent);
@@ -4120,9 +4122,8 @@ nsContentUtils::TraverseListenerManager(nsINode *aNode,
     return;
   }
 
-  EventListenerManagerMapEntry *entry =
-    static_cast<EventListenerManagerMapEntry *>
-               (PL_DHashTableSearch(sEventListenerManagersHash, aNode));
+  auto entry = static_cast<EventListenerManagerMapEntry*>
+                          (sEventListenerManagersHash->Search(aNode));
   if (entry) {
     CycleCollectionNoteChild(cb, entry->mListenerManager.get(),
                              "[via hash] mListenerManager");
@@ -4139,9 +4140,9 @@ nsContentUtils::GetListenerManagerForNode(nsINode *aNode)
     return nullptr;
   }
 
-  EventListenerManagerMapEntry *entry =
-    static_cast<EventListenerManagerMapEntry *>
-      (PL_DHashTableAdd(sEventListenerManagersHash, aNode, fallible));
+  auto entry =
+    static_cast<EventListenerManagerMapEntry*>
+               (sEventListenerManagersHash->Add(aNode, fallible));
 
   if (!entry) {
     return nullptr;
@@ -4170,9 +4171,8 @@ nsContentUtils::GetExistingListenerManagerForNode(const nsINode *aNode)
     return nullptr;
   }
 
-  EventListenerManagerMapEntry *entry =
-    static_cast<EventListenerManagerMapEntry *>
-               (PL_DHashTableSearch(sEventListenerManagersHash, aNode));
+  auto entry = static_cast<EventListenerManagerMapEntry*>
+                          (sEventListenerManagersHash->Search(aNode));
   if (entry) {
     return entry->mListenerManager;
   }
@@ -4185,15 +4185,14 @@ void
 nsContentUtils::RemoveListenerManager(nsINode *aNode)
 {
   if (sEventListenerManagersHash) {
-    EventListenerManagerMapEntry *entry =
-      static_cast<EventListenerManagerMapEntry *>
-                 (PL_DHashTableSearch(sEventListenerManagersHash, aNode));
+    auto entry = static_cast<EventListenerManagerMapEntry*>
+                            (sEventListenerManagersHash->Search(aNode));
     if (entry) {
       nsRefPtr<EventListenerManager> listenerManager;
       listenerManager.swap(entry->mListenerManager);
       // Remove the entry and *then* do operations that could cause further
       // modification of sEventListenerManagersHash.  See bug 334177.
-      PL_DHashTableRawRemove(sEventListenerManagersHash, entry);
+      sEventListenerManagersHash->RawRemove(entry);
       if (listenerManager) {
         listenerManager->Disconnect();
       }
@@ -4775,55 +4774,6 @@ static bool SchemeIs(nsIURI* aURI, const char* aScheme)
 
   bool isScheme = false;
   return NS_SUCCEEDED(baseURI->SchemeIs(aScheme, &isScheme)) && isScheme;
-}
-
-/* static */
-nsresult
-nsContentUtils::CheckSecurityBeforeLoad(nsIURI* aURIToLoad,
-                                        nsIPrincipal* aLoadingPrincipal,
-                                        uint32_t aCheckLoadFlags,
-                                        bool aAllowData,
-                                        uint32_t aContentPolicyType,
-                                        nsISupports* aContext,
-                                        const nsAFlatCString& aMimeGuess,
-                                        nsISupports* aExtra)
-{
-  NS_PRECONDITION(aLoadingPrincipal, "Must have a loading principal here");
-
-  if (aLoadingPrincipal == sSystemPrincipal) {
-    return NS_OK;
-  }
-  
-  // XXXbz do we want to fast-path skin stylesheets loading XBL here somehow?
-  // CheckLoadURIWithPrincipal
-  nsresult rv = sSecurityManager->
-    CheckLoadURIWithPrincipal(aLoadingPrincipal, aURIToLoad, aCheckLoadFlags);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Content Policy
-  int16_t shouldLoad = nsIContentPolicy::ACCEPT;
-  rv = NS_CheckContentLoadPolicy(aContentPolicyType,
-                                 aURIToLoad,
-                                 aLoadingPrincipal,
-                                 aContext,
-                                 aMimeGuess,
-                                 aExtra,
-                                 &shouldLoad,
-                                 GetContentPolicy(),
-                                 sSecurityManager);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (NS_CP_REJECTED(shouldLoad)) {
-    return NS_ERROR_CONTENT_BLOCKED;
-  }
-
-  // Same Origin
-  if ((aAllowData && SchemeIs(aURIToLoad, "data")) ||
-      ((aCheckLoadFlags & nsIScriptSecurityManager::ALLOW_CHROME) &&
-       SchemeIs(aURIToLoad, "chrome"))) {
-    return NS_OK;
-  }
-
-  return aLoadingPrincipal->CheckMayLoad(aURIToLoad, true, false);
 }
 
 bool
@@ -7186,7 +7136,7 @@ nsContentUtils::IsForbiddenSystemRequestHeader(const nsACString& aHeader)
     "access-control-request-method", "connection", "content-length",
     "cookie", "cookie2", "content-transfer-encoding", "date", "dnt",
     "expect", "host", "keep-alive", "origin", "referer", "te", "trailer",
-    "transfer-encoding", "upgrade", "user-agent", "via"
+    "transfer-encoding", "upgrade", "via"
   };
   for (uint32_t i = 0; i < ArrayLength(kInvalidHeaders); ++i) {
     if (aHeader.LowerCaseEqualsASCII(kInvalidHeaders[i])) {

@@ -52,6 +52,7 @@
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/dom/TabParent.h"
+#include "mozilla/Move.h"
 #include "mozilla/Services.h"
 #include "mozilla/Snprintf.h"
 #include "nsRefPtrHashtable.h"
@@ -873,40 +874,6 @@ nsBaseWidget::CreateRootContentController()
   return controller.forget();
 }
 
-class ChromeProcessSetAllowedTouchBehaviorCallback : public SetAllowedTouchBehaviorCallback {
-public:
-  explicit ChromeProcessSetAllowedTouchBehaviorCallback(APZCTreeManager* aTreeManager)
-    : mTreeManager(aTreeManager)
-  {}
-
-  void Run(uint64_t aInputBlockId, const nsTArray<TouchBehaviorFlags>& aFlags) const override {
-    MOZ_ASSERT(NS_IsMainThread());
-    APZThreadUtils::RunOnControllerThread(NewRunnableMethod(
-        mTreeManager.get(), &APZCTreeManager::SetAllowedTouchBehavior,
-        aInputBlockId, aFlags));
-  }
-
-private:
-  nsRefPtr<APZCTreeManager> mTreeManager;
-};
-
-class ChromeProcessContentReceivedInputBlockCallback : public ContentReceivedInputBlockCallback {
-public:
-  explicit ChromeProcessContentReceivedInputBlockCallback(APZCTreeManager* aTreeManager)
-    : mTreeManager(aTreeManager)
-  {}
-
-  void Run(const ScrollableLayerGuid& aGuid, uint64_t aInputBlockId, bool aPreventDefault) const override {
-    MOZ_ASSERT(NS_IsMainThread());
-    APZThreadUtils::RunOnControllerThread(NewRunnableMethod(
-        mTreeManager.get(), &APZCTreeManager::ContentReceivedInputBlock,
-        aInputBlockId, aPreventDefault));
-  }
-
-private:
-  nsRefPtr<APZCTreeManager> mTreeManager;
-};
-
 void nsBaseWidget::ConfigureAPZCTreeManager()
 {
   MOZ_ASSERT(mAPZC);
@@ -914,9 +881,29 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
   ConfigureAPZControllerThread();
 
   mAPZC->SetDPI(GetDPI());
-  mAPZEventState = new APZEventState(this,
-      new ChromeProcessContentReceivedInputBlockCallback(mAPZC));
-  mSetAllowedTouchBehaviorCallback = new ChromeProcessSetAllowedTouchBehaviorCallback(mAPZC);
+
+  nsRefPtr<APZCTreeManager> treeManager = mAPZC;  // for capture by the lambdas
+
+  ContentReceivedInputBlockCallback callback(
+      [treeManager](const ScrollableLayerGuid& aGuid,
+                    uint64_t aInputBlockId,
+                    bool aPreventDefault)
+      {
+        MOZ_ASSERT(NS_IsMainThread());
+        APZThreadUtils::RunOnControllerThread(NewRunnableMethod(
+            treeManager.get(), &APZCTreeManager::ContentReceivedInputBlock,
+            aInputBlockId, aPreventDefault));
+      });
+  mAPZEventState = new APZEventState(this, mozilla::Move(callback));
+
+  mSetAllowedTouchBehaviorCallback = [treeManager](uint64_t aInputBlockId,
+                                                   const nsTArray<TouchBehaviorFlags>& aFlags)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    APZThreadUtils::RunOnControllerThread(NewRunnableMethod(
+        treeManager.get(), &APZCTreeManager::SetAllowedTouchBehavior,
+        aInputBlockId, aFlags));
+  };
 
   nsRefPtr<GeckoContentController> controller = CreateRootContentController();
   if (controller) {
@@ -990,7 +977,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
     // TODO: Eventually we'll be able to move the SendSetTargetAPZCNotification
     // call into APZEventState::Process*Event() as well.
     if (WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent()) {
-      if (touchEvent->mMessage == NS_TOUCH_START) {
+      if (touchEvent->mMessage == eTouchStart) {
         if (gfxPrefs::TouchActionEnabled()) {
           APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(this, *touchEvent,
               aInputBlockId, mSetAllowedTouchBehaviorCallback);
@@ -2637,7 +2624,7 @@ case _value: eventName.AssignLiteral(_name) ; break
     _ASSIGN_eventName(eDragEnter,"eDragEnter");
     _ASSIGN_eventName(eDragExit,"eDragExit");
     _ASSIGN_eventName(eDragOver,"eDragOver");
-    _ASSIGN_eventName(NS_EDITOR_INPUT,"NS_EDITOR_INPUT");
+    _ASSIGN_eventName(eEditorInput,"eEditorInput");
     _ASSIGN_eventName(eFocus,"eFocus");
     _ASSIGN_eventName(eFormSelect,"eFormSelect");
     _ASSIGN_eventName(eFormChange,"eFormChange");
@@ -2657,8 +2644,8 @@ case _value: eventName.AssignLiteral(_name) ; break
     _ASSIGN_eventName(eMouseMove,"eMouseMove");
     _ASSIGN_eventName(eLoad,"eLoad");
     _ASSIGN_eventName(ePopState,"ePopState");
-    _ASSIGN_eventName(NS_BEFORE_SCRIPT_EXECUTE,"NS_BEFORE_SCRIPT_EXECUTE");
-    _ASSIGN_eventName(NS_AFTER_SCRIPT_EXECUTE,"NS_AFTER_SCRIPT_EXECUTE");
+    _ASSIGN_eventName(eBeforeScriptExecute,"eBeforeScriptExecute");
+    _ASSIGN_eventName(eAfterScriptExecute,"eAfterScriptExecute");
     _ASSIGN_eventName(eUnload,"eUnload");
     _ASSIGN_eventName(eHashChange,"eHashChange");
     _ASSIGN_eventName(eReadyStateChange,"eReadyStateChange");

@@ -1668,6 +1668,20 @@ HttpChannelChild::ContinueAsyncOpen()
     optionalFDs = fdSet;
   }
 
+  OptionalCorsPreflightArgs optionalCorsPreflightArgs;
+  if (mRequireCORSPreflight) {
+    CorsPreflightArgs args;
+    args.withCredentials() = mWithCredentials;
+    args.unsafeHeaders() = mUnsafeHeaders;
+    nsresult rv = PrincipalToPrincipalInfo(mPreflightPrincipal, &args.preflightPrincipal());
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    optionalCorsPreflightArgs = args;
+  } else {
+    optionalCorsPreflightArgs = mozilla::void_t();
+  }
+
   nsCOMPtr<mozIThirdPartyUtil> util(do_GetService(THIRDPARTYUTIL_CONTRACTID));
   if (util) {
     bool thirdParty;
@@ -1688,6 +1702,8 @@ HttpChannelChild::ContinueAsyncOpen()
   SerializeURI(mTopWindowURI, openArgs.topWindowURI());
 
   openArgs.fds() = optionalFDs;
+
+  openArgs.preflightArgs() = optionalCorsPreflightArgs;
 
   openArgs.uploadStreamHasHeaders() = mUploadStreamHasHeaders;
   openArgs.priority() = mPriority;
@@ -1769,6 +1785,25 @@ HttpChannelChild::SetRequestHeader(const nsACString& aHeader,
   tuple->mHeader = aHeader;
   tuple->mValue = aValue;
   tuple->mMerge = aMerge;
+  tuple->mEmpty = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpChannelChild::SetEmptyRequestHeader(const nsACString& aHeader)
+{
+  LOG(("HttpChannelChild::SetEmptyRequestHeader [this=%p]\n", this));
+  nsresult rv = HttpBaseChannel::SetEmptyRequestHeader(aHeader);
+  if (NS_FAILED(rv))
+    return rv;
+
+  RequestHeaderTuple* tuple = mClientSetRequestHeaders.AppendElement();
+  if (!tuple)
+    return NS_ERROR_OUT_OF_MEMORY;
+
+  tuple->mHeader = aHeader;
+  tuple->mMerge = false;
+  tuple->mEmpty = true;
   return NS_OK;
 }
 
@@ -2138,6 +2173,26 @@ NS_IMETHODIMP HttpChannelChild::GetClientSetRequestHeaders(RequestHeaderTuples *
   return NS_OK;
 }
 
+NS_IMETHODIMP
+HttpChannelChild::RemoveCorsPreflightCacheEntry(nsIURI* aURI,
+                                                nsIPrincipal* aPrincipal)
+{
+  URIParams uri;
+  SerializeURI(aURI, uri);
+  PrincipalInfo principalInfo;
+  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  bool result = false;
+  // Be careful to not attempt to send a message to the parent after the
+  // actor has been destroyed.
+  if (mIPCOpen) {
+    result = SendRemoveCorsPreflightCacheEntry(uri, principalInfo);
+  }
+  return result ? NS_OK : NS_ERROR_FAILURE;
+}
+
 //-----------------------------------------------------------------------------
 // HttpChannelChild::nsIDivertableChannel
 //-----------------------------------------------------------------------------
@@ -2215,8 +2270,7 @@ HttpChannelChild::OverrideWithSynthesizedResponse(nsAutoPtr<nsHttpResponseHead>&
   mResponseHead = aResponseHead;
   mSynthesizedResponse = true;
 
-  uint16_t status = mResponseHead->Status();
-  if (status != 200 && status != 404) {
+  if (WillRedirect(mResponseHead)) {
     // Continue with the original cross-process request
     nsresult rv = ContinueAsyncOpen();
     NS_ENSURE_SUCCESS_VOID(rv);

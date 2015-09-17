@@ -82,7 +82,6 @@ class ContentParent final : public PContentParent
     typedef mozilla::ipc::TestShellParent TestShellParent;
     typedef mozilla::ipc::URIParams URIParams;
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
-    typedef mozilla::OwningSerializedStructuredCloneBuffer OwningSerializedStructuredCloneBuffer;
 
 public:
 #ifdef MOZ_NUWA_PROCESS
@@ -202,7 +201,7 @@ public:
                                             bool aRunInGlobalScope) override;
     virtual bool DoSendAsyncMessage(JSContext* aCx,
                                     const nsAString& aMessage,
-                                    mozilla::dom::StructuredCloneIPCHelper& aHelper,
+                                    StructuredCloneData& aData,
                                     JS::Handle<JSObject *> aCpows,
                                     nsIPrincipal* aPrincipal) override;
     virtual bool CheckPermission(const nsAString& aPermission) override;
@@ -592,7 +591,7 @@ private:
                                                InfallibleTArray<nsString>* dictionaries,
                                                ClipboardCapabilities* clipboardCaps,
                                                DomainPolicyClone* domainPolicy,
-                                               OwningSerializedStructuredCloneBuffer* initialData) override;
+                                               StructuredCloneData* initialData) override;
 
     virtual bool DeallocPJavaScriptParent(mozilla::jsipc::PJavaScriptParent*) override;
 
@@ -626,6 +625,8 @@ private:
 
     virtual bool RecvIsSecureURI(const uint32_t& aType, const URIParams& aURI,
                                  const uint32_t& aFlags, bool* aIsSecureURI) override;
+
+    virtual bool RecvAccumulateMixedContentHSTS(const URIParams& aURI, const bool& aActive) override;
 
     virtual bool DeallocPHalParent(PHalParent*) override;
 
@@ -753,12 +754,12 @@ private:
                                  const ClonedMessageData& aData,
                                  InfallibleTArray<CpowEntry>&& aCpows,
                                  const IPC::Principal& aPrincipal,
-                                 nsTArray<OwningSerializedStructuredCloneBuffer>* aRetvals) override;
+                                 nsTArray<StructuredCloneData>* aRetvals) override;
     virtual bool RecvRpcMessage(const nsString& aMsg,
                                 const ClonedMessageData& aData,
                                 InfallibleTArray<CpowEntry>&& aCpows,
                                 const IPC::Principal& aPrincipal,
-                                nsTArray<OwningSerializedStructuredCloneBuffer>* aRetvals) override;
+                                nsTArray<StructuredCloneData>* aRetvals) override;
     virtual bool RecvAsyncMessage(const nsString& aMsg,
                                   const ClonedMessageData& aData,
                                   InfallibleTArray<CpowEntry>&& aCpows,
@@ -897,6 +898,8 @@ private:
     virtual bool RecvProfile(const nsCString& aProfile) override;
     virtual bool RecvGetGraphicsDeviceInitData(DeviceInitData* aOut) override;
 
+    virtual bool RecvGetDeviceStorageLocation(const nsString& aType,
+                                              nsString* aPath) override;
     // If you add strong pointers to cycle collected objects here, be sure to
     // release these objects in ShutDownProcess.  See the comment there for more
     // details.

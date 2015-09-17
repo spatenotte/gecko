@@ -3,9 +3,9 @@
 
 "use strict";
 
-let gTestTab;
-let gContentAPI;
-let gContentWindow;
+var gTestTab;
+var gContentAPI;
+var gContentWindow;
 
 Components.utils.import("resource://testing-common/TelemetryArchiveTesting.jsm", this);
 
@@ -13,7 +13,7 @@ function test() {
   UITourTest();
 }
 
-let tests = [
+var tests = [
   function test_untrusted_host(done) {
     loadUITourTestPage(function() {
       let bookmarksMenu = document.getElementById("bookmarks-menu-button");
@@ -222,10 +222,8 @@ let tests = [
     waitForElementToBeVisible(highlight, () => {
 
       let searchbar = document.getElementById("searchbar");
-      if (searchbar.getAttribute("oneoffui")) {
-        done();
-        return; // The oneoffui removes the menu that's being tested here.
-      }
+      done();
+      return; // The oneoffui removes the menu that's being tested here.
 
       gContentAPI.showMenu("searchEngines", function() {
         isnot(searchbar, null, "Should have found searchbar");

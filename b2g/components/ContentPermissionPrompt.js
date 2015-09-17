@@ -37,7 +37,7 @@ var permissionManager = Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsI
 var secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
 var privacyMonitor = Cc["@mozilla.org/privacy-monitor;1"].getService().wrappedJSObject;
 
-let permissionSpecificChecker = {};
+var permissionSpecificChecker = {};
 
 XPCOMUtils.defineLazyServiceGetter(this,
                                    "TelephonyService",

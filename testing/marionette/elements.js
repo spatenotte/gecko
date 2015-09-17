@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let {utils: Cu} = Components;
+var {utils: Cu} = Components;
 
 Cu.import("chrome://marionette/content/error.js");
 
@@ -98,7 +98,8 @@ Accessibility.prototype = {
   getAccessibleObject(element, mustHaveAccessible = false) {
     let acc = this.accessibleRetrieval.getAccessibleFor(element);
     if (!acc && mustHaveAccessible) {
-      this.handleErrorMessage('Element does not have an accessible object');
+      this.handleErrorMessage('Element does not have an accessible object',
+        element);
     }
     return acc;
   },
@@ -178,10 +179,14 @@ Accessibility.prototype = {
   /**
    * Send an error message or log the error message in the log
    * @param String message
+   * @param DOMElement element that caused an error
    */
-  handleErrorMessage(message) {
+  handleErrorMessage(message, element) {
     if (!message) {
       return;
+    }
+    if (element) {
+      message += ` -> id: ${element.id}, tagName: ${element.tagName}, className: ${element.className}\n`;
     }
     if (this.strict) {
       throw new ElementNotAccessibleError(message);

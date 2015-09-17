@@ -496,12 +496,16 @@ public:
    * properties (top, left, right, bottom) are auto. aAnchorRect is in the
    * coordinate space of aLayer's container layer (i.e. relative to the reference
    * frame of the display item which is building aLayer's container layer).
+   * aIsClipFixed is true if the layer's clip rect should also remain fixed
+   * during async-scrolling (true for fixed position elements, false for
+   * fixed backgrounds).
    */
   static void SetFixedPositionLayerData(Layer* aLayer, const nsIFrame* aViewportFrame,
                                         const nsRect& aAnchorRect,
                                         const nsIFrame* aFixedPosFrame,
                                         nsPresContext* aPresContext,
-                                        const ContainerLayerParameters& aContainerParameters);
+                                        const ContainerLayerParameters& aContainerParameters,
+                                        bool aIsClipFixed);
 
   /**
    * Return true if aPresContext's viewport has a displayport.
@@ -1314,7 +1318,8 @@ public:
    */
   enum IntrinsicISizeType { MIN_ISIZE, PREF_ISIZE };
   enum {
-    IGNORE_PADDING = 0x01
+    IGNORE_PADDING = 0x01,
+    BAIL_IF_REFLOW_NEEDED = 0x02, // returns NS_INTRINSIC_WIDTH_UNKNOWN if so
   };
   static nscoord IntrinsicForAxis(mozilla::PhysicalAxis aAxis,
                                   nsRenderingContext*   aRenderingContext,
@@ -1328,6 +1333,38 @@ public:
                                        nsIFrame*           aFrame,
                                        IntrinsicISizeType  aType,
                                        uint32_t            aFlags = 0);
+
+  /**
+   * Get the contribution of aFrame for the given physical axis.
+   * This considers the child's 'min-width' property (or 'min-height' if the
+   * given axis is vertical), and its padding, border, and margin in the
+   * corresponding dimension.
+   */
+  static nscoord MinSizeContributionForAxis(mozilla::PhysicalAxis aAxis,
+                                            nsRenderingContext*   aRC,
+                                            nsIFrame*             aFrame,
+                                            IntrinsicISizeType    aType,
+                                            uint32_t              aFlags = 0);
+
+  /**
+   * This function increases an initial intrinsic size, 'aCurrent', according
+   * to the given 'aPercent', such that the size-increase makes up exactly
+   * 'aPercent' percent of the returned value.  If 'aPercent' is less than
+   * or equal to zero the original 'aCurrent' value is returned. If 'aPercent'
+   * is greater than or equal to 1.0 the value nscoord_MAX is returned.
+   * (We don't increase the size if MIN_ISIZE is passed in, though.)
+   */
+  static nscoord AddPercents(IntrinsicISizeType aType, nscoord aCurrent,
+                             float aPercent)
+  {
+    if (aPercent > 0.0f && aType == nsLayoutUtils::PREF_ISIZE) {
+      // XXX Should we also consider percentages for min widths, up to a
+      // limit?
+      return MOZ_UNLIKELY(aPercent >= 1.0f) ? nscoord_MAX
+        : NSToCoordRound(float(aCurrent) / (1.0f - aPercent));
+    }
+    return aCurrent;
+  }
 
   /*
    * Convert nsStyleCoord to nscoord when percentages depend on the
@@ -2349,8 +2386,8 @@ public:
     return sFontSizeInflationDisabledInMasterProcess;
   }
 
-  static bool SVGTransformOriginEnabled() {
-    return sSVGTransformOriginEnabled;
+  static bool SVGTransformBoxEnabled() {
+    return sSVGTransformBoxEnabled;
   }
 
   /**
@@ -2745,7 +2782,7 @@ private:
   static bool sInvalidationDebuggingIsEnabled;
   static bool sCSSVariablesEnabled;
   static bool sInterruptibleReflowEnabled;
-  static bool sSVGTransformOriginEnabled;
+  static bool sSVGTransformBoxEnabled;
 
   /**
    * Helper function for LogTestDataForPaint().

@@ -75,6 +75,7 @@
 #include "mozilla/layers/CompositorParent.h"
 #include "GeckoTouchDispatcher.h"
 
+#undef LOG
 #define LOG(args...)                                            \
     __android_log_print(ANDROID_LOG_INFO, "Gonk" , ## args)
 #ifdef VERBOSE_LOG_ENABLED
@@ -663,6 +664,7 @@ GeckoInputDispatcher::dispatchOnce()
 void
 GeckoInputDispatcher::notifyConfigurationChanged(const NotifyConfigurationChangedArgs*)
 {
+    gAppShell->CheckPowerKey();
 }
 
 void
@@ -843,8 +845,10 @@ nsAppShell::nsAppShell()
     : mNativeCallbackRequest(false)
     , mEnableDraw(false)
     , mHandlers()
+    , mPowerKeyChecked(false)
 {
     gAppShell = this;
+    Preferences::SetCString("b2g.safe_mode", "unset");
 }
 
 nsAppShell::~nsAppShell()
@@ -911,6 +915,29 @@ nsAppShell::Init()
     // Delay initializing input devices until the screen has been
     // initialized (and we know the resolution).
     return rv;
+}
+
+void
+nsAppShell::CheckPowerKey()
+{
+    if (mPowerKeyChecked) {
+        return;
+    }
+
+    uint32_t deviceId = 0;
+    int32_t powerState = AKEY_STATE_UNKNOWN;
+
+    // EventHub doesn't report the number of devices.
+    while (powerState != AKEY_STATE_DOWN && deviceId < 32) {
+        powerState = mEventHub->getKeyCodeState(deviceId++, AKEYCODE_POWER);
+    }
+
+    // If Power is pressed while we startup, mark safe mode.
+    // Consumers of the b2g.safe_mode preference need to listen on this
+    // preference change to prevent startup races.
+    Preferences::SetCString("b2g.safe_mode",
+                            (powerState == AKEY_STATE_DOWN) ? "yes" : "no");
+    mPowerKeyChecked = true;
 }
 
 NS_IMETHODIMP

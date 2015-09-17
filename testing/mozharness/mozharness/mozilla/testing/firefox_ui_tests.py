@@ -138,10 +138,17 @@ class FirefoxUITests(VCSToolsScript, VirtualenvMixin):
     def _pre_create_virtualenv(self, action):
         dirs = self.query_abs_dirs()
 
-        self.register_virtualenv_module(
-            'firefox-ui-tests',
-            url=dirs['fx_ui_dir'],
-        )
+        # List of exact versions of mozbase packages which are known to work
+        requirements_file = os.path.join(dirs['fx_ui_dir'], 'requirements.txt')
+        if os.path.isfile(requirements_file):
+            self.register_virtualenv_module(requirements=[requirements_file])
+
+        # Optional packages to be installed, e.g. for Jenkins
+        if self.config.get('virtualenv_modules'):
+            for module in self.config['virtualenv_modules']:
+                self.register_virtualenv_module(module)
+
+        self.register_virtualenv_module('firefox-ui-tests', url=dirs['fx_ui_dir'])
 
     def _query_symbols_url(self, installer_url):
         for suffix in INSTALLER_SUFFIXES:
@@ -164,6 +171,13 @@ class FirefoxUITests(VCSToolsScript, VirtualenvMixin):
                 return None
         else:
             self.fatal('Can\'t find symbols_url from installer_url: {}!'.format(installer_url))
+
+    @PreScriptAction('checkout')
+    def _pre_checkout(self, action):
+        if not self.firefox_ui_branch:
+            self.fatal(
+                'Please specify --firefox-ui-branch. Valid values can be found '
+                'in here https://github.com/mozilla/firefox-ui-tests/branches')
 
     def checkout(self):
         """
@@ -203,13 +217,14 @@ class FirefoxUITests(VCSToolsScript, VirtualenvMixin):
         """All required steps for running the tests against an installer."""
         dirs = self.query_abs_dirs()
 
-        bin_dir = os.path.dirname(self.query_python_path())
-        fx_ui_tests_bin = os.path.join(bin_dir, script_name)
+        venv_python_path = self.query_python_path()
+        update_script = os.path.join(dirs['fx_ui_dir'], 'firefox_ui_harness', 'cli_update.py')
         gecko_log = os.path.join(dirs['abs_log_dir'], 'gecko.log')
 
         # Build the command
         cmd = [
-            fx_ui_tests_bin,
+            venv_python_path,
+            update_script,
             '--installer', installer_path,
             # Log to stdout until tests are stable.
             '--gecko-log=-',

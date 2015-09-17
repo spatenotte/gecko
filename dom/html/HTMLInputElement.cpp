@@ -378,8 +378,7 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
 
   // Collect new selected filenames
   nsTArray<nsRefPtr<File>> newFiles;
-  if (mode == static_cast<int16_t>(nsIFilePicker::modeOpenMultiple) ||
-      mode == static_cast<int16_t>(nsIFilePicker::modeGetFolder)) {
+  if (mode == static_cast<int16_t>(nsIFilePicker::modeOpenMultiple)) {
     nsCOMPtr<nsISimpleEnumerator> iter;
     nsresult rv = mFilePicker->GetDomfiles(getter_AddRefs(iter));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -401,7 +400,8 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
       }
     }
   } else {
-    MOZ_ASSERT(mode == static_cast<int16_t>(nsIFilePicker::modeOpen));
+    MOZ_ASSERT(mode == static_cast<int16_t>(nsIFilePicker::modeOpen) ||
+               mode == static_cast<int16_t>(nsIFilePicker::modeGetFolder));
     nsCOMPtr<nsISupports> tmp;
     nsresult rv = mFilePicker->GetDomfile(getter_AddRefs(tmp));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -2481,6 +2481,10 @@ HTMLInputElement::GetFiles()
     return nullptr;
   }
 
+  if (HasAttr(kNameSpaceID_None, nsGkAtoms::directory)) {
+    return nullptr;
+  }
+
   if (!mFileList) {
     mFileList = new FileList(static_cast<nsIContent*>(this));
     UpdateFileList();
@@ -3030,8 +3034,8 @@ HTMLInputElement::NeedToInitializeEditorForEvent(
   case eMouseExitFromWidget:
   case eMouseOver:
   case eMouseOut:
-  case NS_SCROLLPORT_UNDERFLOW:
-  case NS_SCROLLPORT_OVERFLOW:
+  case eScrollPortUnderflow:
+  case eScrollPortOverflow:
     return false;
   default:
     return true;
@@ -3285,7 +3289,7 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
       textControl = numberControlFrame->GetAnonTextControl();
     }
     if (textControl && aVisitor.mEvent->originalTarget == textControl) {
-      if (aVisitor.mEvent->mMessage == NS_EDITOR_INPUT) {
+      if (aVisitor.mEvent->mMessage == eEditorInput) {
         // Propogate the anon text control's new value to our HTMLInputElement:
         nsAutoString value;
         numberControlFrame->GetValueOfAnonTextControl(value);
@@ -4083,7 +4087,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(EventChainPostVisitor& aVisitor)
   switch (aVisitor.mEvent->mMessage)
   {
     case eMouseDown:
-    case NS_TOUCH_START: {
+    case eTouchStart: {
       if (mIsDraggingRange) {
         break;
       }
@@ -4115,7 +4119,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(EventChainPostVisitor& aVisitor)
     } break;
 
     case eMouseMove:
-    case NS_TOUCH_MOVE:
+    case eTouchMove:
       if (!mIsDraggingRange) {
         break;
       }
@@ -4130,7 +4134,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(EventChainPostVisitor& aVisitor)
       break;
 
     case eMouseUp:
-    case NS_TOUCH_END:
+    case eTouchEnd:
       if (!mIsDraggingRange) {
         break;
       }
@@ -4149,7 +4153,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(EventChainPostVisitor& aVisitor)
       }
       break;
 
-    case NS_TOUCH_CANCEL:
+    case eTouchCancel:
       if (mIsDraggingRange) {
         CancelRangeThumbDrag();
       }
@@ -4917,9 +4921,10 @@ HTMLInputElement::GetFilesAndDirectories(ErrorResult& aRv)
       }
       int32_t leafSeparatorIndex = path.RFind(FILE_PATH_SEPARATOR);
       nsDependentSubstring dirname = Substring(path, 0, leafSeparatorIndex);
-      nsDependentSubstring basename = Substring(path, leafSeparatorIndex);
       fs = MakeOrReuseFileSystem(dirname, fs, window);
-      filesAndDirsSeq[i].SetAsDirectory() = new Directory(fs, basename);
+      nsAutoString dompath(NS_LITERAL_STRING(FILESYSTEM_DOM_PATH_SEPARATOR));
+      dompath.Append(Substring(path, leafSeparatorIndex + 1));
+      filesAndDirsSeq[i].SetAsDirectory() = new Directory(fs, dompath);
     } else {
       filesAndDirsSeq[i].SetAsFile() = filesAndDirs[i];
     }

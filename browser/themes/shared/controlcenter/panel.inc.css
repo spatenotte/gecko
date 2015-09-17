@@ -159,6 +159,7 @@
 #identity-popup-security-descriptions > description,
 #identity-popup-securityView-header > description,
 #identity-popup-securityView-body > description,
+#identity-popup-permissions-content > description,
 #tracking-protection-content > label {
   white-space: pre-wrap;
   font-size: 110%;
@@ -168,11 +169,6 @@
 .identity-popup-headline {
   margin: 3px 0 4px;
   font-size: 150%;
-}
-
-.identity-popup-subheadline {
-  margin: 0;
-  font-weight: bold;
 }
 
 .identity-popup-warning-gray {
@@ -293,26 +289,15 @@ description#identity-popup-content-verifier,
   background-image: url(chrome://browser/skin/controlcenter/permissions.svg);
 }
 
-#identity-popup-permissionsView {
-  padding: 0.5em 1em;
-}
-
-#identity-popup-permission-list,
-#identity-popup-permission-subview-list {
+#identity-popup-permission-list:not(:empty) {
   margin-top: 5px;
 }
 
-#permission-subview-list-page-functionality,
-#permission-subview-list-system-access {
-  margin: 3px 0;
-  -moz-margin-start: 3px;
-}
-
-#identity-popup-permission-list menulist.identity-popup-permission,
-#identity-popup-permission-subview-list menulist.identity-popup-permission {
-  max-width: 10em;
+#identity-popup-permission-list:not(:empty) + description {
+  display: none;
 }
 
 .identity-popup-permission-label {
   -moz-margin-start: 0;
 }
+

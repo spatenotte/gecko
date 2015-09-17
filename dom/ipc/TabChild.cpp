@@ -37,6 +37,7 @@
 #include "mozilla/layout/RenderFrameChild.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/Move.h"
 #include "mozilla/PWebBrowserPersistDocumentChild.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
@@ -83,7 +84,7 @@
 #include "nsWindowWatcher.h"
 #include "PermissionMessageUtils.h"
 #include "PuppetWidget.h"
-#include "StructuredCloneIPCHelper.h"
+#include "StructuredCloneData.h"
 #include "nsViewportInfo.h"
 #include "nsILoadContext.h"
 #include "ipc/nsGUIEventIPC.h"
@@ -237,13 +238,13 @@ TabChildBase::DispatchMessageManagerMessage(const nsAString& aMessageName,
 {
     AutoSafeJSContext cx;
     JS::Rooted<JS::Value> json(cx, JS::NullValue());
-    StructuredCloneIPCHelper helper;
+    StructuredCloneData data;
     if (JS_ParseJSON(cx,
                       static_cast<const char16_t*>(aJSONData.BeginReading()),
                       aJSONData.Length(),
                       &json)) {
         ErrorResult rv;
-        helper.Write(cx, json, rv);
+        data.Write(cx, json, rv);
         if (NS_WARN_IF(rv.Failed())) {
             return;
         }
@@ -255,7 +256,7 @@ TabChildBase::DispatchMessageManagerMessage(const nsAString& aMessageName,
     nsRefPtr<nsFrameMessageManager> mm =
       static_cast<nsFrameMessageManager*>(mTabChildGlobal->mMessageManager.get());
     mm->ReceiveMessage(static_cast<EventTarget*>(mTabChildGlobal), nullptr,
-                       aMessageName, false, &helper, nullptr, nullptr, nullptr);
+                       aMessageName, false, &data, nullptr, nullptr, nullptr);
 }
 
 bool
@@ -460,6 +461,24 @@ PreloadSlowThingsPostFork(void* aUnused)
     nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
     observerService->NotifyObservers(nullptr, "preload-postfork", nullptr);
+
+    MOZ_ASSERT(sPreallocatedTab);
+    // Initialize initial reflow of the PresShell has to happen after fork
+    // because about:blank content viewer is created in the above observer
+    // notification.
+    nsCOMPtr<nsIDocShell> docShell =
+      do_GetInterface(sPreallocatedTab->WebNavigation());
+    if (nsIPresShell* presShell = docShell->GetPresShell()) {
+        // Initialize and do an initial reflow of the about:blank
+        // PresShell to let it preload some things for us.
+        presShell->Initialize(0, 0);
+        nsIDocument* doc = presShell->GetDocument();
+        doc->FlushPendingNotifications(Flush_Layout);
+        // ... but after it's done, make sure it doesn't do any more
+        // work.
+        presShell->MakeZombie();
+    }
+
 }
 
 #ifdef MOZ_NUWA_PROCESS
@@ -540,30 +559,18 @@ TabChild::PreloadSlowThings()
         NS_LITERAL_STRING("chrome://global/content/preload.js"),
         true);
 
+    sPreallocatedTab = tab;
+    ClearOnShutdown(&sPreallocatedTab);
+
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {
         NuwaAddFinalConstructor(PreloadSlowThingsPostFork, nullptr);
     } else {
-      PreloadSlowThingsPostFork(nullptr);
+        PreloadSlowThingsPostFork(nullptr);
     }
 #else
     PreloadSlowThingsPostFork(nullptr);
 #endif
-
-    nsCOMPtr<nsIDocShell> docShell = do_GetInterface(tab->WebNavigation());
-    if (nsIPresShell* presShell = docShell->GetPresShell()) {
-        // Initialize and do an initial reflow of the about:blank
-        // PresShell to let it preload some things for us.
-        presShell->Initialize(0, 0);
-        nsIDocument* doc = presShell->GetDocument();
-        doc->FlushPendingNotifications(Flush_Layout);
-        // ... but after it's done, make sure it doesn't do any more
-        // work.
-        presShell->MakeZombie();
-    }
-
-    sPreallocatedTab = tab;
-    ClearOnShutdown(&sPreallocatedTab);
 }
 
 /*static*/ already_AddRefed<TabChild>
@@ -593,37 +600,6 @@ TabChild::Create(nsIContentChild* aManager,
     return NS_SUCCEEDED(iframe->Init()) ? iframe.forget() : nullptr;
 }
 
-class TabChildSetAllowedTouchBehaviorCallback : public SetAllowedTouchBehaviorCallback {
-public:
-  explicit TabChildSetAllowedTouchBehaviorCallback(TabChild* aTabChild)
-    : mTabChild(do_GetWeakReference(static_cast<nsITabChild*>(aTabChild)))
-  {}
-
-  void Run(uint64_t aInputBlockId, const nsTArray<TouchBehaviorFlags>& aFlags) const override {
-    if (nsCOMPtr<nsITabChild> tabChild = do_QueryReferent(mTabChild)) {
-      static_cast<TabChild*>(tabChild.get())->SendSetAllowedTouchBehavior(aInputBlockId, aFlags);
-    }
-  }
-
-private:
-  nsWeakPtr mTabChild;
-};
-
-class TabChildContentReceivedInputBlockCallback : public ContentReceivedInputBlockCallback {
-public:
-  explicit TabChildContentReceivedInputBlockCallback(TabChild* aTabChild)
-    : mTabChild(do_GetWeakReference(static_cast<nsITabChild*>(aTabChild)))
-  {}
-
-  void Run(const ScrollableLayerGuid& aGuid, uint64_t aInputBlockId, bool aPreventDefault) const override {
-    if (nsCOMPtr<nsITabChild> tabChild = do_QueryReferent(mTabChild)) {
-      static_cast<TabChild*>(tabChild.get())->SendContentReceivedInputBlock(aGuid, aInputBlockId, aPreventDefault);
-    }
-  }
-private:
-  nsWeakPtr mTabChild;
-};
-
 TabChild::TabChild(nsIContentChild* aManager,
                    const TabId& aTabId,
                    const TabContext& aContext,
@@ -643,7 +619,6 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mOrientation(eScreenOrientation_PortraitPrimary)
   , mUpdateHitRegion(false)
   , mIgnoreKeyPressEvent(false)
-  , mSetAllowedTouchBehaviorCallback(new TabChildSetAllowedTouchBehaviorCallback(this))
   , mHasValidInnerSize(false)
   , mDestroyed(false)
   , mUniqueId(aTabId)
@@ -658,6 +633,15 @@ TabChild::TabChild(nsIContentChild* aManager,
   // TabChild corresponds to a widget type that would have APZ enabled, and just
   // check the other conditions necessary for enabling APZ.
   mAsyncPanZoomEnabled = gfxPlatform::AsyncPanZoomEnabled();
+
+  nsWeakPtr weakPtrThis(do_GetWeakReference(static_cast<nsITabChild*>(this)));  // for capture by the lambda
+  mSetAllowedTouchBehaviorCallback = [weakPtrThis](uint64_t aInputBlockId,
+                                                   const nsTArray<TouchBehaviorFlags>& aFlags)
+  {
+    if (nsCOMPtr<nsITabChild> tabChild = do_QueryReferent(weakPtrThis)) {
+      static_cast<TabChild*>(tabChild.get())->SendSetAllowedTouchBehavior(aInputBlockId, aFlags);
+    }
+  };
 
   // preloaded TabChild should not be added to child map
   if (mUniqueId) {
@@ -854,8 +838,17 @@ TabChild::Init()
     do_QueryInterface(window->GetChromeEventHandler());
   docShell->SetChromeEventHandler(chromeHandler);
 
-  mAPZEventState = new APZEventState(mPuppetWidget,
-      new TabChildContentReceivedInputBlockCallback(this));
+  nsWeakPtr weakPtrThis = do_GetWeakReference(static_cast<nsITabChild*>(this));  // for capture by the lambda
+  ContentReceivedInputBlockCallback callback(
+      [weakPtrThis](const ScrollableLayerGuid& aGuid,
+                    uint64_t aInputBlockId,
+                    bool aPreventDefault)
+      {
+        if (nsCOMPtr<nsITabChild> tabChild = do_QueryReferent(weakPtrThis)) {
+          static_cast<TabChild*>(tabChild.get())->SendContentReceivedInputBlock(aGuid, aInputBlockId, aPreventDefault);
+        }
+      });
+  mAPZEventState = new APZEventState(mPuppetWidget, Move(callback));
 
   return NS_OK;
 }
@@ -2010,7 +2003,7 @@ TabChild::UpdateTapState(const WidgetTouchEvent& aEvent, nsEventStatus aStatus)
   }
 
   bool currentlyTrackingTouch = (mActivePointerId >= 0);
-  if (aEvent.mMessage == NS_TOUCH_START) {
+  if (aEvent.mMessage == eTouchStart) {
     if (currentlyTrackingTouch || aEvent.touches.Length() > 1) {
       // We're tracking a possible tap for another point, or we saw a
       // touchstart for a later pointer after we canceled tracking of
@@ -2051,14 +2044,14 @@ TabChild::UpdateTapState(const WidgetTouchEvent& aEvent, nsEventStatus aStatus)
   LayoutDevicePoint currentPoint = LayoutDevicePoint(trackedTouch->mRefPoint.x, trackedTouch->mRefPoint.y);
   int64_t time = aEvent.time;
   switch (aEvent.mMessage) {
-  case NS_TOUCH_MOVE:
+  case eTouchMove:
     if (std::abs(currentPoint.x - mGestureDownPoint.x) > sDragThreshold.width ||
         std::abs(currentPoint.y - mGestureDownPoint.y) > sDragThreshold.height) {
       CancelTapTracking();
     }
     return;
 
-  case NS_TOUCH_END:
+  case eTouchEnd:
     if (!TouchManager::gPreventMouseEvents) {
       APZCCallbackHelper::DispatchSynthesizedMouseEvent(
         eMouseMove, time, currentPoint, 0, mPuppetWidget);
@@ -2068,7 +2061,7 @@ TabChild::UpdateTapState(const WidgetTouchEvent& aEvent, nsEventStatus aStatus)
         eMouseUp, time, currentPoint, 0, mPuppetWidget);
     }
     // fall through
-  case NS_TOUCH_CANCEL:
+  case eTouchCancel:
     CancelTapTracking();
     return;
 
@@ -2135,7 +2128,7 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
   APZCCallbackHelper::ApplyCallbackTransform(localEvent, aGuid,
       mPuppetWidget->GetDefaultScale());
 
-  if (localEvent.mMessage == NS_TOUCH_START && AsyncPanZoomEnabled()) {
+  if (localEvent.mMessage == eTouchStart && AsyncPanZoomEnabled()) {
     if (gfxPrefs::TouchActionEnabled()) {
       APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(mPuppetWidget,
           localEvent, aInputBlockId, mSetAllowedTouchBehaviorCallback);
@@ -2453,13 +2446,13 @@ TabChild::RecvAsyncMessage(const nsString& aMessage,
 {
   if (mTabChildGlobal) {
     nsCOMPtr<nsIXPConnectJSObjectHolder> kungFuDeathGrip(GetGlobal());
-    StructuredCloneIPCHelper helper;
-    UnpackClonedMessageDataForChild(aData, helper);
+    StructuredCloneData data;
+    UnpackClonedMessageDataForChild(aData, data);
     nsRefPtr<nsFrameMessageManager> mm =
       static_cast<nsFrameMessageManager*>(mTabChildGlobal->mMessageManager.get());
     CrossProcessCpowHolder cpows(Manager(), aCpows);
     mm->ReceiveMessage(static_cast<EventTarget*>(mTabChildGlobal), nullptr,
-                       aMessage, false, &helper, &cpows, aPrincipal, nullptr);
+                       aMessage, false, &data, &cpows, aPrincipal, nullptr);
   }
   return true;
 }
@@ -2889,14 +2882,14 @@ TabChild::SetTabId(const TabId& aTabId)
 bool
 TabChild::DoSendBlockingMessage(JSContext* aCx,
                                 const nsAString& aMessage,
-                                StructuredCloneIPCHelper& aHelper,
+                                StructuredCloneData& aData,
                                 JS::Handle<JSObject *> aCpows,
                                 nsIPrincipal* aPrincipal,
-                                nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal,
+                                nsTArray<StructuredCloneData>* aRetVal,
                                 bool aIsSync)
 {
   ClonedMessageData data;
-  if (!BuildClonedMessageDataForChild(Manager(), aHelper, data)) {
+  if (!BuildClonedMessageDataForChild(Manager(), aData, data)) {
     return false;
   }
   InfallibleTArray<CpowEntry> cpows;
@@ -2915,12 +2908,12 @@ TabChild::DoSendBlockingMessage(JSContext* aCx,
 bool
 TabChild::DoSendAsyncMessage(JSContext* aCx,
                              const nsAString& aMessage,
-                             StructuredCloneIPCHelper& aHelper,
+                             StructuredCloneData& aData,
                              JS::Handle<JSObject *> aCpows,
                              nsIPrincipal* aPrincipal)
 {
   ClonedMessageData data;
-  if (!BuildClonedMessageDataForChild(Manager(), aHelper, data)) {
+  if (!BuildClonedMessageDataForChild(Manager(), aData, data)) {
     return false;
   }
   InfallibleTArray<CpowEntry> cpows;
@@ -2965,6 +2958,21 @@ TabChild::DidComposite(uint64_t aTransactionId,
     static_cast<ClientLayerManager*>(mPuppetWidget->GetLayerManager());
 
   manager->DidComposite(aTransactionId, aCompositeStart, aCompositeEnd);
+}
+
+void
+TabChild::DidRequestComposite(const TimeStamp& aCompositeReqStart,
+                              const TimeStamp& aCompositeReqEnd)
+{
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  if (!docShell) {
+    return;
+  }
+
+  TimelineConsumers::AddMarkerForDocShell(docShell.get(),
+    "CompositeForwardTransaction", aCompositeReqStart, MarkerTracingType::START);
+  TimelineConsumers::AddMarkerForDocShell(docShell.get(),
+    "CompositeForwardTransaction", aCompositeReqEnd, MarkerTracingType::END);
 }
 
 void

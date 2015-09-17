@@ -168,13 +168,20 @@ struct AnimationProperty
   // **NOTE**: For CSS animations, we only bother setting mWinsInCascade
   // accurately for properties that we can animate on the compositor.
   // For other properties, we make it always be true.
+  // **NOTE 2**: This member is not included when comparing AnimationProperty
+  // objects for equality.
   bool mWinsInCascade;
 
   InfallibleTArray<AnimationPropertySegment> mSegments;
 
+  // NOTE: This operator does *not* compare the mWinsInCascade member.
+  // This is because AnimationProperty objects are compared when recreating
+  // CSS animations to determine if mutation observer change records need to
+  // be created or not. However, at the point when these objects are compared
+  // the mWinsInCascade will not have been set on the new objects so we ignore
+  // this member to avoid generating spurious change records.
   bool operator==(const AnimationProperty& aOther) const {
     return mProperty == aOther.mProperty &&
-           mWinsInCascade == aOther.mWinsInCascade &&
            mSegments == aOther.mSegments;
   }
   bool operator!=(const AnimationProperty& aOther) const {
@@ -245,14 +252,6 @@ public:
   // FIXME: Drop |aOwningAnimation| once we make AnimationEffects track their
   // owning animation.
   void SetTiming(const AnimationTiming& aTiming, Animation& aOwningAnimtion);
-
-  // Return the duration from the start the active interval to the point where
-  // the animation begins playback. This is zero unless the animation has
-  // a negative delay in which case it is the absolute value of the delay.
-  // This is used for setting the elapsedTime member of CSS AnimationEvents.
-  TimeDuration InitialAdvance() const {
-    return std::max(TimeDuration(), mTiming.mDelay * -1);
-  }
 
   Nullable<TimeDuration> GetLocalTime() const {
     // Since the *animation* start time is currently always zero, the local

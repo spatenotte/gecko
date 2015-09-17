@@ -558,10 +558,6 @@ pref("layers.low-precision-opacity", "1.0");
 // work harder keep scrolling smooth and memory low.
 pref("layers.max-active", 20);
 
-// Temporarily disable support for offsetX/Y to work around Google Maps bug
-// (bug 1150284)
-pref("dom.mouseEvent.offsetXY.enabled", false);
-
 pref("notification.feature.enabled", true);
 pref("dom.webnotifications.enabled", true);
 
@@ -1026,3 +1022,5 @@ pref("dom.ipc.systemMessageCPULockTimeoutSec", 30);
 pref("dom.wakelock.enabled", true);
 
 pref("dom.webcomponents.enabled", true);
+
+pref("layout.css.scroll-snap.enabled", true);

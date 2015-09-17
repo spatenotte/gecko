@@ -2923,7 +2923,8 @@ BytecodeEmitter::emitNumberOp(double dval)
 
         uint32_t u = uint32_t(ival);
         if (u < JS_BIT(16)) {
-            emitUint16Operand(JSOP_UINT16, u);
+            if (!emitUint16Operand(JSOP_UINT16, u))
+                return false;
         } else if (u < JS_BIT(24)) {
             ptrdiff_t off;
             if (!emitN(JSOP_UINT24, 3, &off))
@@ -3989,6 +3990,13 @@ BytecodeEmitter::emitDestructuringOpsArrayHelper(ParseNode* pattern, VarEmitOpti
 }
 
 bool
+BytecodeEmitter::emitComputedPropertyName(ParseNode* computedPropName)
+{
+    MOZ_ASSERT(computedPropName->isKind(PNK_COMPUTED_NAME));
+    return emitTree(computedPropName->pn_kid) && emit1(JSOP_TOID);
+}
+
+bool
 BytecodeEmitter::emitDestructuringOpsObjectHelper(ParseNode* pattern, VarEmitOption emitOption)
 {
     MOZ_ASSERT(pattern->isKind(PNK_OBJECT));
@@ -4038,8 +4046,7 @@ BytecodeEmitter::emitDestructuringOpsObjectHelper(ParseNode* pattern, VarEmitOpt
                     needsGetElem = false;
                 }
             } else {
-                MOZ_ASSERT(key->isKind(PNK_COMPUTED_NAME));
-                if (!emitTree(key->pn_kid))                       // ... RHS RHS KEY
+                if (!emitComputedPropertyName(key))               // ... RHS RHS KEY
                     return false;
             }
 
@@ -7045,8 +7052,7 @@ BytecodeEmitter::emitPropertyList(ParseNode* pn, MutableHandlePlainObject objp, 
                 isIndex = true;
             }
         } else {
-            MOZ_ASSERT(key->isKind(PNK_COMPUTED_NAME));
-            if (!emitTree(key->pn_kid))
+            if (!emitComputedPropertyName(key))
                 return false;
             isIndex = true;
         }
