@@ -437,6 +437,16 @@ CommonAnimationManager::WillRefresh(TimeStamp aTime)
   MaybeStartOrStopObservingRefreshDriver();
 }
 
+void
+CommonAnimationManager::ClearIsRunningOnCompositor(const nsIFrame* aFrame,
+                                                   nsCSSProperty aProperty)
+{
+  AnimationCollection* collection = GetAnimationCollection(aFrame);
+  if (collection) {
+    collection->ClearIsRunningOnCompositor(aProperty);
+  }
+}
+
 NS_IMPL_ISUPPORTS(AnimValuesStyleRule, nsIStyleRule)
 
 /* virtual */ void
@@ -527,8 +537,8 @@ AnimationCollection::CanAnimatePropertyOnCompositor(
     return false;
   }
   if (aProperty == eCSSProperty_transform) {
-    if (frame->Preserves3D() ||
-        frame->Preserves3DChildren()) {
+    if (frame->Combines3DTransformWithAncestors() ||
+        frame->Extend3DContext()) {
       if (shouldLog) {
         nsCString message;
         message.AppendLiteral("Gecko bug: Async animation of 'preserve-3d' transforms is not supported.  See bug 779598");
@@ -538,7 +548,7 @@ AnimationCollection::CanAnimatePropertyOnCompositor(
     }
     // Note that testing BackfaceIsHidden() is not a sufficient test for
     // what we need for animating backface-visibility correctly if we
-    // remove the above test for Preserves3DChildren(); that would require
+    // remove the above test for Extend3DContext(); that would require
     // looking at backface-visibility on descendants as well.
     if (frame->StyleDisplay()->BackfaceIsHidden()) {
       if (shouldLog) {
@@ -874,6 +884,17 @@ AnimationCollection::CanThrottleAnimation(TimeStamp aTime)
   }
 
   return true;
+}
+
+void
+AnimationCollection::ClearIsRunningOnCompositor(nsCSSProperty aProperty)
+{
+  for (Animation* anim : mAnimations) {
+    dom::KeyframeEffectReadOnly* effect = anim->GetEffect();
+    if (effect) {
+      effect->SetIsRunningOnCompositor(aProperty, false);
+    }
+  }
 }
 
 void

@@ -77,8 +77,6 @@ function BrowserElementParent() {
   Services.obs.addObserver(this, 'oop-frameloader-crashed', /* ownsWeak = */ true);
   Services.obs.addObserver(this, 'copypaste-docommand', /* ownsWeak = */ true);
   Services.obs.addObserver(this, 'ask-children-to-execute-copypaste-command', /* ownsWeak = */ true);
-  Services.obs.addObserver(this, 'frameloader-message-manager-will-change', /* ownsWeak = */ true);
-  Services.obs.addObserver(this, 'frameloader-message-manager-changed', /* ownsWeak = */ true);
 }
 
 BrowserElementParent.prototype = {
@@ -459,6 +457,8 @@ BrowserElementParent.prototype = {
   //  - caretVisible: Indicate the caret visiibility.
   //  - selectionVisible: Indicate current selection is visible or not.
   //  - selectionEditable: Indicate current selection is editable or not.
+  //  - selectedTextContent: Contains current selected text content, which is
+  //                         equivalent to the string returned by Selection.toString().
   _handleCaretStateChanged: function(data) {
     let evt = this._createEvent('caretstatechanged', data.json,
                                 /* cancelable = */ false);
@@ -1107,16 +1107,6 @@ BrowserElementParent.prototype = {
     case 'ask-children-to-execute-copypaste-command':
       if (this._isAlive() && this._frameElement == subject.wrappedJSObject) {
         this._sendAsyncMsg('copypaste-do-command', { command: data });
-      }
-      break;
-    case 'frameloader-message-manager-will-change':
-      if (this._isAlive() && subject == this._frameLoader) {
-        this._removeMessageListener();
-      }
-      break;
-    case 'frameloader-message-manager-changed':
-      if (this._isAlive() && subject == this._frameLoader) {
-        this._setupMessageListener();
       }
       break;
     default:

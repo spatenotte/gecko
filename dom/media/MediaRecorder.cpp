@@ -407,7 +407,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
 
     NS_ENSURE_TRUE(mTrackUnionStream, NS_ERROR_FAILURE);
-    mTrackUnionStream->ChangeExplicitBlockerCount(1);
+    mTrackUnionStream->Suspend();
 
     return NS_OK;
   }
@@ -418,7 +418,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
 
     NS_ENSURE_TRUE(mTrackUnionStream, NS_ERROR_FAILURE);
-    mTrackUnionStream->ChangeExplicitBlockerCount(-1);
+    mTrackUnionStream->Resume();
 
     return NS_OK;
   }
@@ -595,9 +595,17 @@ private:
 
     // Make sure the application has permission to assign AUDIO_3GPP
     if (mRecorder->mMimeType.EqualsLiteral(AUDIO_3GPP) && Check3gppPermission()) {
-      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(AUDIO_3GPP), aTrackTypes);
+      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(AUDIO_3GPP),
+                                             mRecorder->GetAudioBitrate(),
+                                             mRecorder->GetVideoBitrate(),
+                                             mRecorder->GetBitrate(),
+                                             aTrackTypes);
     } else {
-      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(""), aTrackTypes);
+      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(""),
+                                             mRecorder->GetAudioBitrate(),
+                                             mRecorder->GetVideoBitrate(),
+                                             mRecorder->GetBitrate(),
+                                             aTrackTypes);
     }
 
     if (!mEncoder) {
@@ -788,13 +796,11 @@ MediaRecorder::MediaRecorder(AudioNode& aSrcAudioNode,
     AudioNodeStream::Flags flags =
       AudioNodeStream::EXTERNAL_OUTPUT |
       AudioNodeStream::NEED_MAIN_THREAD_FINISHED;
-    mPipeStream = AudioNodeStream::Create(ctx->Graph(), engine, flags);
+    mPipeStream = AudioNodeStream::Create(ctx, engine, flags);
     AudioNodeStream* ns = aSrcAudioNode.GetStream();
     if (ns) {
       mInputPort = mPipeStream->AllocateInputPort(aSrcAudioNode.GetStream(),
-                                                  0,
-                                                  0,
-                                                  aSrcOutput);
+                                                  0, aSrcOutput);
     }
   }
   mAudioNode = &aSrcAudioNode;
@@ -967,7 +973,7 @@ MediaRecorder::Constructor(const GlobalObject& aGlobal,
   }
 
   nsRefPtr<MediaRecorder> object = new MediaRecorder(aStream, ownerWindow);
-  object->SetMimeType(aInitDict.mMimeType);
+  object->SetOptions(aInitDict);
   return object.forget();
 }
 
@@ -1003,8 +1009,31 @@ MediaRecorder::Constructor(const GlobalObject& aGlobal,
   nsRefPtr<MediaRecorder> object = new MediaRecorder(aSrcAudioNode,
                                                      aSrcOutput,
                                                      ownerWindow);
-  object->SetMimeType(aInitDict.mMimeType);
+  object->SetOptions(aInitDict);
   return object.forget();
+}
+
+void
+MediaRecorder::SetOptions(const MediaRecorderOptions& aInitDict)
+{
+  SetMimeType(aInitDict.mMimeType);
+  mAudioBitsPerSecond = aInitDict.mAudioBitsPerSecond.WasPassed() ?
+                        aInitDict.mAudioBitsPerSecond.Value() : 0;
+  mVideoBitsPerSecond = aInitDict.mVideoBitsPerSecond.WasPassed() ?
+                        aInitDict.mVideoBitsPerSecond.Value() : 0;
+  mBitsPerSecond = aInitDict.mBitsPerSecond.WasPassed() ?
+                   aInitDict.mBitsPerSecond.Value() : 0;
+  // We're not handling dynamic changes yet. Eventually we'll handle
+  // setting audio, video and/or total -- and anything that isn't set,
+  // we'll derive. Calculated versions require querying bitrates after
+  // the encoder is Init()ed. This happens only after data is
+  // available and thus requires dynamic changes.
+  //
+  // Until dynamic changes are supported, I prefer to be safe and err
+  // slightly high
+  if (aInitDict.mBitsPerSecond.WasPassed() && !aInitDict.mVideoBitsPerSecond.WasPassed()) {
+    mVideoBitsPerSecond = mBitsPerSecond;
+  }
 }
 
 nsresult

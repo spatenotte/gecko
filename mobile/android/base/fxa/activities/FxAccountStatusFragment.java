@@ -41,6 +41,7 @@ import org.mozilla.gecko.fxa.tasks.FxAccountCodeResender;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.SharedPreferencesClientsDataDelegate;
 import org.mozilla.gecko.sync.SyncConfiguration;
+import org.mozilla.gecko.sync.setup.activities.ActivityUtils;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
@@ -94,6 +95,7 @@ public class FxAccountStatusFragment
   protected PreferenceCategory accountCategory;
   protected Preference profilePreference;
   protected Preference emailPreference;
+  protected Preference manageAccountPreference;
   protected Preference authServerPreference;
 
   protected Preference needsPasswordPreference;
@@ -169,6 +171,10 @@ public class FxAccountStatusFragment
     } else {
       accountCategory.removePreference(profilePreference);
     }
+    manageAccountPreference = ensureFindPreference("manage_account");
+    if (AppConstants.MOZ_ANDROID_NATIVE_ACCOUNT_UI) {
+      accountCategory.removePreference(manageAccountPreference);
+    }
     authServerPreference = ensureFindPreference("auth_server");
 
     needsPasswordPreference = ensureFindPreference("needs_credentials");
@@ -197,6 +203,7 @@ public class FxAccountStatusFragment
     } else {
       emailPreference.setOnPreferenceClickListener(this);
     }
+    manageAccountPreference.setOnPreferenceClickListener(this);
 
     needsPasswordPreference.setOnPreferenceClickListener(this);
     needsVerificationPreference.setOnPreferenceClickListener(this);
@@ -234,8 +241,15 @@ public class FxAccountStatusFragment
 
   @Override
   public boolean onPreferenceClick(Preference preference) {
+    if (preference == manageAccountPreference) {
+      // There's no native equivalent, so no need to re-direct through an Intent filter.
+      ActivityUtils.openURLInFennec(getActivity().getApplicationContext(), "about:accounts?action=manage");
+      return true;
+    }
+
     if (preference == needsPasswordPreference) {
       final Intent intent = new Intent(FxAccountConstants.ACTION_FXA_UPDATE_CREDENTIALS);
+      intent.putExtra(FxAccountWebFlowActivity.EXTRA_ENDPOINT, FxAccountConstants.ENDPOINT_PREFERENCES);
       final Bundle extras = getExtrasForAccount();
       if (extras != null) {
         intent.putExtras(extras);
@@ -250,6 +264,7 @@ public class FxAccountStatusFragment
 
     if (preference == needsFinishMigratingPreference) {
       final Intent intent = new Intent(FxAccountConstants.ACTION_FXA_FINISH_MIGRATING);
+      intent.putExtra(FxAccountWebFlowActivity.EXTRA_ENDPOINT, FxAccountConstants.ENDPOINT_PREFERENCES);
       final Bundle extras = getExtrasForAccount();
       if (extras != null) {
         intent.putExtras(extras);
@@ -271,6 +286,7 @@ public class FxAccountStatusFragment
       // Per http://stackoverflow.com/a/8992365, this triggers a known bug with
       // the soft keyboard not being shown for the started activity. Why, Android, why?
       intent.setFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+      intent.putExtra(FxAccountWebFlowActivity.EXTRA_ENDPOINT, FxAccountConstants.ENDPOINT_PREFERENCES);
       startActivity(intent);
 
       return true;

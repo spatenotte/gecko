@@ -1029,6 +1029,7 @@
                            width: 334}, 
               React.createElement("div", {className: "panel force-menu-show"}, 
                 React.createElement(ContactDetail, {contact: fakeManyContacts[0], 
+                               getContainerCoordinates: function() { return {"top": 0, "height": 0 }; }, 
                                handleContactAction: function() {}})
               )
             )
@@ -1043,6 +1044,8 @@
              React.createElement("div", {className: "panel"}, 
                React.createElement(ContactDropdown, {blocked: false, 
                                 canEdit: true, 
+                                eventPosY: 0, 
+                                getContainerCoordinates: function() { return {"top": 0, "height": 0 }; }, 
                                 handleAction: function () {}})
              )
             ), 
@@ -1053,8 +1056,10 @@
                            width: 300}, 
              React.createElement("div", {className: "panel"}, 
                React.createElement(ContactDropdown, {blocked: true, 
-                 canEdit: false, 
-                 handleAction: function () {}})
+                                canEdit: false, 
+                                eventPosY: 0, 
+                                getContainerCoordinates: function() { return {"top": 0, "height": 0 }; }, 
+                                handleAction: function () {}})
              )
             )
           ), 
@@ -1113,6 +1118,7 @@
                                        publishStream: noop, 
                                        screenShare: { state: SCREEN_SHARE_STATES.INACTIVE, visible: true}, 
                                        settingsMenuItems: [{ id: "feedback" }], 
+                                       show: true, 
                                        video: { enabled: true, visible: true}})
                 )
               ), 
@@ -1127,6 +1133,7 @@
                                        publishStream: noop, 
                                        screenShare: { state: SCREEN_SHARE_STATES.PENDING, visible: true}, 
                                        settingsMenuItems: [{ id: "feedback" }], 
+                                       show: true, 
                                        video: { enabled: false, visible: true}})
                 )
               ), 
@@ -1141,6 +1148,7 @@
                                        publishStream: noop, 
                                        screenShare: { state: SCREEN_SHARE_STATES.ACTIVE, visible: true}, 
                                        settingsMenuItems: [{ id: "feedback" }], 
+                                       show: true, 
                                        video: { enabled: true, visible: true}})
                 )
               )

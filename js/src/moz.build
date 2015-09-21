@@ -138,6 +138,7 @@ EXPORTS.js += [
 ]
 
 UNIFIED_SOURCES += [
+    'asmjs/AsmJSCompile.cpp',
     'asmjs/AsmJSFrameIterator.cpp',
     'asmjs/AsmJSLink.cpp',
     'asmjs/AsmJSModule.cpp',
@@ -321,6 +322,7 @@ UNIFIED_SOURCES += [
     'vm/StringBuffer.cpp',
     'vm/StructuredClone.cpp',
     'vm/Symbol.cpp',
+    'vm/TaggedProto.cpp',
     'vm/Time.cpp',
     'vm/TypedArrayObject.cpp',
     'vm/TypeInference.cpp',

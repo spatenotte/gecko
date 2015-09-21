@@ -732,7 +732,7 @@ public:
     case WorkerTypeShared:
       return nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER;
     case WorkerTypeService:
-      return nsIContentPolicy::TYPE_SCRIPT;
+      return nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER;
     default:
       MOZ_ASSERT_UNREACHABLE("Invalid worker type");
       return nsIContentPolicy::TYPE_INVALID;
@@ -1275,6 +1275,13 @@ public:
   {
     AssertIsOnWorkerThread();
     return mPreferences[WORKERPREF_DOM_WORKERNOTIFICATION];
+  }
+
+  bool
+  DOMServiceWorkerNotificationEnabled() const
+  {
+    AssertIsOnWorkerThread();
+    return mPreferences[WORKERPREF_DOM_SERVICEWORKERNOTIFICATION];
   }
 
   bool
