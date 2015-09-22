@@ -6,7 +6,7 @@ const Cc = Components.classes;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 function debug2(str) {
-  dump("-*- Privacy monitor: " + str + "\n");
+  dump("-*- Permission WebIDL: " + str + "\n");
 }
 
 function PrivacyMonitor() {
@@ -25,9 +25,8 @@ PrivacyMonitor.prototype = {
                                     flags: Ci.nsIClassInfo.DOM_OBJECT}),
   
   logPermissionRequest: function logPermissionRequest(appID, typesInfo) {
-    debug2("Hellooooooooo");
+    debug2("Entered WebIDL");
     let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(appID);
-    debug2("debugdlgjbdougbdog");
 
     for (let i in typesInfo) {
       debug2("Prompting for: " + typesInfo[i].permission);
