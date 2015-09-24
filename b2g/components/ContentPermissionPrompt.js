@@ -136,10 +136,6 @@ ContentPermissionPrompt.prototype = {
 
   handleExistingPermission: function handleExistingPermission(request,
                                                               typesInfo) {
-
-    // Calling WebIDL for logging requests
-    privacyMonitor.logPermissionRequest(request.principal.appId, typesInfo);
-
     typesInfo.forEach(function(type) {
       type.action =
         Services.perms.testExactPermissionFromPrincipal(request.principal,
@@ -275,6 +271,8 @@ ContentPermissionPrompt.prototype = {
       return;
     }
 
+    // Calling WebIDL for logging requests
+    privacyMonitor.logPermissionRequest(request.principal.appId, typesInfo);
 
     if (typesInfo.length == 0) {
       request.cancel();
