@@ -806,7 +806,6 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
     ok(!classList.contains("mixedActiveBlocked"), "No MCB icon on HTTP page");
     ok(!classList.contains("mixedDisplayContent"), "No MCB icon on HTTP page");
     ok(!classList.contains("mixedDisplayContentLoadedActiveBlocked"), "No MCB icon on HTTP page");
-    ok(!classList.contains("mixedContent"), "No MCB icon on HTTP page");
   } else {
     // Make sure the identity box UI has the correct mixedcontent states and icons
     is(classList.contains("mixedActiveContent"), activeLoaded,
@@ -817,8 +816,6 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
        "identityBox has expected class for passiveLoaded && !(activeLoaded || activeBlocked)");
     is(classList.contains("mixedDisplayContentLoadedActiveBlocked"), passiveLoaded && activeBlocked,
        "identityBox has expected class for passiveLoaded && activeBlocked");
-    is (classList.contains("mixedContent"), activeBlocked || activeLoaded || passiveLoaded,
-       "identityBox has expected class for mixed content");
 
     if (activeLoaded) {
       is(identityBoxImage, "url(\"chrome://browser/skin/identity-mixed-active-loaded.svg\")",
@@ -1033,8 +1030,7 @@ function promiseNewSearchEngine(basename) {
   return new Promise((resolve, reject) => {
     info("Waiting for engine to be added: " + basename);
     let url = getRootDirectory(gTestPath) + basename;
-    Services.search.addEngine(url, Ci.nsISearchEngine.TYPE_MOZSEARCH, "",
-                              false, {
+    Services.search.addEngine(url, null, "", false, {
       onSuccess: function (engine) {
         info("Search engine added: " + basename);
         registerCleanupFunction(() => Services.search.removeEngine(engine));

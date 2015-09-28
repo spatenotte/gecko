@@ -198,9 +198,10 @@ class AutoSetHandlingSignal
 # else
 #  define R15_sig(p) ((p)->uc_mcontext.mc_r15)
 # endif
-#elif defined(XP_MACOSX)
+#elif defined(XP_DARWIN)
 # define EIP_sig(p) ((p)->uc_mcontext->__ss.__eip)
 # define RIP_sig(p) ((p)->uc_mcontext->__ss.__rip)
+# define R15_sig(p) ((p)->uc_mcontext->__ss.__pc)
 #else
 # error "Don't know how to read/write to the thread state via the mcontext_t."
 #endif
@@ -313,19 +314,27 @@ enum { REG_EIP = 14 };
 // the same as CONTEXT, but on Mac we use a different structure since we call
 // into the emulator code from a Mach exception handler rather than a
 // sigaction-style signal handler.
-#if defined(XP_MACOSX) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+#if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
 # if defined(JS_CODEGEN_X64)
 struct macos_x64_context {
     x86_thread_state64_t thread;
     x86_float_state64_t float_;
 };
 #  define EMULATOR_CONTEXT macos_x64_context
-# else
+# elif defined(JS_CODEGEN_X86)
 struct macos_x86_context {
     x86_thread_state_t thread;
     x86_float_state_t float_;
 };
 #  define EMULATOR_CONTEXT macos_x86_context
+# elif defined(JS_CODEGEN_ARM)
+struct macos_arm_context {
+    arm_thread_state_t thread;
+    arm_neon_state_t float_;
+};
+#  define EMULATOR_CONTEXT macos_arm_context
+# else
+#  error Unsupported architecture
 # endif
 #else
 # define EMULATOR_CONTEXT CONTEXT
@@ -421,7 +430,7 @@ StoreValueFromGPImm(void* addr, size_t size, int32_t imm)
     memcpy(addr, &imm, size);
 }
 
-# if !defined(XP_MACOSX)
+# if !defined(XP_DARWIN)
 MOZ_COLD static void*
 AddressOfFPRegisterSlot(CONTEXT* context, FloatRegisters::Encoding encoding)
 {
@@ -521,7 +530,7 @@ AddressOfGPRegisterSlot(EMULATOR_CONTEXT* context, Registers::Code code)
     }
     MOZ_CRASH();
 }
-# endif  // !XP_MACOSX
+# endif  // !XP_DARWIN
 #endif // JS_CODEGEN_X64
 
 MOZ_COLD static void
@@ -793,7 +802,7 @@ AsmJSFaultHandler(LPEXCEPTION_POINTERS exception)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-#elif defined(XP_MACOSX)
+#elif defined(XP_DARWIN)
 # include <mach/exc.h>
 
 static uint8_t**
@@ -803,10 +812,16 @@ ContextToPC(EMULATOR_CONTEXT* context)
     static_assert(sizeof(context->thread.__rip) == sizeof(void*),
                   "stored IP should be compile-time pointer-sized");
     return reinterpret_cast<uint8_t**>(&context->thread.__rip);
-# else
+# elif defined(JS_CPU_X86)
     static_assert(sizeof(context->thread.uts.ts32.__eip) == sizeof(void*),
                   "stored IP should be compile-time pointer-sized");
     return reinterpret_cast<uint8_t**>(&context->thread.uts.ts32.__eip);
+# elif defined(JS_CPU_ARM)
+    static_assert(sizeof(context->thread.__pc) == sizeof(void*),
+                  "stored IP should be compile-time pointer-sized");
+    return reinterpret_cast<uint8_t**>(&context->thread.__pc);
+# else
+#  error Unsupported architecture
 # endif
 }
 
@@ -852,11 +867,18 @@ HandleMachException(JSRuntime* rt, const ExceptionRequest& request)
     unsigned int float_state_count = x86_FLOAT_STATE64_COUNT;
     int thread_state = x86_THREAD_STATE64;
     int float_state = x86_FLOAT_STATE64;
-# else
+# elif defined(JS_CODEGEN_X86)
     unsigned int thread_state_count = x86_THREAD_STATE_COUNT;
     unsigned int float_state_count = x86_FLOAT_STATE_COUNT;
     int thread_state = x86_THREAD_STATE;
     int float_state = x86_FLOAT_STATE;
+# elif defined(JS_CODEGEN_ARM)
+    unsigned int thread_state_count = ARM_THREAD_STATE_COUNT;
+    unsigned int float_state_count = ARM_NEON_STATE_COUNT;
+    int thread_state = ARM_THREAD_STATE;
+    int float_state = ARM_NEON_STATE;
+# else
+#  error Unsupported architecture
 # endif
     kern_return_t kret;
     kret = thread_get_state(rtThread, thread_state,
@@ -1199,7 +1221,7 @@ JitInterruptHandler(int signum, siginfo_t* info, void* context)
 bool
 js::EnsureSignalHandlersInstalled(JSRuntime* rt)
 {
-#if defined(XP_MACOSX) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+#if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
     // On OSX, each JSRuntime gets its own handler thread.
     if (!rt->asmJSMachExceptionHandler.installed() && !rt->asmJSMachExceptionHandler.install(rt))
         return false;
@@ -1262,7 +1284,7 @@ js::EnsureSignalHandlersInstalled(JSRuntime* rt)
 # if defined(XP_WIN)
     if (!AddVectoredExceptionHandler(/* FirstHandler = */ true, AsmJSFaultHandler))
         return false;
-# elif defined(XP_MACOSX)
+# elif defined(XP_DARWIN)
     // OSX handles seg faults via the Mach exception handler above, so don't
     // install AsmJSFaultHandler.
 # else

@@ -180,7 +180,7 @@ JS_BasicObjectToString(JSContext* cx, JS::HandleObject obj);
 namespace js {
 
 JS_FRIEND_API(bool)
-ObjectClassIs(JSContext* cx, JS::HandleObject obj, ESClassValue classValue);
+GetBuiltinClass(JSContext* cx, JS::HandleObject obj, ESClassValue* classValue);
 
 JS_FRIEND_API(const char*)
 ObjectClassName(JSContext* cx, JS::HandleObject obj);
@@ -1086,9 +1086,6 @@ SetActivityCallback(JSRuntime* rt, ActivityCallback cb, void* arg);
 extern JS_FRIEND_API(const JSStructuredCloneCallbacks*)
 GetContextStructuredCloneCallbacks(JSContext* cx);
 
-extern JS_FRIEND_API(bool)
-IsContextRunningJS(JSContext* cx);
-
 typedef bool
 (* DOMInstanceClassHasProtoAtDepth)(const Class* instanceClass,
                                     uint32_t protoID, uint32_t depth);
@@ -1261,15 +1258,12 @@ inline bool DOMProxyIsShadowing(DOMProxyShadowsResult result) {
 
 /* Implemented in jsdate.cpp. */
 
-/*
- * Detect whether the internal date value is NaN.  (Because failure is
- * out-of-band for js_DateGet*)
- */
+/* Detect whether the internal date value is NaN. */
 extern JS_FRIEND_API(bool)
-DateIsValid(JSContext* cx, JSObject* obj);
+DateIsValid(JSContext* cx, JS::HandleObject obj, bool* isValid);
 
-extern JS_FRIEND_API(double)
-DateGetMsecSinceEpoch(JSContext* cx, JSObject* obj);
+extern JS_FRIEND_API(bool)
+DateGetMsecSinceEpoch(JSContext* cx, JS::HandleObject obj, double* msecSinceEpoch);
 
 } /* namespace js */
 

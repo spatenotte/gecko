@@ -20,6 +20,7 @@ const Cr = Components.results;
 Cu.import('resource://gre/modules/SettingsRequestManager.jsm');
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
+Cu.import('resource://gre/modules/AppConstants.jsm');
 
 #ifdef MOZ_WIDGET_GONK
 XPCOMUtils.defineLazyGetter(this, "libcutils", function () {
@@ -76,6 +77,12 @@ var SettingsListener = {
 };
 
 SettingsListener.init();
+
+// =================== Mono Audio ======================
+
+SettingsListener.observe('accessibility.monoaudio.enable', false, function(value) {
+  Services.prefs.setBoolPref('accessibility.monoaudio.enable', value);
+});
 
 // =================== Console ======================
 
@@ -327,7 +334,8 @@ setUpdateTrackingId();
     });
   }
 
-  syncCharPref('app.update.url');
+  syncCharPref(AppConstants.MOZ_B2GDROID ? 'app.update.url.android'
+                                         : 'app.update.url');
   syncCharPref('app.update.channel');
 })();
 

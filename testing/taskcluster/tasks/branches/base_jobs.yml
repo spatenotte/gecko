@@ -1,6 +1,6 @@
 ---
 # For complete sample of all build and test jobs,
-# see <gecko>/testing/taskcluster/tasks/job_flags.yml
+# see <gecko>/testing/taskcluster/tasks/branches/base_job_flags.yml
 
 $inherits:
   from: tasks/branches/base_job_flags.yml
@@ -98,6 +98,18 @@ builds:
     types:
       opt:
         task: tasks/builds/b2g_nexus_4_eng.yml
+  nexus-4-kk:
+    platforms:
+      - b2g
+    types:
+      opt:
+        task: tasks/builds/b2g_nexus_4_kk_user.yml
+  nexus-4-kk-eng:
+    platforms:
+      - b2g
+    types:
+      opt:
+        task: tasks/builds/b2g_nexus_4_kk_eng.yml
   nexus-5l:
     platforms:
       - b2g
@@ -118,6 +130,12 @@ builds:
         task: tasks/builds/opt_linux64.yml
       debug:
         task: tasks/builds/dbg_linux64.yml
+  linux64-st-an:
+    platforms:
+      - Linux64 Static Analysis
+    types:
+      opt:
+        task: tasks/builds/opt_linux64_st-an.yml
   macosx64:
     platforms:
       - MacOSX64

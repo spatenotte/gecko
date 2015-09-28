@@ -3376,7 +3376,6 @@ ServiceWorkerManager::FindScopeForPath(const nsACString& aScopeKey,
   return false;
 }
 
-#ifdef DEBUG
 /* static */ bool
 ServiceWorkerManager::HasScope(nsIPrincipal* aPrincipal,
                                const nsACString& aScope)
@@ -3397,7 +3396,6 @@ ServiceWorkerManager::HasScope(nsIPrincipal* aPrincipal,
 
   return data->mOrderedScopes.Contains(aScope);
 }
-#endif
 
 /* static */ void
 ServiceWorkerManager::RemoveScopeAndRegistration(ServiceWorkerRegistrationInfo* aRegistration)
@@ -3987,18 +3985,13 @@ ServiceWorkerManager::PrepareFetchEvent(const OriginAttributes& aOriginAttribute
                                         nsIDocument* aDoc,
                                         nsIInterceptedChannel* aChannel,
                                         bool aIsReload,
+                                        bool aIsSubresourceLoad,
                                         ErrorResult& aRv)
 {
   MOZ_ASSERT(aChannel);
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsISupports> serviceWorker;
-
-  bool isNavigation = false;
-  aRv = aChannel->GetIsNavigation(&isNavigation);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
 
   // if the ServiceWorker script fails to load for some reason, just resume
   // the original channel.
@@ -4007,7 +4000,7 @@ ServiceWorkerManager::PrepareFetchEvent(const OriginAttributes& aOriginAttribute
 
   nsAutoPtr<ServiceWorkerClientInfo> clientInfo;
 
-  if (!isNavigation) {
+  if (aIsSubresourceLoad) {
     MOZ_ASSERT(aDoc);
     aRv = GetDocumentController(aDoc->GetInnerWindow(), failRunnable,
                                 getter_AddRefs(serviceWorker));
@@ -4641,7 +4634,8 @@ ServiceWorkerManager::MaybeRemoveRegistration(ServiceWorkerRegistrationInfo* aRe
 {
   MOZ_ASSERT(aRegistration);
   nsRefPtr<ServiceWorkerInfo> newest = aRegistration->Newest();
-  if (!newest) {
+  if (!newest && HasScope(aRegistration->mPrincipal, aRegistration->mScope)) {
+    aRegistration->Clear();
     RemoveRegistration(aRegistration);
   }
 }

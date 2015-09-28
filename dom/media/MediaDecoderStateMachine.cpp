@@ -206,7 +206,6 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   mIsAudioPrerolling(false),
   mIsVideoPrerolling(false),
   mAudioCaptured(false),
-  mPositionChangeQueued(false),
   mAudioCompleted(false, "MediaDecoderStateMachine::mAudioCompleted"),
   mNotifyMetadataBeforeFirstFrame(false),
   mDispatchedEventToDecode(false),
@@ -931,8 +930,10 @@ MediaDecoderStateMachine::OnVideoDecoded(MediaData* aVideoSample)
           // in this case, we'll just decode forward. Bug 1026330.
           mCurrentSeek.mTarget.mType = SeekTarget::Accurate;
         }
-        if (mCurrentSeek.mTarget.mType == SeekTarget::PrevSyncPoint) {
-          // Non-precise seek; we can stop the seek at the first sample.
+        if (mCurrentSeek.mTarget.mType == SeekTarget::PrevSyncPoint ||
+            mPendingSeek.Exists()) {
+          // Non-precise seek; or a pending seek exists ; we can stop the seek
+          // at the first sample.
           Push(video, MediaData::VIDEO_DATA);
         } else {
           // We're doing an accurate seek. We still need to discard
@@ -1153,14 +1154,6 @@ void MediaDecoderStateMachine::UpdatePlaybackPosition(int64_t aTime)
   if (fragmentEnded) {
     StopPlayback();
   }
-}
-
-void MediaDecoderStateMachine::ClearPositionChangeFlag()
-{
-  NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
-  AssertCurrentThreadInMonitor();
-
-  mPositionChangeQueued = false;
 }
 
 static const char* const gMachineStateStr[] = {
@@ -2737,19 +2730,19 @@ MediaDecoderStateMachine::DropAudioUpToSeekTarget(MediaData* aSample)
              mCurrentSeek.Exists() &&
              mCurrentSeek.mTarget.mType == SeekTarget::Accurate);
 
-  CheckedInt64 startFrame = UsecsToFrames(audio->mTime,
-                                          mInfo.mAudio.mRate);
-  CheckedInt64 targetFrame = UsecsToFrames(mCurrentSeek.mTarget.mTime,
-                                           mInfo.mAudio.mRate);
-  if (!startFrame.isValid() || !targetFrame.isValid()) {
+  CheckedInt64 sampleDuration =
+    FramesToUsecs(audio->mFrames, mInfo.mAudio.mRate);
+  if (!sampleDuration.isValid()) {
     return NS_ERROR_FAILURE;
   }
-  if (startFrame.value() + audio->mFrames <= targetFrame.value()) {
+
+  if (audio->mTime + sampleDuration.value() <= mCurrentSeek.mTarget.mTime) {
     // Our seek target lies after the frames in this AudioData. Don't
     // push it onto the audio queue, and keep decoding forwards.
     return NS_OK;
   }
-  if (startFrame.value() > targetFrame.value()) {
+
+  if (audio->mTime > mCurrentSeek.mTarget.mTime) {
     // The seek target doesn't lie in the audio block just after the last
     // audio frames we've seen which were before the seek target. This
     // could have been the first audio data we've seen after seek, i.e. the
@@ -2765,23 +2758,27 @@ MediaDecoderStateMachine::DropAudioUpToSeekTarget(MediaData* aSample)
   // The seek target lies somewhere in this AudioData's frames, strip off
   // any frames which lie before the seek target, so we'll begin playback
   // exactly at the seek target.
-  NS_ASSERTION(targetFrame.value() >= startFrame.value(),
+  NS_ASSERTION(mCurrentSeek.mTarget.mTime >= audio->mTime,
                "Target must at or be after data start.");
-  NS_ASSERTION(targetFrame.value() < startFrame.value() + audio->mFrames,
+  NS_ASSERTION(mCurrentSeek.mTarget.mTime < audio->mTime + sampleDuration.value(),
                "Data must end after target.");
 
-  int64_t framesToPrune = targetFrame.value() - startFrame.value();
-  if (framesToPrune > audio->mFrames) {
+  CheckedInt64 framesToPrune =
+    UsecsToFrames(mCurrentSeek.mTarget.mTime - audio->mTime, mInfo.mAudio.mRate);
+  if (!framesToPrune.isValid()) {
+    return NS_ERROR_FAILURE;
+  }
+  if (framesToPrune.value() > audio->mFrames) {
     // We've messed up somehow. Don't try to trim frames, the |frames|
     // variable below will overflow.
     DECODER_WARN("Can't prune more frames that we have!");
     return NS_ERROR_FAILURE;
   }
-  uint32_t frames = audio->mFrames - static_cast<uint32_t>(framesToPrune);
+  uint32_t frames = audio->mFrames - static_cast<uint32_t>(framesToPrune.value());
   uint32_t channels = audio->mChannels;
   nsAutoArrayPtr<AudioDataValue> audioData(new AudioDataValue[frames * channels]);
   memcpy(audioData.get(),
-         audio->mAudioData.get() + (framesToPrune * channels),
+         audio->mAudioData.get() + (framesToPrune.value() * channels),
          frames * channels * sizeof(AudioDataValue));
   CheckedInt64 duration = FramesToUsecs(frames, mInfo.mAudio.mRate);
   if (!duration.isValid()) {
@@ -2894,14 +2891,6 @@ void MediaDecoderStateMachine::StartBuffering()
   DECODER_LOG("Playback rate: %.1lfKB/s%s download rate: %.1lfKB/s%s",
               stats.mPlaybackRate/1024, stats.mPlaybackRateReliable ? "" : " (unreliable)",
               stats.mDownloadRate/1024, stats.mDownloadRateReliable ? "" : " (unreliable)");
-}
-
-void MediaDecoderStateMachine::ScheduleStateMachineWithLockAndWakeDecoder()
-{
-  MOZ_ASSERT(OnTaskQueue());
-  ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-  DispatchAudioDecodeTaskIfNeeded();
-  DispatchVideoDecodeTaskIfNeeded();
 }
 
 void

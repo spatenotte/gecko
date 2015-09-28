@@ -1522,11 +1522,6 @@ class Mochitest(MochitestUtilsMixin):
         if not options.enableCPOWWarnings:
             browserEnv["DISABLE_UNSAFE_CPOW_WARNINGS"] = "1"
 
-        # Force use of core Xlib events on GTK3 to work around focus bug.
-        # See bug 1170342.
-        if mozinfo.info.get('toolkit') == 'gtk3':
-            browserEnv["GDK_CORE_DEVICE_EVENTS"] = "1"
-
         return browserEnv
 
     def cleanup(self, options):
@@ -2533,6 +2528,9 @@ def run_test_harness(options):
         options.runByDir = False
 
     if runner.getTestFlavor(options) == 'browser-chrome':
+        options.runByDir = True
+
+    if runner.getTestFlavor(options) == 'chrome' and (not mozinfo.info['debug']):
         options.runByDir = True
 
     if mozinfo.info.get('buildapp') == 'mulet':

@@ -1165,7 +1165,7 @@ FirstCharMatcher8bit(const char* text, uint32_t n, const char pat)
 static const char16_t*
 FirstCharMatcher16bit(const char16_t* text, uint32_t n, const char16_t pat)
 {
-#if defined(XP_MACOSX) || defined(XP_WIN)
+#if defined(XP_DARWIN) || defined(XP_WIN)
     /*
      * Performance of memchr is horrible in OSX. Windows is better,
      * but it is still better to use UnrolledMatcher.
@@ -1739,8 +1739,8 @@ js::str_lastIndexOf(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-HasSubstringAt(JSLinearString* text, JSLinearString* pat, size_t start)
+bool
+js::HasSubstringAt(JSLinearString* text, JSLinearString* pat, size_t start)
 {
     MOZ_ASSERT(start + pat->length() <= text->length());
 
@@ -2100,8 +2100,14 @@ class MOZ_STACK_CLASS StringRegExpGuard
     /* init must succeed in order to call tryFlatMatch or normalizeRegExp. */
     bool init(JSContext* cx, const CallArgs& args, bool convertVoid = false)
     {
-        if (args.length() != 0 && IsObjectWithClass(args[0], ESClass_RegExp, cx))
-            return initRegExp(cx, &args[0].toObject());
+        if (args.length() != 0) {
+            ESClassValue cls;
+            if (!GetClassOfValue(cx, args[0], &cls))
+                return false;
+
+            if (cls == ESClass_RegExp)
+                return initRegExp(cx, &args[0].toObject());
+        }
 
         if (convertVoid && !args.hasDefined(0)) {
             fm.pat_ = cx->runtime()->emptyString;
@@ -2121,9 +2127,6 @@ class MOZ_STACK_CLASS StringRegExpGuard
 
     bool initRegExp(JSContext* cx, JSObject* regexp) {
         obj_ = regexp;
-
-        MOZ_ASSERT(ObjectClassIs(obj_, ESClass_RegExp, cx));
-
         return RegExpToShared(cx, obj_, &re_);
     }
 
@@ -3861,7 +3864,11 @@ js::str_split(JSContext* cx, unsigned argc, Value* vp)
     RootedLinearString sepstr(cx);
     bool sepDefined = args.hasDefined(0);
     if (sepDefined) {
-        if (IsObjectWithClass(args[0], ESClass_RegExp, cx)) {
+        ESClassValue cls;
+        if (!GetClassOfValue(cx, args[0], &cls))
+            return false;
+
+        if (cls == ESClass_RegExp) {
             RootedObject obj(cx, &args[0].toObject());
             if (!RegExpToShared(cx, obj, &re))
                 return false;
@@ -4532,6 +4539,17 @@ js::DuplicateString(js::ExclusiveContext* cx, const char16_t* s)
     auto ret = cx->make_pod_array<char16_t>(n);
     if (!ret)
         return ret;
+    PodCopy(ret.get(), s, n);
+    return ret;
+}
+
+UniquePtr<char16_t[], JS::FreePolicy>
+js::DuplicateString(const char16_t* s)
+{
+    size_t n = js_strlen(s) + 1;
+    UniquePtr<char16_t[], JS::FreePolicy> ret(js_pod_malloc<char16_t>(n));
+    if (!ret)
+        return nullptr;
     PodCopy(ret.get(), s, n);
     return ret;
 }

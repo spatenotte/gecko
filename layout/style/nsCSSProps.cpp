@@ -224,6 +224,42 @@ nsCSSProps::AddRefTable(void)
           }
         }
       }
+
+      // Assert that CSS_PROPERTY_INTERNAL is used on properties in
+      // #ifndef CSS_PROP_LIST_EXCLUDE_INTERNAL sections of nsCSSPropList.h
+      // and on no others.
+      static nsCSSProperty nonInternalProperties[] = {
+        #define CSS_PROP(name_, id_, ...)           eCSSProperty_##id_,
+        #define CSS_PROP_SHORTHAND(name_, id_, ...) eCSSProperty_##id_,
+        #define CSS_PROP_LIST_INCLUDE_LOGICAL
+        #define CSS_PROP_LIST_EXCLUDE_INTERNAL
+        #include "nsCSSPropList.h"
+        #undef CSS_PROP_LIST_EXCLUDE_INTERNAL
+        #undef CSS_PROP_LIST_INCLUDE_LOGICAL
+        #undef CSS_PROP_SHORTHAND
+        #undef CSS_PROP
+      };
+      MOZ_ASSERT(ArrayLength(nonInternalProperties) <= eCSSProperty_COUNT);
+
+      bool found[eCSSProperty_COUNT];
+      PodArrayZero(found);
+      for (nsCSSProperty p : nonInternalProperties) {
+        MOZ_ASSERT(!nsCSSProps::PropHasFlags(p, CSS_PROPERTY_INTERNAL),
+                   "properties defined outside of #ifndef "
+                   "CSS_PROP_LIST_EXCLUDE_INTERNAL sections must not have "
+                   "the CSS_PROPERTY_INTERNAL flag");
+        found[p] = true;
+      }
+
+      for (size_t i = 0; i < ArrayLength(found); ++i) {
+        if (!found[i]) {
+          auto p = static_cast<nsCSSProperty>(i);
+          MOZ_ASSERT(nsCSSProps::PropHasFlags(p, CSS_PROPERTY_INTERNAL),
+                     "properties defined in #ifndef "
+                     "CSS_PROP_LIST_EXCLUDE_INTERNAL sections must have "
+                     "the CSS_PROPERTY_INTERNAL flag");
+        }
+      }
     }
 #endif
   }
@@ -1739,9 +1775,8 @@ const KTableValue nsCSSProps::kTextDecorationStyleKTable[] = {
 const KTableValue nsCSSProps::kTextOrientationKTable[] = {
   eCSSKeyword_mixed, NS_STYLE_TEXT_ORIENTATION_MIXED,
   eCSSKeyword_upright, NS_STYLE_TEXT_ORIENTATION_UPRIGHT,
-  eCSSKeyword_sideways_right, NS_STYLE_TEXT_ORIENTATION_SIDEWAYS_RIGHT,
-  /* eCSSKeyword_sideways_left, NS_STYLE_TEXT_ORIENTATION_SIDEWAYS_LEFT, */
-  /* eCSSKeyword_sideways, NS_STYLE_TEXT_ORIENTATION_SIDEWAYS, */
+  eCSSKeyword_sideways, NS_STYLE_TEXT_ORIENTATION_SIDEWAYS,
+  eCSSKeyword_sideways_right, NS_STYLE_TEXT_ORIENTATION_SIDEWAYS,
   eCSSKeyword_UNKNOWN, -1
 };
 
@@ -1909,6 +1944,8 @@ const KTableValue nsCSSProps::kWritingModeKTable[] = {
   eCSSKeyword_horizontal_tb, NS_STYLE_WRITING_MODE_HORIZONTAL_TB,
   eCSSKeyword_vertical_lr, NS_STYLE_WRITING_MODE_VERTICAL_LR,
   eCSSKeyword_vertical_rl, NS_STYLE_WRITING_MODE_VERTICAL_RL,
+  eCSSKeyword_sideways_lr, NS_STYLE_WRITING_MODE_SIDEWAYS_LR,
+  eCSSKeyword_sideways_rl, NS_STYLE_WRITING_MODE_SIDEWAYS_RL,
   eCSSKeyword_lr, NS_STYLE_WRITING_MODE_HORIZONTAL_TB,
   eCSSKeyword_lr_tb, NS_STYLE_WRITING_MODE_HORIZONTAL_TB,
   eCSSKeyword_rl, NS_STYLE_WRITING_MODE_HORIZONTAL_TB,
@@ -2982,3 +3019,5 @@ nsCSSProps::gPropertyUseCounter[eCSSProperty_COUNT_no_shorthands] = {
 #include "nsCSSPropList.h"
 #undef CSS_PROP_LOGICAL
 #undef CSS_PROP
+
+#include "nsCSSPropsGenerated.inc"

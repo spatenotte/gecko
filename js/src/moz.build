@@ -129,8 +129,9 @@ EXPORTS.js += [
     '../public/TrackedOptimizationInfo.h',
     '../public/TypeDecls.h',
     '../public/UbiNode.h',
+    '../public/UbiNodeBreadthFirst.h',
     '../public/UbiNodeCensus.h',
-    '../public/UbiNodeTraverse.h',
+    '../public/UbiNodePostOrder.h',
     '../public/Utility.h',
     '../public/Value.h',
     '../public/Vector.h',
@@ -437,6 +438,11 @@ elif CONFIG['JS_CODEGEN_ARM']:
     if CONFIG['JS_SIMULATOR_ARM']:
         UNIFIED_SOURCES += [
             'jit/arm/Simulator-arm.cpp'
+        ]
+    elif CONFIG['OS_ARCH'] == 'Darwin':
+        SOURCES += [
+            'jit/arm/llvm-compiler-rt/arm/aeabi_idivmod.S',
+            'jit/arm/llvm-compiler-rt/arm/aeabi_uidivmod.S',
         ]
 elif CONFIG['JS_CODEGEN_ARM64']:
     UNIFIED_SOURCES += [

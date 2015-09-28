@@ -1694,7 +1694,13 @@
     "kind": "boolean",
     "description": "Fraction of responses with a quic alt-protocol advertisement."
   },
- "HTTP_DISK_CACHE_OVERHEAD": {
+  "HTTP_CONTENT_ENCODING": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 6,
+    "description": "encoding removed: 0=unknown, 1=gzip, 2=deflate, 3=brotli"
+  },
+  "HTTP_DISK_CACHE_OVERHEAD": {
     "expires_in_version": "default",
     "kind": "exponential",
     "high": "32000000",
@@ -5308,12 +5314,6 @@
     "kind": "flag",
     "description": "Whether enablePrivilege has ever been called during the current session"
   },
-  "READ_SAVED_PING_SUCCESS": {
-    "alert_emails": ["perf-telemetry-alerts@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "boolean",
-    "description": "Successfully reading a saved ping file"
-  },
   "TOUCH_ENABLED_DEVICE": {
     "expires_in_version": "never",
     "kind": "boolean",
@@ -6492,6 +6492,54 @@
     "n_values": 15,
     "description": "Origins for getUserMedia calls (0=other, 1=HTTPS, 2=file, 3=app, 4=localhost, 5=loop, 6=privileged)",
     "releaseChannelCollection": "opt-out"
+  },
+  "WEBRTC_GET_USER_MEDIA_TYPE": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 8,
+    "description": "Type for media in getUserMedia calls (0=Camera, 1=Screen, 2=Application, 3=Window, 4=Browser, 5=Microphone, 6=AudioCapture, 7=Other)"
+  },
+  "WEBRTC_LOAD_STATE_RELAXED": {
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "100",
+    "n_buckets": "25",
+    "description": "Percentage of time spent in the Relaxed load state in calls over 30 seconds."
+  },
+  "WEBRTC_LOAD_STATE_RELAXED_SHORT": {
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "100",
+    "n_buckets": "25",
+    "description": "Percentage of time spent in the Relaxed load state in calls 5-30 seconds."
+  },
+  "WEBRTC_LOAD_STATE_NORMAL": {
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "100",
+    "n_buckets": "25",
+    "description": "Percentage of time spent in the Normal load state in calls over 30 seconds."
+  },
+  "WEBRTC_LOAD_STATE_NORMAL_SHORT": {
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "100",
+    "n_buckets": "25",
+    "description": "Percentage of time spent in the Normal load state in calls over 5-30 seconds."
+  },
+  "WEBRTC_LOAD_STATE_STRESSED": {
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "100",
+    "n_buckets": "25",
+    "description": "Percentage of time spent in the Stressed load state in calls over 30 seconds."
+  },
+  "WEBRTC_LOAD_STATE_STRESSED_SHORT": {
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "100",
+    "n_buckets": "25",
+    "description": "Percentage of time spent in the Stressed load state in calls 5-30 seconds."
   },
   "DEVTOOLS_DEBUGGER_RDP_LOCAL_TRACERDETACH_MS": {
     "expires_in_version": "never",
@@ -9333,6 +9381,12 @@
     "n_buckets": "29",
     "description": "The number of times AddIceCandidate failed on a given PeerConnection, given that ICE failed."
   },
+  "LOOP_GET_USER_MEDIA_TYPE": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 8,
+    "description": "Type for media in getUserMedia calls (0=Camera, 1=Screen, 2=Application, 3=Window, 4=Browser, 5=Microphone, 6=AudioCapture, 7=Other)"
+  },
   "PERF_MONITORING_TEST_CPU_RESCHEDULING_PROPORTION_MOVED": {
     "alert_emails": ["dteller@mozilla.com"],
     "expires_in_version": "45",
@@ -9364,6 +9418,24 @@
     "n_values": 10,
     "releaseChannelCollection": "opt-out",
     "description": "Reason for reporting the Adobe CDM to be unsupported. (1 = NOT_WINDOWS; 2 = WINDOWS_VERSION)"
+  },
+  "VIDEO_EME_REQUEST_SUCCESS_LATENCY_MS": {
+    "alert_emails": ["cpearce@mozilla.com"],
+    "expires_in_version": "50",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 60,
+    "releaseChannelCollection": "opt-out",
+    "description": "Time spent waiting for a navigator.requestMediaKeySystemAccess call to succeed."
+  },
+  "VIDEO_EME_REQUEST_FAILURE_LATENCY_MS": {
+    "alert_emails": ["cpearce@mozilla.com"],
+    "expires_in_version": "50",
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 60,
+    "releaseChannelCollection": "opt-out",
+    "description": "Time spent waiting for a navigator.requestMediaKeySystemAccess call to fail."
   },
   "FXA_CONFIGURED": {
     "alert_emails": ["fx-team@mozilla.com"],

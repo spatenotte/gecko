@@ -516,12 +516,11 @@ nsWindow::DispatchDeactivateEvent(void)
 void
 nsWindow::DispatchResized(int32_t aWidth, int32_t aHeight)
 {
-    nsIWidgetListener *listeners[] =
-        { mWidgetListener, mAttachedWidgetListener };
-    for (size_t i = 0; i < ArrayLength(listeners); ++i) {
-        if (listeners[i]) {
-            listeners[i]->WindowResized(this, aWidth, aHeight);
-        }
+    if (mWidgetListener) {
+        mWidgetListener->WindowResized(this, aWidth, aHeight);
+    }
+    if (mAttachedWidgetListener) {
+        mAttachedWidgetListener->WindowResized(this, aWidth, aHeight);
     }
 }
 
@@ -6287,7 +6286,7 @@ nsWindow::GetSurfaceForGdkDrawable(GdkDrawable* aDrawable,
         Visual* xVisual = gdk_x11_visual_get_xvisual(visual);
 
         result = new gfxXlibSurface(xDisplay, xDrawable, xVisual,
-                                    gfxIntSize(aSize.width, aSize.height));
+                                    IntSize(aSize.width, aSize.height));
     } else {
         // no visual? we must be using an xrender format.  Find a format
         // for this depth.
@@ -6305,7 +6304,7 @@ nsWindow::GetSurfaceForGdkDrawable(GdkDrawable* aDrawable,
         }
 
         result = new gfxXlibSurface(xScreen, xDrawable, pf,
-                                    gfxIntSize(aSize.width, aSize.height));
+                                    IntSize(aSize.width, aSize.height));
     }
 
     return result.forget();

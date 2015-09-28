@@ -68,6 +68,7 @@ describe("loop.OTSdkDriver", function () {
     window.OT = {
       ExceptionCodes: {
         CONNECT_FAILED: 1006,
+        TERMS_OF_SERVICE_FAILURE: 1026,
         UNABLE_TO_PUBLISH: 1500
       }
     };
@@ -1537,6 +1538,26 @@ describe("loop.OTSdkDriver", function () {
           }));
       });
 
+      describe("Unable to publish (not GetUserMedia)", function() {
+        it("should notify metrics", function() {
+          sdk.trigger("exception", {
+            code: OT.ExceptionCodes.UNABLE_TO_PUBLISH,
+            message: "Fake",
+            title: "Connect Failed"
+          });
+
+          sinon.assert.calledOnce(dispatcher.dispatch);
+          sinon.assert.calledWithExactly(dispatcher.dispatch,
+            new sharedActions.ConnectionStatus({
+              event: "sdk.exception." + OT.ExceptionCodes.UNABLE_TO_PUBLISH + ".Fake",
+              state: "starting",
+              connections: 0,
+              sendStreams: 0,
+              recvStreams: 0
+            }));
+        });
+      });
+
       describe("Unable to publish (GetUserMedia)", function() {
         it("should destroy the publisher", function() {
           sdk.trigger("exception", {
@@ -1576,6 +1597,38 @@ describe("loop.OTSdkDriver", function () {
           sinon.assert.calledWithExactly(dispatcher.dispatch,
             new sharedActions.ConnectionFailure({
               reason: FAILURE_DETAILS.UNABLE_TO_PUBLISH_MEDIA
+            }));
+        });
+      });
+
+      describe("ToS Failure", function() {
+        it("should dispatch a ConnectionFailure action", function() {
+          sdk.trigger("exception", {
+            code: OT.ExceptionCodes.TERMS_OF_SERVICE_FAILURE,
+            message: "Fake"
+          });
+
+          sinon.assert.calledTwice(dispatcher.dispatch);
+          sinon.assert.calledWithExactly(dispatcher.dispatch,
+            new sharedActions.ConnectionFailure({
+              reason: FAILURE_DETAILS.TOS_FAILURE
+            }));
+        });
+
+        it("should notify metrics", function() {
+          sdk.trigger("exception", {
+            code: OT.ExceptionCodes.TERMS_OF_SERVICE_FAILURE,
+            message: "Fake"
+          });
+
+          sinon.assert.calledTwice(dispatcher.dispatch);
+          sinon.assert.calledWithExactly(dispatcher.dispatch,
+            new sharedActions.ConnectionStatus({
+              event: "sdk.exception." + OT.ExceptionCodes.TERMS_OF_SERVICE_FAILURE,
+              state: "starting",
+              connections: 0,
+              sendStreams: 0,
+              recvStreams: 0
             }));
         });
       });

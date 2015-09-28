@@ -47,8 +47,7 @@ using JS::ubi::Concrete;
 using JS::ubi::Edge;
 using JS::ubi::EdgeRange;
 using JS::ubi::Node;
-using JS::ubi::SimpleEdge;
-using JS::ubi::SimpleEdgeVector;
+using JS::ubi::EdgeVector;
 using JS::ubi::StackFrame;
 using JS::ubi::TracerConcrete;
 using JS::ubi::TracerConcreteWithCompartment;
@@ -151,7 +150,7 @@ JS::Zone* Concrete<void>::zone() const             { MOZ_CRASH("null ubi::Node")
 JSCompartment* Concrete<void>::compartment() const { MOZ_CRASH("null ubi::Node"); }
 
 UniquePtr<EdgeRange>
-Concrete<void>::edges(JSContext*, bool) const {
+Concrete<void>::edges(JSRuntime*, bool) const {
     MOZ_CRASH("null ubi::Node");
 }
 
@@ -202,11 +201,11 @@ Node::exposeToJS() const
 }
 
 
-// A JS::CallbackTracer subclass that adds a SimpleEdge to a Vector for each
+// A JS::CallbackTracer subclass that adds a Edge to a Vector for each
 // edge on which it is invoked.
-class SimpleEdgeVectorTracer : public JS::CallbackTracer {
-    // The vector to which we add SimpleEdges.
-    SimpleEdgeVector* vec;
+class EdgeVectorTracer : public JS::CallbackTracer {
+    // The vector to which we add Edges.
+    EdgeVector* vec;
 
     // True if we should populate the edge's names.
     bool wantNames;
@@ -242,11 +241,11 @@ class SimpleEdgeVectorTracer : public JS::CallbackTracer {
             name16[i] = '\0';
         }
 
-        // The simplest code is correct! The temporary SimpleEdge takes
+        // The simplest code is correct! The temporary Edge takes
         // ownership of name; if the append succeeds, the vector element
         // then takes ownership; if the append fails, then the temporary
         // retains it, and its destructor will free it.
-        if (!vec->append(mozilla::Move(SimpleEdge(name16, Node(thing))))) {
+        if (!vec->append(mozilla::Move(Edge(name16, Node(thing))))) {
             okay = false;
             return;
         }
@@ -256,8 +255,8 @@ class SimpleEdgeVectorTracer : public JS::CallbackTracer {
     // True if no errors (OOM, say) have yet occurred.
     bool okay;
 
-    SimpleEdgeVectorTracer(JSContext* cx, SimpleEdgeVector* vec, bool wantNames)
-      : JS::CallbackTracer(JS_GetRuntime(cx)),
+    EdgeVectorTracer(JSRuntime* rt, EdgeVector* vec, bool wantNames)
+      : JS::CallbackTracer(rt),
         vec(vec),
         wantNames(wantNames),
         okay(true)
@@ -265,10 +264,10 @@ class SimpleEdgeVectorTracer : public JS::CallbackTracer {
 };
 
 
-// An EdgeRange concrete class that simply holds a vector of SimpleEdges,
+// An EdgeRange concrete class that simply holds a vector of Edges,
 // populated by the init method.
 class SimpleEdgeRange : public EdgeRange {
-    SimpleEdgeVector edges;
+    EdgeVector edges;
     size_t i;
 
     void settle() {
@@ -276,10 +275,10 @@ class SimpleEdgeRange : public EdgeRange {
     }
 
   public:
-    explicit SimpleEdgeRange(JSContext* cx) : edges(cx), i(0) { }
+    explicit SimpleEdgeRange() : edges(), i(0) { }
 
-    bool init(JSContext* cx, void* thing, JS::TraceKind kind, bool wantNames = true) {
-        SimpleEdgeVectorTracer tracer(cx, &edges, wantNames);
+    bool init(JSRuntime* rt, void* thing, JS::TraceKind kind, bool wantNames = true) {
+        EdgeVectorTracer tracer(rt, &edges, wantNames);
         js::TraceChildren(&tracer, thing, kind);
         settle();
         return tracer.okay;
@@ -298,13 +297,12 @@ TracerConcrete<Referent>::zone() const
 
 template<typename Referent>
 UniquePtr<EdgeRange>
-TracerConcrete<Referent>::edges(JSContext* cx, bool wantNames) const {
-    UniquePtr<SimpleEdgeRange, JS::DeletePolicy<SimpleEdgeRange>> range(
-      cx->new_<SimpleEdgeRange>(cx));
+TracerConcrete<Referent>::edges(JSRuntime* rt, bool wantNames) const {
+    UniquePtr<SimpleEdgeRange, JS::DeletePolicy<SimpleEdgeRange>> range(js_new<SimpleEdgeRange>());
     if (!range)
         return nullptr;
 
-    if (!range->init(cx, ptr, JS::MapTypeToTraceKind<Referent>::kind, wantNames))
+    if (!range->init(rt, ptr, JS::MapTypeToTraceKind<Referent>::kind, wantNames))
         return nullptr;
 
     return UniquePtr<EdgeRange>(range.release());
@@ -396,10 +394,10 @@ template class TracerConcrete<js::ObjectGroup>;
 namespace JS {
 namespace ubi {
 
-RootList::RootList(JSContext* cx, Maybe<AutoCheckCannotGC>& noGC, bool wantNames /* = false */)
+RootList::RootList(JSRuntime* rt, Maybe<AutoCheckCannotGC>& noGC, bool wantNames /* = false */)
   : noGC(noGC),
-    cx(cx),
-    edges(cx),
+    rt(rt),
+    edges(),
     wantNames(wantNames)
 { }
 
@@ -407,19 +405,19 @@ RootList::RootList(JSContext* cx, Maybe<AutoCheckCannotGC>& noGC, bool wantNames
 bool
 RootList::init()
 {
-    SimpleEdgeVectorTracer tracer(cx, &edges, wantNames);
+    EdgeVectorTracer tracer(rt, &edges, wantNames);
     JS_TraceRuntime(&tracer);
     if (!tracer.okay)
         return false;
-    noGC.emplace(cx->runtime());
+    noGC.emplace(rt);
     return true;
 }
 
 bool
 RootList::init(ZoneSet& debuggees)
 {
-    SimpleEdgeVector allRootEdges(cx);
-    SimpleEdgeVectorTracer tracer(cx, &allRootEdges, wantNames);
+    EdgeVector allRootEdges;
+    EdgeVectorTracer tracer(rt, &allRootEdges, wantNames);
 
     JS_TraceRuntime(&tracer);
     if (!tracer.okay)
@@ -428,8 +426,8 @@ RootList::init(ZoneSet& debuggees)
     if (!tracer.okay)
         return false;
 
-    for (SimpleEdgeVector::Range r = allRootEdges.all(); !r.empty(); r.popFront()) {
-        SimpleEdge& edge = r.front();
+    for (EdgeVector::Range r = allRootEdges.all(); !r.empty(); r.popFront()) {
+        Edge& edge = r.front();
         Zone* zone = edge.referent.zone();
         if (zone && !debuggees.has(zone))
             continue;
@@ -437,7 +435,7 @@ RootList::init(ZoneSet& debuggees)
             return false;
     }
 
-    noGC.emplace(cx->runtime());
+    noGC.emplace(rt);
     return true;
 }
 
@@ -479,20 +477,20 @@ RootList::addRoot(Node node, const char16_t* edgeName)
 
     UniquePtr<char16_t[], JS::FreePolicy> name;
     if (edgeName) {
-        name = DuplicateString(cx, edgeName);
+        name = DuplicateString(edgeName);
         if (!name)
             return false;
     }
 
-    return edges.append(mozilla::Move(SimpleEdge(name.release(), node)));
+    return edges.append(mozilla::Move(Edge(name.release(), node)));
 }
 
 const char16_t Concrete<RootList>::concreteTypeName[] = MOZ_UTF16("RootList");
 
 UniquePtr<EdgeRange>
-Concrete<RootList>::edges(JSContext* cx, bool wantNames) const {
+Concrete<RootList>::edges(JSRuntime* rt, bool wantNames) const {
     MOZ_ASSERT_IF(wantNames, get().wantNames);
-    return UniquePtr<EdgeRange>(cx->new_<PreComputedEdgeRange>(cx, get().edges));
+    return UniquePtr<EdgeRange>(js_new<PreComputedEdgeRange>(get().edges));
 }
 
 } // namespace ubi

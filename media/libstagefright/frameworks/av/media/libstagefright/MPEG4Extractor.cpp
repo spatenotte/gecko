@@ -507,12 +507,18 @@ status_t MPEG4Extractor::readMetaData() {
     CHECK_NE(err, (status_t)NO_INIT);
 
     // copy pssh data into file metadata
-    int psshsize = 0;
+    uint64_t psshsize = 0;
     for (size_t i = 0; i < mPssh.Length(); i++) {
         psshsize += 20 + mPssh[i].datalen;
     }
+    if (psshsize > kMAX_ALLOCATION) {
+        return ERROR_MALFORMED;
+    }
     if (psshsize) {
         char *buf = (char*)malloc(psshsize);
+        if (!buf) {
+            return ERROR_MALFORMED;
+        }
         char *ptr = buf;
         for (size_t i = 0; i < mPssh.Length(); i++) {
             memcpy(ptr, mPssh[i].uuid, 20); // uuid + length
@@ -4258,9 +4264,10 @@ nsTArray<MediaSource::Indice> MPEG4Source::exportIndex()
       uint32_t compositionTime;
       uint32_t duration;
       bool isSyncSample;
+      uint32_t decodeTime;
       if (mSampleTable->getMetaDataForSample(sampleIndex, &offset, &size,
                                              &compositionTime, &duration,
-                                             &isSyncSample) != OK) {
+                                             &isSyncSample, &decodeTime) != OK) {
           ALOGE("Unexpected sample table problem");
           continue;
       }
@@ -4274,6 +4281,7 @@ nsTArray<MediaSource::Indice> MPEG4Source::exportIndex()
       indice.end_composition =
           (compositionTime * 1000000ll + duration * 1000000ll) / mTimescale;
       indice.sync = isSyncSample;
+      indice.start_decode = (decodeTime * 1000000ll) / mTimescale;
       index.AppendElement(indice);
   }
 

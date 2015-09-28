@@ -2066,7 +2066,7 @@ public:
     DirectDrawInfo mDrawInfo;
 
     /* The size of the surface */
-    gfxIntSize mSize;
+    mozilla::gfx::IntSize mSize;
     /* The principal associated with the element whose surface was returned.
        If there is a surface, this will never be null. */
     nsCOMPtr<nsIPrincipal> mPrincipal;
@@ -2653,6 +2653,12 @@ public:
    */
   static bool CalculateAndSetDisplayPortMargins(nsIScrollableFrame* aScrollFrame,
                                                 RepaintMode aRepaintMode);
+
+  /**
+   * Return true if GetOrMaybeCreateDisplayPort would create a displayport.
+   */
+  static bool WantDisplayPort(const nsDisplayListBuilder* aBuilder,
+                              nsIFrame* aScrollFrame);
 
   /**
    * Get the display port for |aScrollFrame|'s content. If |aScrollFrame|

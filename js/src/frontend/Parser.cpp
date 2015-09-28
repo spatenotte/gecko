@@ -54,6 +54,7 @@ JSFunction::AutoParseUsingFunctionBox::AutoParseUsingFunctionBox(ExclusiveContex
   : fun_(cx, funbox->function()),
     oldEnv_(cx, fun_->environment())
 {
+    fun_->unsetEnvironment();
     fun_->setFunctionBox(funbox);
     funbox->computeAllowSyntax(fun_);
     funbox->computeInWith(fun_);
@@ -62,7 +63,7 @@ JSFunction::AutoParseUsingFunctionBox::AutoParseUsingFunctionBox(ExclusiveContex
 JSFunction::AutoParseUsingFunctionBox::~AutoParseUsingFunctionBox()
 {
     fun_->unsetFunctionBox();
-    fun_->setEnvironment(oldEnv_);
+    fun_->initEnvironment(oldEnv_);
 }
 
 namespace js {
@@ -651,6 +652,8 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunct
     enclosingStaticScope_(enclosingStaticScope),
     bufStart(0),
     bufEnd(0),
+    startLine(1),
+    startColumn(0),
     length(0),
     generatorKindBits_(GeneratorKindAsBits(generatorKind)),
     inGenexpLambda(false),
@@ -875,7 +878,10 @@ Parser<ParseHandler>::standaloneModule(HandleModuleObject module)
     TokenKind tt;
     if (!tokenStream.getToken(&tt, TokenStream::Operand))
         return null();
-    MOZ_ASSERT(tt == TOK_EOF);
+    if (tt != TOK_EOF) {
+        report(ParseError, false, null(), JSMSG_GARBAGE_AFTER_INPUT, "module", TokenKindToDesc(tt));
+        return null();
+    }
 
     if (!FoldConstants(context, &pn, this))
         return null();
@@ -4861,13 +4867,13 @@ Parser<FullParseHandler>::exportDeclaration()
             if (!moduleSpec)
                 return null();
 
-            if (!MatchOrInsertSemicolon(tokenStream))
+            if (!MatchOrInsertSemicolon(tokenStream, TokenStream::Operand))
                 return null();
 
             return handler.newExportFromDeclaration(begin, kid, moduleSpec);
-        } else {
-            tokenStream.ungetToken();
         }
+
+        tokenStream.ungetToken();
 
         if (!MatchOrInsertSemicolon(tokenStream, TokenStream::Operand))
             return null();
@@ -4889,28 +4895,24 @@ Parser<FullParseHandler>::exportDeclaration()
 
         if (!tokenStream.getToken(&tt))
             return null();
-        if (tt == TOK_NAME && tokenStream.currentName() == context->names().from) {
-            if (!checkUnescapedName())
-                return null();
-
-            MUST_MATCH_TOKEN(TOK_STRING, JSMSG_MODULE_SPEC_AFTER_FROM);
-
-            Node moduleSpec = stringLiteral();
-            if (!moduleSpec)
-                return null();
-
-            if (!MatchOrInsertSemicolon(tokenStream))
-                return null();
-
-            return handler.newExportFromDeclaration(begin, kid, moduleSpec);
-        } else {
+        if (tt != TOK_NAME || tokenStream.currentName() != context->names().from) {
             report(ParseError, false, null(), JSMSG_FROM_AFTER_EXPORT_STAR);
             return null();
         }
 
-        if (!MatchOrInsertSemicolon(tokenStream))
+        if (!checkUnescapedName())
             return null();
-        break;
+
+        MUST_MATCH_TOKEN(TOK_STRING, JSMSG_MODULE_SPEC_AFTER_FROM);
+
+        Node moduleSpec = stringLiteral();
+        if (!moduleSpec)
+            return null();
+
+        if (!MatchOrInsertSemicolon(tokenStream, TokenStream::Operand))
+            return null();
+
+        return handler.newExportFromDeclaration(begin, kid, moduleSpec);
       }
 
       case TOK_FUNCTION:
@@ -6703,10 +6705,15 @@ Parser<ParseHandler>::statement(YieldHandling yieldHandling, bool canHaveDirecti
         return expressionStatement(yieldHandling);
 
       case TOK_YIELD: {
+        // Don't use a ternary operator here due to obscure linker issues
+        // around using static consts in the arms of a ternary.
+        TokenStream::Modifier modifier;
+        if (yieldExpressionsSupported())
+            modifier = TokenStream::Operand;
+        else
+            modifier = TokenStream::None;
+
         TokenKind next;
-        TokenStream::Modifier modifier = yieldExpressionsSupported()
-                                         ? TokenStream::Operand
-                                         : TokenStream::None;
         if (!tokenStream.peekToken(&next, modifier))
             return null();
         if (next == TOK_COLON) {
@@ -8765,7 +8772,7 @@ Parser<ParseHandler>::arrayInitializer(YieldHandling yieldHandling)
         uint32_t index = 0;
         TokenStream::Modifier modifier = TokenStream::Operand;
         for (; ; index++) {
-            if (index == NativeObject::NELEMENTS_LIMIT) {
+            if (index >= NativeObject::MAX_DENSE_ELEMENTS_COUNT) {
                 report(ParseError, false, null(), JSMSG_ARRAY_INIT_TOO_BIG);
                 return null();
             }

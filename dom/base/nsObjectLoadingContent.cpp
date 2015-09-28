@@ -1156,7 +1156,7 @@ nsObjectLoadingContent::OnStopRequest(nsIRequest *aRequest,
     }
   }
 
-  NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
+  NS_ENSURE_TRUE(nsContentUtils::LegacyIsCallerChromeOrNativeCode(), NS_ERROR_NOT_AVAILABLE);
 
   if (aRequest != mChannel) {
     return NS_BINDING_ABORTED;
@@ -1183,7 +1183,7 @@ nsObjectLoadingContent::OnDataAvailable(nsIRequest *aRequest,
                                         nsIInputStream *aInputStream,
                                         uint64_t aOffset, uint32_t aCount)
 {
-  NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
+  NS_ENSURE_TRUE(nsContentUtils::LegacyIsCallerChromeOrNativeCode(), NS_ERROR_NOT_AVAILABLE);
 
   if (aRequest != mChannel) {
     return NS_BINDING_ABORTED;
@@ -2825,9 +2825,10 @@ nsObjectLoadingContent::ScriptRequestPluginInstance(JSContext* aCx,
   // so the ensuing expression is short-circuited.
   MOZ_ASSERT_IF(nsContentUtils::GetCurrentJSContext(),
                 aCx == nsContentUtils::GetCurrentJSContext());
-  bool callerIsContentJS = (!nsContentUtils::IsCallerChrome() &&
+  bool callerIsContentJS = (nsContentUtils::GetCurrentJSContext() &&
+                            !nsContentUtils::IsCallerChrome() &&
                             !nsContentUtils::IsCallerContentXBL() &&
-                            js::IsContextRunningJS(aCx));
+                            JS_IsRunning(aCx));
 
   nsCOMPtr<nsIContent> thisContent =
     do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));

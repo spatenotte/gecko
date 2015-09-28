@@ -100,16 +100,16 @@ Concrete<DeserializedNode>::size(mozilla::MallocSizeOf mallocSizeof) const
 
 class DeserializedEdgeRange : public EdgeRange
 {
-  SimpleEdgeVector edges;
-  size_t           i;
+  EdgeVector edges;
+  size_t     i;
 
   void settle() {
     front_ = i < edges.length() ? &edges[i] : nullptr;
   }
 
 public:
-  explicit DeserializedEdgeRange(JSContext* cx)
-    : edges(cx)
+  explicit DeserializedEdgeRange()
+    : edges()
     , i(0)
   {
     settle();
@@ -132,7 +132,7 @@ public:
       }
 
       auto referent = node.getEdgeReferent(*edgep);
-      edges.infallibleAppend(mozilla::Move(SimpleEdge(name, referent)));
+      edges.infallibleAppend(mozilla::Move(Edge(name, referent)));
     }
 
     settle();
@@ -160,10 +160,10 @@ Concrete<DeserializedNode>::allocationStack() const
 
 
 UniquePtr<EdgeRange>
-Concrete<DeserializedNode>::edges(JSContext* cx, bool) const
+Concrete<DeserializedNode>::edges(JSRuntime* rt, bool) const
 {
   UniquePtr<DeserializedEdgeRange, JS::DeletePolicy<DeserializedEdgeRange>> range(
-    js_new<DeserializedEdgeRange>(cx));
+    js_new<DeserializedEdgeRange>());
 
   if (!range || !range->init(get()))
     return nullptr;
