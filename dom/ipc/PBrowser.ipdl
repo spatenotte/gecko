@@ -331,14 +331,6 @@ parent:
     sync IsParentWindowMainWidgetVisible() returns (bool visible);
 
     /**
-     * Returns the offset of this tab from the top level window
-     * origin in device pixels.
-     *
-     * aPoint offset values in device pixels.
-     */
-    prio(high) sync GetTabOffset() returns (LayoutDeviceIntPoint aPoint);
-
-    /**
      * Gets the DPI of the screen corresponding to this browser.
      */
     sync GetDPI() returns (float value);
@@ -386,8 +378,6 @@ parent:
     SetCustomCursor(nsCString cursorData, uint32_t width, uint32_t height,
                     uint32_t stride, uint8_t format,
                     uint32_t hotspotX, uint32_t hotspotY, bool force);
-
-    SetBackgroundColor(nscolor color);
 
     /**
      * Used to set the current text of the status tooltip.

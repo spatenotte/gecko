@@ -9,7 +9,7 @@ describe("loop.OTSdkDriver", function () {
   var FAILURE_DETAILS = loop.shared.utils.FAILURE_DETAILS;
   var STREAM_PROPERTIES = loop.shared.utils.STREAM_PROPERTIES;
   var SCREEN_SHARE_STATES = loop.shared.utils.SCREEN_SHARE_STATES;
-  var CHAT_CONTENT_TYPES = loop.store.CHAT_CONTENT_TYPES;
+  var CHAT_CONTENT_TYPES = loop.shared.utils.CHAT_CONTENT_TYPES;
 
   var sandbox;
   var dispatcher, driver, mozLoop, publisher, sdk, session, sessionData, subscriber;
@@ -112,6 +112,19 @@ describe("loop.OTSdkDriver", function () {
       expect(function() {
         new loop.OTSdkDriver({dispatcher: dispatcher});
       }).to.Throw(/sdk/);
+    });
+
+    it("should set the metrics to zero", function() {
+      driver = new loop.OTSdkDriver({
+        dispatcher: dispatcher,
+        sdk: sdk
+      });
+
+      expect(driver._metrics).eql({
+        connections: 0,
+        sendStreams: 0,
+        recvStreams: 0
+      });
     });
   });
 
@@ -472,6 +485,22 @@ describe("loop.OTSdkDriver", function () {
       driver.disconnectSession();
 
       expect(subscribedEvents).eql([]);
+    });
+
+    it("should reset the metrics to zero", function() {
+      driver._metrics = {
+        connections: 1,
+        sendStreams: 2,
+        recvStreams: 3
+      };
+
+      driver.disconnectSession();
+
+      expect(driver._metrics).eql({
+        connections: 0,
+        sendStreams: 0,
+        recvStreams: 0
+      });
     });
 
     it("should dispatch a DataChannelsAvailable action with available = false", function() {

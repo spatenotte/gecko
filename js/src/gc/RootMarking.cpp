@@ -24,7 +24,6 @@
 #include "js/HashTable.h"
 #include "vm/Debugger.h"
 #include "vm/JSONParser.h"
-#include "vm/WeakMapObject.h"
 
 #include "jsgcinlines.h"
 #include "jsobjinlines.h"
@@ -413,7 +412,7 @@ BufferGrayRootsTracer::onChild(const JS::GCCellPtr& thing)
         // objects and scripts. We rely on gray root buffering for this to work,
         // but we only need to worry about uncollected dead compartments during
         // incremental GCs (when we do gray root buffering).
-        DispatchTraceKindTyped(SetMaybeAliveFunctor(), tenured, thing.kind());
+        DispatchTyped(SetMaybeAliveFunctor(), thing);
 
         if (!zone->gcGrayRoots.append(tenured))
             bufferingGrayRootsFailed = true;

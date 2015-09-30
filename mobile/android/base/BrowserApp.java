@@ -6,6 +6,7 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.annotation.RobocopTarget;
+import org.mozilla.gecko.AdjustConstants;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.DynamicToolbar.PinReason;
 import org.mozilla.gecko.DynamicToolbar.VisibilityTransition;
@@ -668,7 +669,7 @@ public class BrowserApp extends GeckoApp
                     return true;
 
                 case KeyEvent.KEYCODE_R:
-                    tab.doReload();
+                    tab.doReload(false);
                     return true;
 
                 case KeyEvent.KEYCODE_PERIOD:
@@ -861,6 +862,13 @@ public class BrowserApp extends GeckoApp
         mBrowserHealthReporter = new BrowserHealthReporter();
         mReadingListHelper = new ReadingListHelper(appContext, getProfile(), this);
         mAccountsHelper = new AccountsHelper(appContext, getProfile());
+
+        if (AppConstants.MOZ_INSTALL_TRACKING) {
+            final SharedPreferences prefs = GeckoSharedPrefs.forApp(this);
+            if (prefs.getBoolean(GeckoPreferences.PREFS_HEALTHREPORT_UPLOAD_ENABLED, true)) {
+                AdjustConstants.getAdjustHelper().onCreate(this, AdjustConstants.MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN);
+            }
+        }
 
         if (AppConstants.MOZ_ANDROID_BEAM) {
             NfcAdapter nfc = NfcAdapter.getDefaultAdapter(this);
@@ -1807,6 +1815,11 @@ public class BrowserApp extends GeckoApp
             Telemetry.addToHistogram("FENNEC_TABQUEUE_ENABLED", (TabQueueHelper.isTabQueueEnabled(BrowserApp.this) ? 1 : 0));
             if (Versions.feature16Plus) {
                 Telemetry.addToHistogram("BROWSER_IS_ASSIST_DEFAULT", (isDefaultBrowser(Intent.ACTION_ASSIST) ? 1 : 0));
+            }
+
+            final SharedPreferences sharedPrefs = GeckoSharedPrefs.forApp(BrowserApp.this);
+            if (sharedPrefs.getBoolean(GeckoPreferences.PREFS_OPEN_URLS_IN_PRIVATE, false)) {
+                Telemetry.addToHistogram("FENNEC_OPEN_URLS_IN_PRIVATE", 1);
             }
         } else if ("Updater:Launch".equals(event)) {
             handleUpdaterLaunch();
@@ -3397,7 +3410,7 @@ public class BrowserApp extends GeckoApp
         if (itemId == R.id.reload) {
             tab = Tabs.getInstance().getSelectedTab();
             if (tab != null)
-                tab.doReload();
+                tab.doReload(false);
             return true;
         }
 
@@ -3512,6 +3525,21 @@ public class BrowserApp extends GeckoApp
         }
 
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    public boolean onMenuItemLongClick(MenuItem item) {
+        if (item.getItemId() == R.id.reload) {
+            Tab tab = Tabs.getInstance().getSelectedTab();
+            if (tab != null) {
+                tab.doReload(true);
+
+                Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.MENU, "reload_force");
+            }
+            return true;
+        }
+
+        return super.onMenuItemLongClick(item);
     }
 
     public void showGuestModeDialog(final GuestModeDialog type) {

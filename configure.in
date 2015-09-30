@@ -137,6 +137,8 @@ MOZ_BUILD_ROOT=`pwd -W 2>/dev/null || pwd`
 
 MOZ_PYTHON
 
+MOZ_BUILD_BACKEND
+
 MOZ_DEFAULT_COMPILER
 
 COMPILE_ENVIRONMENT=1
@@ -4777,6 +4779,21 @@ then
     fi
 fi
 AC_SUBST(MOZ_ENABLE_DBUS)
+
+dnl ========================================================
+dnl = speech-dispatcher support
+dnl ========================================================
+
+if test "$MOZ_ENABLE_GTK" -o "$MOZ_ENABLE_QT"
+then
+    MOZ_SYNTH_SPEECHD=1
+
+    MOZ_ARG_DISABLE_BOOL(synth-speechd,
+    [  --disable-synth-speechd Disable speech-dispatcher support ],
+        MOZ_SYNTH_SPEECHD=,
+        MOZ_SYNTH_SPEECHD=1)
+fi
+AC_SUBST(MOZ_SYNTH_SPEECHD)
 
 dnl ========================================================
 dnl = Enable Android History instead of Places

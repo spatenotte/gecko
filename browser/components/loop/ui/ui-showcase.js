@@ -27,6 +27,7 @@
   var DesktopPendingConversationView = loop.conversationViews.PendingConversationView;
   var OngoingConversationView = loop.conversationViews.OngoingConversationView;
   var DirectCallFailureView = loop.conversationViews.DirectCallFailureView;
+  var DesktopRoomEditContextView = loop.roomViews.DesktopRoomEditContextView;
   var RoomFailureView = loop.roomViews.RoomFailureView;
   var DesktopRoomConversationView = loop.roomViews.DesktopRoomConversationView;
 
@@ -35,6 +36,7 @@
   var UnsupportedBrowserView  = loop.webapp.UnsupportedBrowserView;
   var UnsupportedDeviceView   = loop.webapp.UnsupportedDeviceView;
   var StandaloneRoomView      = loop.standaloneRoomViews.StandaloneRoomView;
+  var StandaloneHandleUserAgentView = loop.standaloneRoomViews.StandaloneHandleUserAgentView;
 
   // 3. Shared components
   var ConversationToolbar = loop.shared.views.ConversationToolbar;
@@ -96,7 +98,7 @@
 
     sendTextChatMessage: function(actionData) {
       dispatcher.dispatch(new loop.shared.actions.ReceivedTextChatMessage({
-        contentType: loop.store.CHAT_CONTENT_TYPES.TEXT,
+        contentType: loop.shared.utils.CHAT_CONTENT_TYPES.TEXT,
         message: actionData.message,
         receivedTimestamp: actionData.sentTimestamp
       }));
@@ -407,40 +409,40 @@
   textChatStore.setStoreState({textChatEnabled: true});
 
   dispatcher.dispatch(new sharedActions.SendTextChatMessage({
-    contentType: loop.store.CHAT_CONTENT_TYPES.TEXT,
+    contentType: loop.shared.utils.CHAT_CONTENT_TYPES.TEXT,
     message: "Rheet!",
     sentTimestamp: "2015-06-23T22:21:45.590Z"
   }));
   dispatcher.dispatch(new sharedActions.ReceivedTextChatMessage({
-    contentType: loop.store.CHAT_CONTENT_TYPES.TEXT,
+    contentType: loop.shared.utils.CHAT_CONTENT_TYPES.TEXT,
     message: "Hello",
     receivedTimestamp: "2015-06-23T23:24:45.590Z"
   }));
   dispatcher.dispatch(new sharedActions.SendTextChatMessage({
-    contentType: loop.store.CHAT_CONTENT_TYPES.TEXT,
+    contentType: loop.shared.utils.CHAT_CONTENT_TYPES.TEXT,
     message: "Nowforareallylongwordwithoutspacesorpunctuationwhichshouldcause" +
     "linewrappingissuesifthecssiswrong",
     sentTimestamp: "2015-06-23T22:23:45.590Z"
   }));
   dispatcher.dispatch(new sharedActions.SendTextChatMessage({
-    contentType: loop.store.CHAT_CONTENT_TYPES.TEXT,
+    contentType: loop.shared.utils.CHAT_CONTENT_TYPES.TEXT,
     message: "Check out this menu from DNA Pizza:" +
     " http://example.com/DNA/pizza/menu/lots-of-different-kinds-of-pizza/" +
     "%8D%E0%B8%88%E0%B8%A1%E0%B8%A3%E0%8D%E0%B8%88%E0%B8%A1%E0%B8%A3%E0%",
     sentTimestamp: "2015-06-23T22:23:45.590Z"
   }));
   dispatcher.dispatch(new sharedActions.ReceivedTextChatMessage({
-    contentType: loop.store.CHAT_CONTENT_TYPES.TEXT,
+    contentType: loop.shared.utils.CHAT_CONTENT_TYPES.TEXT,
     message: "That avocado monkey-brains pie sounds tasty!",
     receivedTimestamp: "2015-06-23T22:25:45.590Z"
   }));
   dispatcher.dispatch(new sharedActions.SendTextChatMessage({
-    contentType: loop.store.CHAT_CONTENT_TYPES.TEXT,
+    contentType: loop.shared.utils.CHAT_CONTENT_TYPES.TEXT,
     message: "What time should we meet?",
     sentTimestamp: "2015-06-23T22:27:45.590Z"
   }));
   dispatcher.dispatch(new sharedActions.ReceivedTextChatMessage({
-    contentType: loop.store.CHAT_CONTENT_TYPES.TEXT,
+    contentType: loop.shared.utils.CHAT_CONTENT_TYPES.TEXT,
     message: "8:00 PM",
     receivedTimestamp: "2015-06-23T22:27:45.590Z"
   }));
@@ -1395,6 +1397,23 @@
               )
             ), 
 
+            React.createElement(FramedExample, {height: 278.6, 
+                           onContentsRendered: invitationRoomStore.activeRoomStore.forcedUpdate, 
+                           summary: "Desktop room Edit Context w/Error", 
+                           width: 298}, 
+              React.createElement("div", {className: "fx-embedded room-invitation-overlay"}, 
+                React.createElement(DesktopRoomEditContextView, {
+                  dispatcher: dispatcher, 
+                  error: {}, 
+                  mozLoop: navigator.mozLoop, 
+                  onClose: function(){}, 
+                  roomData: {}, 
+                  savingContext: false, 
+                  show: true}
+                  )
+              )
+            ), 
+
             React.createElement(FramedExample, {dashed: true, 
                            height: 394, 
                            onContentsRendered: desktopRoomStoreLoading.activeRoomStore.forcedUpdate, 
@@ -1493,6 +1512,21 @@
                   onCallTerminated: function(){}, 
                   remotePosterUrl: "sample-img/video-screen-remote.png", 
                   roomStore: desktopRemoteFaceMuteRoomStore})
+              )
+            )
+          ), 
+
+          React.createElement(Section, {name: "StandaloneHandleUserAgentView"}, 
+            React.createElement(FramedExample, {
+              cssClass: "standalone", 
+              dashed: true, 
+              height: 483, 
+              summary: "Standalone Room Handle Join in Firefox", 
+              width: 644}, 
+              React.createElement("div", {className: "standalone"}, 
+                React.createElement(StandaloneHandleUserAgentView, {
+                  activeRoomStore: readyRoomStore, 
+                  dispatcher: dispatcher})
               )
             )
           ), 
