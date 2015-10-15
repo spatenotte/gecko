@@ -68,19 +68,19 @@ public:
   Pledge& operator = (const Pledge&) = delete;
 
   template<typename OnSuccessType>
-  void Then(OnSuccessType aOnSuccess)
+  void Then(OnSuccessType&& aOnSuccess)
   {
-    Then(aOnSuccess, [](ErrorType&){});
+    Then(Forward<OnSuccessType>(aOnSuccess), [](ErrorType&){});
   }
 
   template<typename OnSuccessType, typename OnFailureType>
-  void Then(OnSuccessType aOnSuccess, OnFailureType aOnFailure)
+  void Then(OnSuccessType&& aOnSuccess, OnFailureType&& aOnFailure)
   {
     class Functors : public FunctorsBase
     {
     public:
-      Functors(OnSuccessType& aOnSuccess, OnFailureType& aOnFailure)
-        : mOnSuccess(aOnSuccess), mOnFailure(aOnFailure) {}
+      Functors(OnSuccessType&& aOnSuccess, OnFailureType&& aOnFailure)
+        : mOnSuccess(Move(aOnSuccess)), mOnFailure(Move(aOnFailure)) {}
 
       void Succeed(ValueType& result)
       {
@@ -94,8 +94,8 @@ public:
       OnSuccessType mOnSuccess;
       OnFailureType mOnFailure;
     };
-    mFunctors = new Functors(aOnSuccess, aOnFailure);
-
+    mFunctors = new Functors(Forward<OnSuccessType>(aOnSuccess),
+                             Forward<OnFailureType>(aOnFailure));
     if (mDone) {
       if (!mRejected) {
         mFunctors->Succeed(mValue);
@@ -186,7 +186,7 @@ template<typename OnRunType>
 class LambdaRunnable : public nsRunnable
 {
 public:
-  explicit LambdaRunnable(OnRunType& aOnRun) : mOnRun(aOnRun) {}
+  explicit LambdaRunnable(OnRunType&& aOnRun) : mOnRun(Move(aOnRun)) {}
 private:
   NS_IMETHODIMP
   Run()
@@ -198,16 +198,16 @@ private:
 
 template<typename OnRunType>
 LambdaRunnable<OnRunType>*
-NewRunnableFrom(OnRunType aOnRun)
+NewRunnableFrom(OnRunType&& aOnRun)
 {
-  return new LambdaRunnable<OnRunType>(aOnRun);
+  return new LambdaRunnable<OnRunType>(Forward<OnRunType>(aOnRun));
 }
 
 template<typename OnRunType>
 class LambdaTask : public Task
 {
 public:
-  explicit LambdaTask(OnRunType& aOnRun) : mOnRun(aOnRun) {}
+  explicit LambdaTask(OnRunType&& aOnRun) : mOnRun(Move(aOnRun)) {}
 private:
   void
   Run()
@@ -219,9 +219,9 @@ private:
 
 template<typename OnRunType>
 LambdaTask<OnRunType>*
-NewTaskFrom(OnRunType aOnRun)
+NewTaskFrom(OnRunType&& aOnRun)
 {
-  return new LambdaTask<OnRunType>(aOnRun);
+  return new LambdaTask<OnRunType>(Forward<OnRunType>(aOnRun));
 }
 
 /* media::CoatCheck - There and back again. Park an object in exchange for an id.
@@ -320,6 +320,41 @@ private:
     return ++counter;
   };
   nsAutoTArray<Element, 3> mElements;
+};
+
+/* media::Refcountable - Add threadsafe ref-counting to something that isn't.
+ *
+ * Often, reference counting is the most practical way to share an object with
+ * another thread without imposing lifetime restrictions, even if there's
+ * otherwise no concurrent access happening on the object.  For instance, an
+ * algorithm on another thread may find it more expedient to modify a passed-in
+ * object, rather than pass expensive copies back and forth.
+ *
+ * Lists in particular often aren't ref-countable, yet are expensive to copy,
+ * e.g. nsTArray<nsRefPtr<Foo>>. Refcountable can be used to make such objects
+ * (or owning smart-pointers to such objects) refcountable.
+ *
+ * Technical limitation: A template specialization is needed for types that take
+ * a constructor. Please add below (ScopedDeletePtr covers a lot of ground though).
+ */
+
+template<typename T>
+class Refcountable : public T
+{
+public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Refcountable<T>)
+private:
+  ~Refcountable<T>() {}
+};
+
+template<typename T>
+class Refcountable<ScopedDeletePtr<T>> : public ScopedDeletePtr<T>
+{
+public:
+  explicit Refcountable<ScopedDeletePtr<T>>(T* aPtr) : ScopedDeletePtr<T>(aPtr) {}
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Refcountable<T>)
+private:
+  ~Refcountable<ScopedDeletePtr<T>>() {}
 };
 
 } // namespace media

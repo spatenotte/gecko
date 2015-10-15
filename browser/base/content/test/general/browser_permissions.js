@@ -2,7 +2,7 @@
  * Test the Permissions section in the Control Center.
  */
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 const PERMISSIONS_PAGE = "http://example.com/browser/browser/base/content/test/general/permissions.html";
 var {SitePermissions} = Cu.import("resource:///modules/SitePermissions.jsm", {});
 
@@ -29,6 +29,11 @@ add_task(function* testMainViewVisible() {
 
   gIdentityHandler._identityBox.click();
   ok(is_hidden(emptyLabel), "List of permissions is not empty");
+
+  let labelText = SitePermissions.getPermissionLabel("install");
+  let labels = permissionsList.querySelectorAll(".identity-popup-permission-label");
+  is(labels.length, 1, "One permission visible in main view");
+  is(labels[0].textContent, labelText, "Correct value");
 
   let menulists = permissionsList.querySelectorAll("menulist");
   is(menulists.length, 1, "One permission visible in main view");

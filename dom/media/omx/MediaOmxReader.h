@@ -70,8 +70,6 @@ public:
   MediaOmxReader(AbstractMediaDecoder* aDecoder);
   ~MediaOmxReader();
 
-  virtual nsresult Init(MediaDecoderReader* aCloneDonor);
-
 protected:
   virtual void NotifyDataArrivedInternal(uint32_t aLength, int64_t aOffset) override;
 public:
@@ -97,8 +95,6 @@ public:
     return mHasVideo;
   }
 
-  virtual void ReleaseMediaResources();
-
   virtual nsRefPtr<MediaDecoderReader::MetadataPromise> AsyncReadMetadata() override;
 
   virtual nsRefPtr<SeekPromise>
@@ -120,6 +116,8 @@ private:
   class ProcessCachedDataTask;
   class NotifyDataArrivedRunnable;
 
+  virtual void ReleaseMediaResourcesInternal() override;
+
   bool IsShutdown() {
     MutexAutoLock lock(mShutdownMutex);
     return mIsShutdown;
@@ -128,6 +126,8 @@ private:
   int64_t ProcessCachedData(int64_t aOffset);
 
   already_AddRefed<AbstractMediaDecoder> SafeGetDecoder();
+
+  NotifyDataArrivedFilter mFilter;
 };
 
 } // namespace mozilla

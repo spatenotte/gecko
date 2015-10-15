@@ -121,7 +121,7 @@ typedef void (*FreeTransferStructuredCloneOp)(uint32_t tag, JS::TransferableOwne
 // Increment this when anything at all changes in the serialization format.
 // (Note that this does not need to be bumped for Transferable-only changes,
 // since they are never saved to persistent storage.)
-#define JS_STRUCTURED_CLONE_VERSION 5
+#define JS_STRUCTURED_CLONE_VERSION 6
 
 struct JSStructuredCloneCallbacks {
     ReadStructuredCloneOp read;
@@ -195,17 +195,20 @@ class JS_PUBLIC_API(JSAutoStructuredCloneBuffer) {
     void clear(const JSStructuredCloneCallbacks* optionalCallbacks=nullptr, void* closure=nullptr);
 
     // Copy some memory. It will be automatically freed by the destructor.
-    bool copy(const uint64_t* data, size_t nbytes, uint32_t version=JS_STRUCTURED_CLONE_VERSION);
+    bool copy(const uint64_t* data, size_t nbytes, uint32_t version=JS_STRUCTURED_CLONE_VERSION,
+              const JSStructuredCloneCallbacks* callbacks=nullptr, void* closure=nullptr);
 
     // Adopt some memory. It will be automatically freed by the destructor.
     // data must have been allocated by the JS engine (e.g., extracted via
     // JSAutoStructuredCloneBuffer::steal).
-    void adopt(uint64_t* data, size_t nbytes, uint32_t version=JS_STRUCTURED_CLONE_VERSION);
+    void adopt(uint64_t* data, size_t nbytes, uint32_t version=JS_STRUCTURED_CLONE_VERSION,
+               const JSStructuredCloneCallbacks* callbacks=nullptr, void* closure=nullptr);
 
     // Release the buffer and transfer ownership to the caller. The caller is
     // responsible for calling JS_ClearStructuredClone or feeding the memory
     // back to JSAutoStructuredCloneBuffer::adopt.
-    void steal(uint64_t** datap, size_t* nbytesp, uint32_t* versionp=nullptr);
+    void steal(uint64_t** datap, size_t* nbytesp, uint32_t* versionp=nullptr,
+               const JSStructuredCloneCallbacks** callbacks=nullptr, void** closure=nullptr);
 
     // Abandon ownership of any transferable objects stored in the buffer,
     // without freeing the buffer itself. Useful when copying the data out into
@@ -235,9 +238,6 @@ class JS_PUBLIC_API(JSAutoStructuredCloneBuffer) {
 #define JS_SCERR_RECURSION 0
 #define JS_SCERR_TRANSFERABLE 1
 #define JS_SCERR_DUP_TRANSFERABLE 2
-
-JS_PUBLIC_API(void)
-JS_SetStructuredCloneCallbacks(JSRuntime* rt, const JSStructuredCloneCallbacks* callbacks);
 
 JS_PUBLIC_API(bool)
 JS_ReadUint32Pair(JSStructuredCloneReader* r, uint32_t* p1, uint32_t* p2);

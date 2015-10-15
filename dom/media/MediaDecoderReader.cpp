@@ -62,13 +62,11 @@ public:
   size_t mSize;
 };
 
-MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder,
-                                       TaskQueue* aBorrowedTaskQueue)
+MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder)
   : mAudioCompactor(mAudioQueue)
   , mDecoder(aDecoder)
-  , mTaskQueue(aBorrowedTaskQueue ? aBorrowedTaskQueue
-                                  : new TaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK),
-                                                  /* aSupportsTailDispatch = */ true))
+  , mTaskQueue(new TaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK),
+                             /* aSupportsTailDispatch = */ true))
   , mWatchManager(this, mTaskQueue)
   , mTimer(new MediaTimer())
   , mBuffered(mTaskQueue, TimeIntervals(), "MediaDecoderReader::mBuffered (Canonical)")
@@ -78,7 +76,6 @@ MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder,
   , mIgnoreAudioOutputFormat(false)
   , mHitAudioDecodeError(false)
   , mShutdown(false)
-  , mTaskQueueIsBorrowed(!!aBorrowedTaskQueue)
   , mAudioDiscontinuity(false)
   , mVideoDiscontinuity(false)
 {
@@ -256,22 +253,11 @@ MediaDecoderReader::AsyncReadMetadata()
   typedef ReadMetadataFailureReason Reason;
 
   MOZ_ASSERT(OnTaskQueue());
-  mDecoder->GetReentrantMonitor().AssertNotCurrentThreadIn();
   DECODER_LOG("MediaDecoderReader::AsyncReadMetadata");
-
-  if (IsWaitingMediaResources()) {
-    return MetadataPromise::CreateAndReject(Reason::WAITING_FOR_RESOURCES, __func__);
-  }
 
   // Attempt to read the metadata.
   nsRefPtr<MetadataHolder> metadata = new MetadataHolder();
   nsresult rv = ReadMetadata(&metadata->mInfo, getter_Transfers(metadata->mTags));
-
-  // Reading metadata can cause us to discover that we need resources (a hardware
-  // resource initialized but not yet ready for use).
-  if (IsWaitingMediaResources()) {
-    return MetadataPromise::CreateAndReject(Reason::WAITING_FOR_RESOURCES, __func__);
-  }
 
   // We're not waiting for anything. If we didn't get the metadata, that's an
   // error.
@@ -385,7 +371,7 @@ MediaDecoderReader::RequestAudioData()
     // waiting in this while loop since it somehow prevents audio EOS from
     // coming in gstreamer 1.x when there is still video buffer waiting to be
     // consumed. (|mVideoSinkBufferCount| > 0)
-    if (AudioQueue().GetSize() == 0 && mTaskQueue) {
+    if (AudioQueue().GetSize() == 0) {
       RefPtr<nsIRunnable> task(new ReRequestAudioTask(this));
       mTaskQueue->Dispatch(task.forget());
       return p;
@@ -436,22 +422,10 @@ MediaDecoderReader::Shutdown()
 
   nsRefPtr<ShutdownPromise> p;
 
-  // Spin down the task queue if necessary. We wait until BreakCycles to null
-  // out mTaskQueue, since otherwise any remaining tasks could crash when they
-  // invoke OnTaskQueue().
-  if (mTaskQueue && !mTaskQueueIsBorrowed) {
-    // If we own our task queue, shutdown ends when the task queue is done.
-    p = mTaskQueue->BeginShutdown();
-  } else {
-    // If we don't own our task queue, we resolve immediately (though
-    // asynchronously).
-    p = ShutdownPromise::CreateAndResolve(true, __func__);
-  }
-
   mTimer = nullptr;
   mDecoder = nullptr;
 
-  return p;
+  return mTaskQueue->BeginShutdown();
 }
 
 } // namespace mozilla

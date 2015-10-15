@@ -118,8 +118,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
                   this._renderJoinButton()
               }
             </div>
-            <ToSView
-              dispatcher={this.props.dispatcher} />
+            <ToSView dispatcher={this.props.dispatcher} />
             <p className="mozilla-logo" />
           </div>
         </div>
@@ -159,6 +158,8 @@ loop.standaloneRoomViews = (function(mozL10n) {
         case FAILURE_DETAILS.TOS_FAILURE:
           return mozL10n.get("tos_failure_message",
             { clientShortname: mozL10n.get("clientShortname2") });
+        case FAILURE_DETAILS.ICE_FAILED:
+          return mozL10n.get("rooms_ice_failure_message");
         default:
           return mozL10n.get("status_error");
       }
@@ -310,6 +311,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
                       onClick={this.props.joinRoom}>
                 {mozL10n.get("rooms_room_join_label")}
               </button>
+              <ToSView dispatcher={this.props.dispatcher} />
             </div>
           );
         }
@@ -414,22 +416,6 @@ loop.standaloneRoomViews = (function(mozL10n) {
     }
   });
 
-  var StandaloneRoomFooter = React.createClass({
-    propTypes: {
-      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired
-    },
-
-    render: function() {
-      return (
-        <footer className="rooms-footer">
-          <div className="footer-logo" />
-          <ToSView
-            dispatcher={this.props.dispatcher} />
-        </footer>
-      );
-    }
-  });
-
   var StandaloneRoomView = React.createClass({
     mixins: [
       Backbone.Events,
@@ -484,10 +470,16 @@ loop.standaloneRoomViews = (function(mozL10n) {
     componentWillUpdate: function(nextProps, nextState) {
       if (this.state.roomState !== ROOM_STATES.READY &&
           nextState.roomState === ROOM_STATES.READY) {
-        this.setTitle(mozL10n.get("standalone_title_with_room_name", {
-          roomName: nextState.roomName || this.state.roomName,
-          clientShortname: mozL10n.get("clientShortname2")
-        }));
+        var roomName = nextState.roomName || this.state.roomName;
+
+        if (roomName) {
+          this.setTitle(mozL10n.get("standalone_title_with_room_name", {
+            roomName: roomName,
+            clientShortname: mozL10n.get("clientShortname2")
+          }));
+        } else {
+          this.setTitle(mozL10n.get("clientShortname2"));
+        }
       }
 
       if (this.state.roomState !== ROOM_STATES.MEDIA_WAIT &&
@@ -666,16 +658,26 @@ loop.standaloneRoomViews = (function(mozL10n) {
               audio={{enabled: !this.state.audioMuted,
                       visible: this._roomIsActive()}}
               dispatcher={this.props.dispatcher}
-              enableHangup={this._roomIsActive()}
               hangup={this.leaveRoom}
-              hangupButtonLabel={mozL10n.get("rooms_leave_button_label")}
               publishStream={this.publishStream}
               show={true}
               video={{enabled: !this.state.videoMuted,
                       visible: this._roomIsActive()}} />
+            <StandaloneMozLogo dispatcher={this.props.dispatcher}/>
           </sharedViews.MediaLayoutView>
-          <StandaloneRoomFooter dispatcher={this.props.dispatcher} />
         </div>
+      );
+    }
+  });
+
+  var StandaloneMozLogo = React.createClass({
+    propTypes: {
+      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired
+    },
+
+    render: function() {
+      return (
+        <div className="standalone-moz-logo" />
       );
     }
   });
@@ -720,7 +722,6 @@ loop.standaloneRoomViews = (function(mozL10n) {
     StandaloneHandleUserAgentView: StandaloneHandleUserAgentView,
     StandaloneRoomControllerView: StandaloneRoomControllerView,
     StandaloneRoomFailureView: StandaloneRoomFailureView,
-    StandaloneRoomFooter: StandaloneRoomFooter,
     StandaloneRoomHeader: StandaloneRoomHeader,
     StandaloneRoomInfoArea: StandaloneRoomInfoArea,
     StandaloneRoomView: StandaloneRoomView,

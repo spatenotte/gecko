@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* globals focusManager, CSSPropertyList, domUtils */
-
 /**
  * Basic use:
  * let spanToEdit = document.getElementById("somespan");
@@ -94,6 +92,9 @@ Cu.import("resource://gre/modules/devtools/shared/event-emitter.js");
  *      defaults to false
  *    {Boolean} trimOutput: Should the returned string be trimmed?
  *      defaults to true
+ *    {Boolean} preserveTextStyles: If true, do not copy text-related styles
+ *              from `element` to the new input.
+ *      defaults to false
  */
 function editableField(options) {
   return editableItem(options, function(element, event) {
@@ -206,6 +207,9 @@ function InplaceEditor(options, event) {
   this.contentType = options.contentType || CONTENT_TYPES.PLAIN_TEXT;
   this.property = options.property;
   this.popup = options.popup;
+  this.preserveTextStyles = options.preserveTextStyles === undefined
+                          ? false
+                          : !!options.preserveTextStyles;
 
   this._onBlur = this._onBlur.bind(this);
   this._onKeyPress = this._onKeyPress.bind(this);
@@ -285,8 +289,9 @@ InplaceEditor.prototype = {
     this.input.inplaceEditor = this;
     this.input.classList.add("styleinspector-propertyeditor");
     this.input.value = this.initial;
-
-    copyTextStyles(this.elt, this.input);
+    if (!this.preserveTextStyles) {
+      copyTextStyles(this.elt, this.input);
+    }
   },
 
   /**

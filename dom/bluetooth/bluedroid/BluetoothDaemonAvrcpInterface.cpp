@@ -483,13 +483,12 @@ public:
   { }
 
   nsresult
-  operator () (nsString& aArg1, unsigned long& aArg2) const
+  operator () (BluetoothAddress& aArg1, unsigned long& aArg2) const
   {
     DaemonSocketPDU& pdu = GetPDU();
 
     /* Read address */
-    nsresult rv = UnpackPDU(
-      pdu, UnpackConversion<BluetoothAddress, nsAString>(aArg1));
+    nsresult rv = UnpackPDU(pdu, aArg1);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -739,40 +738,13 @@ BluetoothDaemonAvrcpModule::VolumeChangeNtf(
     UnpackPDUInitOp(aPDU));
 }
 
-// Init operator class for PassthroughCmdNotification
-class BluetoothDaemonAvrcpModule::PassthroughCmdInitOp final
-  : private PDUInitOp
-{
-public:
-  PassthroughCmdInitOp(DaemonSocketPDU& aPDU)
-    : PDUInitOp(aPDU)
-  { }
-
-  nsresult
-  operator () (int& aArg1, int& aArg2) const
-  {
-    DaemonSocketPDU& pdu = GetPDU();
-
-    nsresult rv = UnpackPDU(pdu, UnpackConversion<uint8_t, int>(aArg1));
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    rv = UnpackPDU(pdu, UnpackConversion<uint8_t, int>(aArg2));
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    WarnAboutTrailingData();
-    return NS_OK;
-  }
-};
-
 void
 BluetoothDaemonAvrcpModule::PassthroughCmdNtf(
   const DaemonSocketPDUHeader& aHeader, DaemonSocketPDU& aPDU)
 {
   PassthroughCmdNotification::Dispatch(
     &BluetoothAvrcpNotificationHandler::PassthroughCmdNotification,
-    PassthroughCmdInitOp(aPDU));
+    UnpackPDUInitOp(aPDU));
 }
 #endif
 

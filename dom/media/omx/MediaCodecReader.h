@@ -27,6 +27,8 @@
 #include <ui/Fence.h>
 #endif
 
+#include "MP3FrameParser.h"
+
 namespace android {
 struct ALooper;
 struct AMessage;
@@ -57,13 +59,6 @@ class MediaCodecReader : public MediaOmxCommonReader
 public:
   MediaCodecReader(AbstractMediaDecoder* aDecoder);
   virtual ~MediaCodecReader();
-
-  // Initializes the reader, returns NS_OK on success, or NS_ERROR_FAILURE
-  // on failure.
-  virtual nsresult Init(MediaDecoderReader* aCloneDonor);
-
-  // Release media resources they should be released in dormant state
-  virtual void ReleaseMediaResources();
 
   // Destroys the decoding state. The reader cannot be made usable again.
   // This is different from ReleaseMediaResources() as Shutdown() is
@@ -436,6 +431,12 @@ private:
     FenceHandle mReleaseFence;
   };
   nsTArray<ReleaseItem> mPendingReleaseItems;
+
+  NotifyDataArrivedFilter mFilter;
+
+private:
+  // Release media resources they should be released in dormant state
+  virtual void ReleaseMediaResourcesInternal() override;
 };
 
 } // namespace mozilla

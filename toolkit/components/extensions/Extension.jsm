@@ -38,6 +38,7 @@ Cu.import("resource://gre/modules/ExtensionManagement.jsm");
 // in browser/, mobile/, or b2g/.
 ExtensionManagement.registerScript("chrome://extensions/content/ext-alarms.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-backgroundPage.js");
+ExtensionManagement.registerScript("chrome://extensions/content/ext-cookies.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-notifications.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-i18n.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-idle.js");
@@ -47,6 +48,7 @@ ExtensionManagement.registerScript("chrome://extensions/content/ext-webNavigatio
 ExtensionManagement.registerScript("chrome://extensions/content/ext-webRequest.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-storage.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-test.js");
+ExtensionManagement.registerScript("chrome://extensions/content/ext-bookmarks.js");
 
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 var {
@@ -774,6 +776,10 @@ Extension.prototype = {
 
   hasPermission(perm) {
     return this.permissions.has(perm);
+  },
+
+  get name() {
+    return this.localize(this.manifest.name);
   },
 };
 

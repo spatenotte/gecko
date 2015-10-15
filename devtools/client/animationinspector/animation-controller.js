@@ -3,12 +3,11 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* globals ViewHelpers, Task, AnimationsPanel, promise, EventEmitter,
-   AnimationsFront */
+/* globals AnimationsPanel */
 
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/Task.jsm");
 var { loader, require } = Cu.import("resource://gre/modules/devtools/shared/Loader.jsm");
@@ -90,7 +89,9 @@ var getServerTraits = Task.async(function*(target) {
     { name: "hasTargetNode", actor: "domwalker",
       method: "getNodeFromActor" },
     { name: "hasSetCurrentTimes", actor: "animations",
-      method: "setCurrentTimes" }
+      method: "setCurrentTimes" },
+    { name: "hasGetFrames", actor: "animationplayer",
+      method: "getFrames" }
   ];
 
   let traits = {};

@@ -38,7 +38,7 @@ public:
 
   virtual MediaDecoder* Clone() override;
   virtual MediaDecoderStateMachine* CreateStateMachine() override;
-  virtual nsresult Load(nsIStreamListener**, MediaDecoder*) override;
+  virtual nsresult Load(nsIStreamListener**) override;
   virtual media::TimeIntervals GetSeekable() override;
   media::TimeIntervals GetBuffered() override;
 
@@ -65,10 +65,6 @@ public:
   void SetInitialDuration(int64_t aDuration);
   void SetMediaSourceDuration(double aDuration, MSRangeRemovalAction aAction);
   double GetMediaSourceDuration();
-
-#ifdef MOZ_EME
-  virtual nsresult SetCDMProxy(CDMProxy* aProxy) override;
-#endif
 
   MediaSourceDemuxer* GetDemuxer()
   {

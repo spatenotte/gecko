@@ -10,7 +10,7 @@
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/StructuredCloneHelper.h"
+#include "mozilla/dom/StructuredCloneHolder.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/Maybe.h"
 #include "nsCycleCollectionParticipant.h"
@@ -40,10 +40,6 @@
 #include "nsISupportsPrimitives.h"
 #include "nsIWebNavigation.h"
 #include "nsIXPConnect.h"
-
-#ifdef MOZ_ENABLE_PROFILER_SPS
-#include "nsIProfiler.h"
-#endif
 
 // The maximum allowed number of concurrent timers per page.
 #define MAX_PAGE_TIMERS 10000
@@ -198,7 +194,7 @@ private:
 
 class ConsoleRunnable : public nsRunnable
                       , public WorkerFeature
-                      , public StructuredCloneHelperInternal
+                      , public StructuredCloneHolderBase
 {
 public:
   explicit ConsoleRunnable(Console* aConsole)
@@ -211,8 +207,8 @@ public:
   virtual
   ~ConsoleRunnable()
   {
-    // Shutdown the StructuredCloneHelperInternal class.
-    Shutdown();
+    // Clear the StructuredCloneHolderBase class.
+    Clear();
   }
 
   bool
@@ -352,10 +348,10 @@ protected:
   RunConsole(JSContext* aCx, nsPIDOMWindow* aOuterWindow,
              nsPIDOMWindow* aInnerWindow) = 0;
 
-  virtual JSObject* ReadCallback(JSContext* aCx,
-                                 JSStructuredCloneReader* aReader,
-                                 uint32_t aTag,
-                                 uint32_t aIndex) override
+  virtual JSObject* CustomReadHandler(JSContext* aCx,
+                                      JSStructuredCloneReader* aReader,
+                                      uint32_t aTag,
+                                      uint32_t aIndex) override
   {
     AssertIsOnMainThread();
 
@@ -378,9 +374,9 @@ protected:
     return nullptr;
   }
 
-  virtual bool WriteCallback(JSContext* aCx,
-                             JSStructuredCloneWriter* aWriter,
-                             JS::Handle<JSObject*> aObj) override
+  virtual bool CustomWriteHandler(JSContext* aCx,
+                                  JSStructuredCloneWriter* aWriter,
+                                  JS::Handle<JSObject*> aObj) override
   {
     nsRefPtr<Blob> blob;
     if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, aObj, blob)) &&
@@ -826,23 +822,6 @@ Console::TimeStamp(JSContext* aCx, const JS::Handle<JS::Value> aData)
   if (aData.isString() && !data.AppendElement(aData, fallible)) {
     return;
   }
-
-#ifdef MOZ_ENABLE_PROFILER_SPS
-  if (aData.isString() && NS_IsMainThread()) {
-    if (!mProfiler) {
-      mProfiler = do_GetService("@mozilla.org/tools/profiler;1");
-    }
-    if (mProfiler) {
-      bool active = false;
-      if (NS_SUCCEEDED(mProfiler->IsActive(&active)) && active) {
-        nsAutoJSString stringValue;
-        if (stringValue.init(aCx, aData)) {
-          mProfiler->AddMarker(NS_ConvertUTF16toUTF8(stringValue).get());
-        }
-      }
-    }
-  }
-#endif
 
   Method(aCx, MethodTimeStamp, NS_LITERAL_STRING("timeStamp"), data);
 }

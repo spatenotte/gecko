@@ -4,11 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global promise, PromisesPanel, PromisesFront, DevToolsUtils */
+/* global PromisesPanel */
 
 "use strict";
 
-const { utils: Cu } = Components;
+var { utils: Cu } = Components;
 const { loader, require } =
   Cu.import("resource://gre/modules/devtools/shared/Loader.jsm", {});
 

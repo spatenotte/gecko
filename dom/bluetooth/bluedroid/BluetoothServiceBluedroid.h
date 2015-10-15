@@ -8,6 +8,7 @@
 #define mozilla_dom_bluetooth_bluedroid_BluetoothServiceBluedroid_h
 
 #include "BluetoothCommon.h"
+#include "BluetoothHashKeys.h"
 #include "BluetoothInterface.h"
 #include "BluetoothService.h"
 #include "nsDataHashtable.h"
@@ -176,6 +177,52 @@ public:
   ReplyTovCardListing(Blob* aBlob,
                       uint16_t aPhonebookSize,
                       BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToMapFolderListing(long aMasId,
+                          const nsAString& aFolderlists,
+                          BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToMapMessagesListing(BlobParent* aBlobParent,
+                            BlobChild* aBlobChild,
+                            long aMasId,
+                            bool aNewMessage,
+                            const nsAString& aTimestamp,
+                            int aSize,
+                            BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToMapMessagesListing(long aMasId,
+                            Blob* aBlob,
+                            bool aNewMessage,
+                            const nsAString& aTimestamp,
+                            int aSize,
+                            BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToMapGetMessage(BlobParent* aBlobParent,
+                       BlobChild* aBlobChild,
+                       long aMasId,
+                       BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToMapGetMessage(Blob* aBlob,
+                       long aMasId,
+                       BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToMapSetMessageStatus(long aMasId,
+                             bool aStatus,
+                             BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToMapSendMessage(
+    long aMasId, bool aStatus, BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToMapMessageUpdate(
+    long aMasId, bool aStatus, BluetoothReplyRunnable* aRunnable);
 
   virtual void
   AnswerWaitingCall(BluetoothReplyRunnable* aRunnable);
@@ -388,7 +435,7 @@ public:
     const BluetoothProperty* aProperties) override;
 
   virtual void RemoteDevicePropertiesNotification(
-    BluetoothStatus aStatus, const nsAString& aBdAddr,
+    BluetoothStatus aStatus, const BluetoothAddress& aBdAddr,
     int aNumProperties, const BluetoothProperty* aProperties) override;
 
   virtual void DeviceFoundNotification(
@@ -396,21 +443,21 @@ public:
 
   virtual void DiscoveryStateChangedNotification(bool aState) override;
 
-  virtual void PinRequestNotification(const nsAString& aRemoteBdAddr,
-                                      const nsAString& aBdName,
+  virtual void PinRequestNotification(const BluetoothAddress& aRemoteBdAddr,
+                                      const BluetoothRemoteName& aBdName,
                                       uint32_t aCod) override;
-  virtual void SspRequestNotification(const nsAString& aRemoteBdAddr,
-                                      const nsAString& aBdName,
+  virtual void SspRequestNotification(const BluetoothAddress& aRemoteBdAddr,
+                                      const BluetoothRemoteName& aBdName,
                                       uint32_t aCod,
                                       BluetoothSspVariant aPairingVariant,
                                       uint32_t aPasskey) override;
 
   virtual void BondStateChangedNotification(
-    BluetoothStatus aStatus, const nsAString& aRemoteBdAddr,
+    BluetoothStatus aStatus, const BluetoothAddress& aRemoteBdAddr,
     BluetoothBondState aState) override;
-  virtual void AclStateChangedNotification(BluetoothStatus aStatus,
-                                           const nsAString& aRemoteBdAddr,
-                                           bool aState) override;
+  virtual void AclStateChangedNotification(
+    BluetoothStatus aStatus, const BluetoothAddress& aRemoteBdAddr,
+    BluetoothAclState aState) override;
 
   virtual void DutModeRecvNotification(uint16_t aOpcode,
                                        const uint8_t* aBuf,
@@ -439,12 +486,12 @@ protected:
   static void NextBluetoothProfileController();
 
   // Adapter properties
-  nsString mBdAddress;
+  BluetoothAddress mBdAddress;
   nsString mBdName;
   bool mEnabled;
   bool mDiscoverable;
   bool mDiscovering;
-  nsTArray<nsString> mBondedAddresses;
+  nsTArray<BluetoothAddress> mBondedAddresses;
 
   // Backend error recovery
   bool mIsRestart;
@@ -465,7 +512,7 @@ protected:
   nsTArray<GetDeviceRequest> mGetDeviceRequests;
 
   // <address, name> mapping table for remote devices
-  nsDataHashtable<nsStringHashKey, nsString> mDeviceNameMap;
+  nsDataHashtable<BluetoothAddressHashKey, nsString> mDeviceNameMap;
 
   // Arrays for SDP operations
   nsTArray<GetRemoteServiceRecordRequest> mGetRemoteServiceRecordArray;

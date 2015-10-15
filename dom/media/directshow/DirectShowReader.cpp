@@ -56,13 +56,6 @@ DirectShowReader::~DirectShowReader()
 #endif
 }
 
-nsresult
-DirectShowReader::Init(MediaDecoderReader* aCloneDonor)
-{
-  MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
-  return NS_OK;
-}
-
 // Try to parse the MP3 stream to make sure this is indeed an MP3, get the
 // estimated duration of the stream, and find the offset of the actual MP3
 // frames in the stream, as DirectShow doesn't like large ID3 sections.
@@ -408,18 +401,22 @@ DirectShowReader::NotifyDataArrivedInternal(uint32_t aLength, int64_t aOffset)
     return;
   }
 
-  nsRefPtr<MediaByteBuffer> bytes = mDecoder->GetResource()->MediaReadAt(aOffset, aLength);
-  NS_ENSURE_TRUE_VOID(bytes);
-  mMP3FrameParser.Parse(bytes->Elements(), aLength, aOffset);
-  if (!mMP3FrameParser.IsMP3()) {
-    return;
-  }
+  IntervalSet<int64_t> intervals = mFilter.NotifyDataArrived(aLength, aOffset);
+  for (const auto& interval : intervals) {
+    nsRefPtr<MediaByteBuffer> bytes =
+      mDecoder->GetResource()->MediaReadAt(interval.mStart, interval.Length());
+    NS_ENSURE_TRUE_VOID(bytes);
+    mMP3FrameParser.Parse(bytes->Elements(), interval.Length(), interval.mStart);
+    if (!mMP3FrameParser.IsMP3()) {
+      return;
+    }
 
-  int64_t duration = mMP3FrameParser.GetDuration();
-  if (duration != mDuration) {
-    MOZ_ASSERT(mDecoder);
-    mDuration = duration;
-    mDecoder->DispatchUpdateEstimatedMediaDuration(mDuration);
+    int64_t duration = mMP3FrameParser.GetDuration();
+    if (duration != mDuration) {
+      MOZ_ASSERT(mDecoder);
+      mDuration = duration;
+      mDecoder->DispatchUpdateEstimatedMediaDuration(mDuration);
+    }
   }
 }
 

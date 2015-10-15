@@ -354,9 +354,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(Promise)
   if (tmp->IsBlack()) {
-    if (tmp->mResult.isObject()) {
-      JS::ExposeObjectToActiveJS(&(tmp->mResult.toObject()));
-    }
+    JS::ExposeValueToActiveJS(tmp->mResult);
     if (tmp->mAllocationStack) {
       JS::ExposeObjectToActiveJS(tmp->mAllocationStack);
     }
@@ -615,6 +613,7 @@ Promise::CreateFunction(JSContext* aCx, Promise* aPromise, int32_t aTask)
     return nullptr;
   }
 
+  JS::ExposeValueToActiveJS(promiseObj);
   js::SetFunctionNativeReserved(obj, SLOT_PROMISE, promiseObj);
   js::SetFunctionNativeReserved(obj, SLOT_DATA, JS::Int32Value(aTask));
 
@@ -642,6 +641,7 @@ Promise::CreateThenableFunction(JSContext* aCx, Promise* aPromise, uint32_t aTas
     return nullptr;
   }
 
+  JS::ExposeValueToActiveJS(promiseObj);
   js::SetFunctionNativeReserved(obj, SLOT_PROMISE, promiseObj);
 
   return obj;
@@ -1231,8 +1231,7 @@ Promise::MaybeReportRejected()
     NS_WARNING("!!! Trying to report rejected Promise after MainThread shutdown");
   }
   if (mainThread) {
-    nsRefPtr<AsyncErrorReporter> r =
-      new AsyncErrorReporter(CycleCollectedJSRuntime::Get()->Runtime(), xpcReport);
+    nsRefPtr<AsyncErrorReporter> r = new AsyncErrorReporter(xpcReport);
     mainThread->Dispatch(r.forget(), NS_DISPATCH_NORMAL);
   }
 }
@@ -1619,8 +1618,8 @@ PromiseWorkerProxy::CleanProperties()
   mWorkerPromise = nullptr;
   mWorkerPrivate = nullptr;
 
-  // Shutdown the StructuredCloneHelperInternal class.
-  Shutdown();
+  // Clear the StructuredCloneHolderBase class.
+  Clear();
 }
 
 bool
@@ -1692,7 +1691,7 @@ PromiseWorkerProxy::RunCallback(JSContext* aCx,
     return;
   }
 
-  // The |aValue| is written into the StructuredCloneHelperInternal.
+  // The |aValue| is written into the StructuredCloneHolderBase.
   if (!Write(aCx, aValue)) {
     JS_ClearPendingException(aCx);
     MOZ_ASSERT(false, "cannot serialize the value with the StructuredCloneAlgorithm!");
@@ -1757,10 +1756,10 @@ PromiseWorkerProxy::CleanUp(JSContext* aCx)
 }
 
 JSObject*
-PromiseWorkerProxy::ReadCallback(JSContext* aCx,
-                                 JSStructuredCloneReader* aReader,
-                                 uint32_t aTag,
-                                 uint32_t aIndex)
+PromiseWorkerProxy::CustomReadHandler(JSContext* aCx,
+                                      JSStructuredCloneReader* aReader,
+                                      uint32_t aTag,
+                                      uint32_t aIndex)
 {
   if (NS_WARN_IF(!mCallbacks)) {
     return nullptr;
@@ -1770,9 +1769,9 @@ PromiseWorkerProxy::ReadCallback(JSContext* aCx,
 }
 
 bool
-PromiseWorkerProxy::WriteCallback(JSContext* aCx,
-                                  JSStructuredCloneWriter* aWriter,
-                                  JS::Handle<JSObject*> aObj)
+PromiseWorkerProxy::CustomWriteHandler(JSContext* aCx,
+                                       JSStructuredCloneWriter* aWriter,
+                                       JS::Handle<JSObject*> aObj)
 {
   if (NS_WARN_IF(!mCallbacks)) {
     return false;

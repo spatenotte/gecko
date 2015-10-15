@@ -130,7 +130,7 @@ public:
     AllocPProcessHangMonitorChild(Transport* aTransport,
                                   ProcessId aOtherProcess) override;
 
-    virtual bool RecvSetProcessSandbox() override;
+    virtual bool RecvSetProcessSandbox(const MaybeFileDesc& aBroker) override;
 
     PBackgroundChild*
     AllocPBackgroundChild(Transport* aTransport, ProcessId aOtherProcess)
@@ -203,6 +203,12 @@ public:
                                          const bool& aDumpAllTraces,
                                          const FileDescriptor& aGCLog,
                                          const FileDescriptor& aCCLog) override;
+
+    virtual PWebBrowserPersistDocumentChild* AllocPWebBrowserPersistDocumentChild(PBrowserChild* aBrowser, const uint64_t& aOuterWindowID) override;
+    virtual bool RecvPWebBrowserPersistDocumentConstructor(PWebBrowserPersistDocumentChild *aActor,
+                                                           PBrowserChild *aBrowser,
+                                                           const uint64_t& aOuterWindowID) override;
+    virtual bool DeallocPWebBrowserPersistDocumentChild(PWebBrowserPersistDocumentChild* aActor) override;
 
     virtual bool
     RecvDataStoreNotify(const uint32_t& aAppId, const nsString& aName,
@@ -453,6 +459,7 @@ public:
     virtual POfflineCacheUpdateChild* AllocPOfflineCacheUpdateChild(
             const URIParams& manifestURI,
             const URIParams& documentURI,
+            const PrincipalInfo& aLoadingPrincipalInfo,
             const bool& stickDocument,
             const TabId& aTabId) override;
     virtual bool

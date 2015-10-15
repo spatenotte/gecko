@@ -13,6 +13,36 @@ loop.shared.views = (function(_, mozL10n) {
   var SCREEN_SHARE_STATES = loop.shared.utils.SCREEN_SHARE_STATES;
 
   /**
+   * Hang-up control button.
+   *
+   * Required props:
+   * - {Function} action  Function to be executed on click.
+   * - {String}   title   Tooltip functionality.
+   */
+  var HangUpControlButton = React.createClass({displayName: "HangUpControlButton",
+    mixins: [
+      React.addons.PureRenderMixin
+    ],
+
+    propTypes: {
+      action: React.PropTypes.func.isRequired,
+      title: React.PropTypes.string
+    },
+
+    handleClick: function() {
+      this.props.action();
+    },
+
+    render: function() {
+      return (
+          React.createElement("button", {className: "btn btn-hangup", 
+                  onClick: this.handleClick, 
+                  title: this.props.title})
+      );
+    }
+  });
+
+  /**
    * Media control button.
    *
    * Required props:
@@ -120,10 +150,12 @@ loop.shared.views = (function(_, mozL10n) {
 
     _handleShareTabs: function() {
       this._startScreenShare("browser");
+      this.hideDropdownMenu();
     },
 
     _handleShareWindows: function() {
       this._startScreenShare("window");
+      this.hideDropdownMenu();
     },
 
     _getTitle: function() {
@@ -163,7 +195,7 @@ loop.shared.views = (function(_, mozL10n) {
         React.createElement("div", null, 
           React.createElement("button", {className: screenShareClasses, 
                   onClick: this.handleClick, 
-                  ref: "menu-button", 
+                  ref: "anchor", 
                   title: this._getTitle()}, 
             isActive ? null : React.createElement("span", {className: "chevron"})
           ), 
@@ -203,11 +235,48 @@ loop.shared.views = (function(_, mozL10n) {
     },
 
     /**
-     * Show or hide the settings menu
+     * Reposition Menu if cropped
+     *
+     * Added to reposition the menu if it is cropped on the left side because of
+     * a long text string. This function measures how much the menu is cropped
+     * on the left or right and adjusts the coordinates so the menu isn't cropped.
+     * Also, sets the left style to auto, to prevent complexity in calculations
+     *
+     * The dropdownmenu mixin needs to be revamped, along with all components
+     * using dropdown menus. Components should be utilizing a global function
+     * for menu positions and it should be consistent throughout.
+     *
      */
-    handleClick: function(event) {
-      event.preventDefault();
-      this.toggleDropdownMenu();
+    _repositionMenu: function() {
+      if (this.refs.menu && this.state.showMenu) {
+        var menuNode = this.refs.menu && this.refs.menu.getDOMNode();
+
+        if (menuNode) {
+          // Amount of pixels that the dropdown needs to stay away from the edges
+          // of the page body. Copied from the mixin.
+          var boundOffset = 4;
+          var menuNodeRect = menuNode.getBoundingClientRect();
+          var menuComputedStyle = window.getComputedStyle(menuNode);
+          var documentBody = this.getDOMNode().ownerDocument.body;
+          var bodyRect = documentBody.getBoundingClientRect();
+          var menuLeft = parseFloat(menuNodeRect.left);
+          var menuRight = parseFloat(menuNodeRect.right);
+          var bodyRight = parseFloat(bodyRect.right);
+
+          menuNode.style.left = "auto";
+
+          // If menu is too close or cropped on left, move right
+          if (menuLeft < -boundOffset) {
+            menuNode.style.right =
+              (parseFloat(menuComputedStyle.right) + menuLeft - boundOffset) + "px";
+          }
+          // If menu is too close or cropped on right, move left
+          if (menuRight > bodyRight - boundOffset) {
+            menuNode.style.right =
+              (parseFloat(menuComputedStyle.right) + (menuRight - bodyRight) + boundOffset) + "px";
+          }
+        }
+      }
     },
 
     /**
@@ -339,7 +408,7 @@ loop.shared.views = (function(_, mozL10n) {
         audio: {enabled: true, visible: true},
         screenShare: {state: SCREEN_SHARE_STATES.INACTIVE, visible: false},
         settingsMenuItems: null,
-        enableHangup: true
+        showHangup: true
       };
     },
 
@@ -352,14 +421,13 @@ loop.shared.views = (function(_, mozL10n) {
     propTypes: {
       audio: React.PropTypes.object.isRequired,
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
-      enableHangup: React.PropTypes.bool,
       hangup: React.PropTypes.func.isRequired,
-      hangupButtonLabel: React.PropTypes.string,
       mozLoop: React.PropTypes.object,
       publishStream: React.PropTypes.func.isRequired,
       screenShare: React.PropTypes.object,
       settingsMenuItems: React.PropTypes.array,
       show: React.PropTypes.bool.isRequired,
+      showHangup: React.PropTypes.bool,
       video: React.PropTypes.object.isRequired
     },
 
@@ -436,10 +504,6 @@ loop.shared.views = (function(_, mozL10n) {
       }.bind(this), 6000);
     },
 
-    _getHangupButtonLabel: function() {
-      return this.props.hangupButtonLabel || mozL10n.get("hangup_button_caption2");
-    },
-
     render: function() {
       if (!this.props.show) {
         return null;
@@ -450,20 +514,21 @@ loop.shared.views = (function(_, mozL10n) {
         "conversation-toolbar": true,
         "idle": this.state.idle
       });
+      var showButtons = this.props.video.visible || this.props.audio.visible;
       var mediaButtonGroupCssClasses = cx({
         "conversation-toolbar-media-btn-group-box": true,
-        "hide": (!this.props.video.visible && !this.props.audio.visible)
+        "hide": !showButtons
       });
       return (
         React.createElement("ul", {className: conversationToolbarCssClasses}, 
+        
+          this.props.showHangup && showButtons ?
           React.createElement("li", {className: "conversation-toolbar-btn-box btn-hangup-entry"}, 
-            React.createElement("button", {className: "btn btn-hangup", 
-                    disabled: !this.props.enableHangup, 
-                    onClick: this.handleClickHangup, 
-                    title: mozL10n.get("hangup_button_title")}, 
-              this._getHangupButtonLabel()
-            )
-          ), 
+            React.createElement(HangUpControlButton, {action: this.handleClickHangup, 
+                                 title: mozL10n.get("rooms_leave_button_label")})
+          ) : null, 
+        
+
           React.createElement("li", {className: "conversation-toolbar-btn-box"}, 
             React.createElement("div", {className: mediaButtonGroupCssClasses}, 
                 React.createElement(MediaControlButton, {action: this.handleToggleVideo, 
@@ -1074,7 +1139,6 @@ loop.shared.views = (function(_, mozL10n) {
                this.state.localMediaAboslutelyPositioned ?
                 this.renderLocalVideo() : null, 
                this.props.children
-
             ), 
             React.createElement("div", {className: screenShareStreamClasses}, 
               React.createElement(MediaView, {displayAvatar: false, 

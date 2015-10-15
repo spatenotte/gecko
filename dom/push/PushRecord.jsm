@@ -19,8 +19,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
                                   "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
-                                  "resource://gre/modules/BrowserUtils.jsm");
 
 this.EXPORTED_SYMBOLS = ["PushRecord"];
 
@@ -52,8 +50,15 @@ function PushRecord(props) {
 
 PushRecord.prototype = {
   setQuota(suggestedQuota) {
-    this.quota = (!isNaN(suggestedQuota) && suggestedQuota >= 0) ?
-                 suggestedQuota : prefs.get("maxQuotaPerSubscription");
+    if (!isNaN(suggestedQuota) && suggestedQuota >= 0) {
+      this.quota = suggestedQuota;
+    } else {
+      this.resetQuota();
+    }
+  },
+
+  resetQuota() {
+    this.quota = prefs.get("maxQuotaPerSubscription");
   },
 
   updateQuota(lastVisit) {
@@ -163,21 +168,18 @@ PushRecord.prototype = {
   },
 
   /**
-   * Returns the push permission state for the principal associated with
-   * this registration.
-   */
-  pushPermission() {
-    return Services.perms.testExactPermissionFromPrincipal(
-           this.principal, "push");
-  },
-
-  /**
    * Indicates whether the registration can deliver push messages to its
    * associated service worker.
    */
   hasPermission() {
-    let permission = this.pushPermission();
+    let permission = Services.perms.testExactPermissionFromPrincipal(
+      this.principal, "desktop-notification");
     return permission == Ci.nsIPermissionManager.ALLOW_ACTION;
+  },
+
+  quotaChanged() {
+    return this.getLastVisit()
+      .then(lastVisit => lastVisit > this.lastPush);
   },
 
   quotaApplies() {
@@ -218,7 +220,7 @@ Object.defineProperties(PushRecord.prototype, {
           // Allow tests to omit origin attributes.
           url += this.originAttributes;
         }
-        principal = BrowserUtils.principalFromOrigin(url);
+        principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(url);
         principals.set(this, principal);
       }
       return principal;

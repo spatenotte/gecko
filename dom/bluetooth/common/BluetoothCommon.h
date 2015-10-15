@@ -255,6 +255,8 @@ extern bool gBluetoothDebugFlag;
 #define MAP_GET_MESSAGE_REQ_ID               "mapgetmessagereq"
 #define MAP_SET_MESSAGE_STATUS_REQ_ID        "mapsetmessagestatusreq"
 #define MAP_PUSH_MESSAGE_REQ_ID              "mappushmessagereq"
+#define MAP_FOLDER_LISTING_REQ_ID            "mapfolderlistingreq"
+#define MAP_MESSAGE_UPDATE_REQ_ID            "mapmessageupdatereq"
 
 /**
  * When the value of a characteristic of a remote BLE device changes, we'll
@@ -310,6 +312,11 @@ enum BluetoothStatus {
   STATUS_AUTH_FAILURE,
   STATUS_RMT_DEV_DOWN,
   NUM_STATUS
+};
+
+enum BluetoothAclState {
+  ACL_STATE_CONNECTED,
+  ACL_STATE_DISCONNECTED
 };
 
 enum BluetoothBondState {
@@ -371,6 +378,108 @@ struct BluetoothActivityEnergyInfo {
   uint64_t mEnergyUsed; /* a product of mA, V and ms */
 };
 
+/**
+ * |BluetoothAddress| stores the 6-byte MAC address of a Bluetooth
+ * device. The constants ANY, ALL and LOCAL represent addresses with
+ * special meaning.
+ */
+struct BluetoothAddress {
+
+  static const BluetoothAddress ANY;
+  static const BluetoothAddress ALL;
+  static const BluetoothAddress LOCAL;
+
+  uint8_t mAddr[6];
+
+  BluetoothAddress()
+  {
+    Clear(); // assign ANY
+  }
+
+  MOZ_IMPLICIT BluetoothAddress(const BluetoothAddress&) = default;
+
+  BluetoothAddress(uint8_t aAddr0, uint8_t aAddr1,
+                   uint8_t aAddr2, uint8_t aAddr3,
+                   uint8_t aAddr4, uint8_t aAddr5)
+  {
+    mAddr[0] = aAddr0;
+    mAddr[1] = aAddr1;
+    mAddr[2] = aAddr2;
+    mAddr[3] = aAddr3;
+    mAddr[4] = aAddr4;
+    mAddr[5] = aAddr5;
+  }
+
+  BluetoothAddress& operator=(const BluetoothAddress&) = default;
+
+  bool operator==(const BluetoothAddress& aRhs) const
+  {
+    return !memcmp(mAddr, aRhs.mAddr, sizeof(mAddr));
+  }
+
+  bool operator!=(const BluetoothAddress& aRhs) const
+  {
+    return !operator==(aRhs);
+  }
+
+  /**
+   * |Clear| assigns an invalid value (i.e., ANY) to the address.
+   */
+  void Clear()
+  {
+    operator=(ANY);
+  }
+
+  /*
+   * Getter and setter methods for the address parts. The figure
+   * below illustrates the mapping to bytes; from LSB to MSB.
+   *
+   *    |       LAP       | UAP |    NAP    |
+   *    |  0  |  1  |  2  |  3  |  4  |  5  |
+   *
+   * See Bluetooth Core Spec 2.1, Sec 1.2.
+   */
+
+  uint32_t GetLAP() const
+  {
+    return (static_cast<uint32_t>(mAddr[0])) |
+           (static_cast<uint32_t>(mAddr[1]) << 8) |
+           (static_cast<uint32_t>(mAddr[2]) << 16);
+  }
+
+  void SetLAP(uint32_t aLAP)
+  {
+    MOZ_ASSERT(!(aLAP & 0xff000000)); // no top-8 bytes in LAP
+
+    mAddr[0] = aLAP;
+    mAddr[1] = aLAP >> 8;
+    mAddr[2] = aLAP >> 16;
+  }
+
+  uint8_t GetUAP() const
+  {
+    return mAddr[3];
+  }
+
+  void SetUAP(uint8_t aUAP)
+  {
+    mAddr[3] = aUAP;
+  }
+
+  uint16_t GetNAP() const
+  {
+    return (static_cast<uint16_t>(mAddr[4])) |
+           (static_cast<uint16_t>(mAddr[5]) << 8);
+  }
+
+  void SetNAP(uint16_t aNAP)
+  {
+    mAddr[4] = aNAP;
+    mAddr[5] = aNAP >> 8;
+  }
+
+};
+
 struct BluetoothUuid {
   uint8_t mUuid[16];
 
@@ -390,6 +499,15 @@ struct BluetoothUuid {
   }
 };
 
+struct BluetoothPinCode {
+  uint8_t mPinCode[16]; /* not \0-terminated */
+  uint8_t mLength;
+};
+
+struct BluetoothServiceName {
+  uint8_t mName[255]; /* not \0-terminated */
+};
+
 struct BluetoothServiceRecord {
   BluetoothUuid mUuid;
   uint16_t mChannel;
@@ -402,6 +520,10 @@ struct BluetoothRemoteInfo {
   int mManufacturer;
 };
 
+struct BluetoothRemoteName {
+  uint8_t mName[248]; /* not \0-terminated */
+};
+
 struct BluetoothProperty {
   /* Type */
   BluetoothPropertyType mType;
@@ -409,8 +531,10 @@ struct BluetoothProperty {
   /* Value
    */
 
+  /* PROPERTY_BDADDR */
+  BluetoothAddress mBdAddress;
+
   /* PROPERTY_BDNAME
-     PROPERTY_BDADDR
      PROPERTY_REMOTE_FRIENDLY_NAME */
   nsString mString;
 
@@ -418,7 +542,7 @@ struct BluetoothProperty {
   nsTArray<BluetoothUuid> mUuidArray;
 
   /* PROPERTY_ADAPTER_BONDED_DEVICES */
-  nsTArray<nsString> mStringArray;
+  nsTArray<BluetoothAddress> mBdAddressArray;
 
   /* PROPERTY_CLASS_OF_DEVICE
      PROPERTY_ADAPTER_DISCOVERY_TIMEOUT */
@@ -438,6 +562,68 @@ struct BluetoothProperty {
 
   /* PROPERTY_REMOTE_VERSION_INFO */
   BluetoothRemoteInfo mRemoteInfo;
+
+  BluetoothProperty()
+    : mType(PROPERTY_UNKNOWN)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType,
+                             const BluetoothAddress& aBdAddress)
+    : mType(aType)
+    , mBdAddress(aBdAddress)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType,
+                             const nsAString& aString)
+    : mType(aType)
+    , mString(aString)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType,
+                             const nsTArray<BluetoothUuid>& aUuidArray)
+    : mType(aType)
+    , mUuidArray(aUuidArray)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType,
+                             const nsTArray<BluetoothAddress>& aBdAddressArray)
+    : mType(aType)
+    , mBdAddressArray(aBdAddressArray)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType, uint32_t aUint32)
+    : mType(aType)
+    , mUint32(aUint32)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType, int32_t aInt32)
+    : mType(aType)
+    , mInt32(aInt32)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType,
+                             BluetoothTypeOfDevice aTypeOfDevice)
+    : mType(aType)
+    , mTypeOfDevice(aTypeOfDevice)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType,
+                             const BluetoothServiceRecord& aServiceRecord)
+    : mType(aType)
+    , mServiceRecord(aServiceRecord)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType,
+                             BluetoothScanMode aScanMode)
+    : mType(aType)
+    , mScanMode(aScanMode)
+  { }
+
+  explicit BluetoothProperty(BluetoothPropertyType aType,
+                             const BluetoothRemoteInfo& aRemoteInfo)
+    : mType(aType)
+    , mRemoteInfo(aRemoteInfo)
+  { }
 };
 
 enum BluetoothSocketType {
@@ -811,7 +997,7 @@ struct BluetoothGattWriteParam {
 };
 
 struct BluetoothGattNotifyParam {
-  nsString mBdAddr;
+  BluetoothAddress mBdAddr;
   BluetoothGattServiceId mServiceId;
   BluetoothGattId mCharId;
   uint16_t mLength;
@@ -820,7 +1006,7 @@ struct BluetoothGattNotifyParam {
 };
 
 struct BluetoothGattTestParam {
-  nsString mBdAddr;
+  BluetoothAddress mBdAddr;
   BluetoothUuid mUuid;
   uint16_t mU1;
   uint16_t mU2;

@@ -630,9 +630,10 @@ RestyleManager::StyleChangeReflow(nsIFrame* aFrame, nsChangeHint aHint)
 void
 RestyleManager::AddSubtreeToOverflowTracker(nsIFrame* aFrame) 
 {
-  mOverflowChangedTracker.AddFrame(
-      aFrame,
-      OverflowChangedTracker::CHILDREN_CHANGED);
+  if (aFrame->FrameMaintainsOverflow()) {
+    mOverflowChangedTracker.AddFrame(aFrame,
+                                     OverflowChangedTracker::CHILDREN_CHANGED);
+  }
   nsIFrame::ChildListIterator lists(aFrame);
   for (; !lists.IsDone(); lists.Next()) {
     for (nsIFrame* child : lists.CurrentList()) {
@@ -818,8 +819,7 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
     } else {
       NS_ASSERTION(frame, "This shouldn't happen");
 
-      if ((frame->GetStateBits() & NS_FRAME_SVG_LAYOUT) &&
-          (frame->GetStateBits() & NS_FRAME_IS_NONDISPLAY)) {
+      if (!frame->FrameMaintainsOverflow()) {
         // frame does not maintain overflow rects, so avoid calling
         // FinishAndStoreOverflow on it:
         hint = NS_SubtractHint(hint,
@@ -4346,20 +4346,16 @@ ElementRestyler::ComputeStyleChangeFor(nsIFrame*          aFrame,
                                          aSwappedStructOwners)
 {
   nsIContent* content = aFrame->GetContent();
-  nsAutoCString idStr;
+  nsAutoCString localDescriptor;
   if (profiler_is_active() && content) {
-    nsIAtom* id = content->GetID();
-    if (id) {
-      id->ToUTF8String(idStr);
-    } else {
-      idStr.AssignLiteral("?");
-    }
+    std::string elemDesc = ToString(*content);
+    localDescriptor.Assign(elemDesc.c_str());
   }
 
   PROFILER_LABEL_PRINTF("ElementRestyler", "ComputeStyleChangeFor",
                         js::ProfileEntry::Category::CSS,
                         content ? "Element: %s" : "%s",
-                        content ? idStr.get() : "");
+                        content ? localDescriptor.get() : "");
   if (aMinChange) {
     aChangeList->AppendChange(aFrame, content, aMinChange);
   }

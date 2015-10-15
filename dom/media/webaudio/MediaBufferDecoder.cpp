@@ -206,7 +206,7 @@ MediaDecodeTask::CreateReader()
     return false;
   }
 
-  nsresult rv = mDecoderReader->Init(nullptr);
+  nsresult rv = mDecoderReader->Init();
   if (NS_FAILED(rv)) {
     return false;
   }
@@ -272,10 +272,8 @@ MediaDecodeTask::OnMetadataRead(MetadataHolder* aMetadata)
 void
 MediaDecodeTask::OnMetadataNotRead(ReadMetadataFailureReason aReason)
 {
-  MOZ_RELEASE_ASSERT(aReason != ReadMetadataFailureReason::WAITING_FOR_RESOURCES);
   mDecoderReader->Shutdown();
   ReportFailureOnMainThread(WebAudioDecodeJob::InvalidContent);
-  return;
 }
 
 void

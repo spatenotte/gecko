@@ -144,7 +144,7 @@ MacroAssemblerMIPSCompat::convertUInt32ToFloat32(Register src, FloatRegister des
     // have enough precision.
     convertUInt32ToDouble(src, dest);
     convertDoubleToFloat32(dest, dest);
-    ma_b(&done);
+    ma_b(&done, ShortJump);
 
     bind(&positive);
     convertInt32ToFloat32(src, dest);
@@ -3199,7 +3199,7 @@ MacroAssemblerMIPSCompat::toggledCall(JitCode* target, bool enabled)
         as_nop();
         as_nop();
     }
-    MOZ_ASSERT(nextOffset().getOffset() - offset.offset() == ToggledCallSize(nullptr));
+    MOZ_ASSERT_IF(!oom(), nextOffset().getOffset() - offset.offset() == ToggledCallSize(nullptr));
     return offset;
 }
 

@@ -1,9 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* globals gDevTools, DOMHelpers, toolboxStrings, InspectorFront, Selection,
-   CommandUtils, DevToolsUtils, Hosts, osString, showDoorhanger,
-   getHighlighterUtils, createPerformanceFront */
 
 "use strict";
 
@@ -62,7 +59,7 @@ loader.lazyRequireGetter(this, "showDoorhanger",
 loader.lazyRequireGetter(this, "createPerformanceFront",
   "devtools/server/actors/performance", true);
 loader.lazyRequireGetter(this, "system",
-  "devtools/shared/shared/system");
+  "devtools/shared/system");
 loader.lazyGetter(this, "osString", () => {
   return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
 });
@@ -331,6 +328,17 @@ Toolbox.prototype = {
   get splitConsole() {
     return this._splitConsole;
   },
+  /**
+   * Get the focused state of the split console
+   */
+  isSplitConsoleFocused: function() {
+    if (!this._splitConsole) {
+      return false;
+    }
+    let focusedWin = Services.focus.focusedWindow;
+    return focusedWin && focusedWin ===
+      this.doc.querySelector("#toolbox-panel-iframe-webconsole").contentWindow;
+  },
 
   /**
    * Open the toolbox
@@ -485,6 +493,28 @@ Toolbox.prototype = {
         e.preventDefault();
       }
     }
+  },
+  /**
+   * Add a shortcut key that should work when a split console
+   * has focus to the toolbox.
+   *
+   * @param {element} keyElement
+   *        They <key> XUL element describing the shortcut key
+   * @param {string} whichTool
+   *        The tool the key belongs to. The corresponding command
+   *        will only trigger if this tool is active.
+   */
+  useKeyWithSplitConsole: function(keyElement, whichTool) {
+    let cloned = keyElement.cloneNode();
+    cloned.setAttribute("oncommand", "void(0)");
+    cloned.removeAttribute("command");
+    cloned.addEventListener("command", (e) => {
+      // Only forward the command if the tool is active
+      if (this.currentToolId === whichTool && this.isSplitConsoleFocused()) {
+        keyElement.doCommand();
+      }
+    }, true);
+    this.doc.getElementById("toolbox-keyset").appendChild(cloned);
   },
 
   _addReloadKeys: function() {
@@ -1496,10 +1526,8 @@ Toolbox.prototype = {
       toolName = toolboxStrings("toolbox.defaultTitle");
     }
     let title = toolboxStrings("toolbox.titleTemplate",
-                               toolName,
-                               this.target.isAddon ?
-                               this.target.name :
-                               this.target.url || this.target.name);
+                               toolName, this.target.name ||
+                                         this.target.url);
     this._host.setTitle(title);
   },
 

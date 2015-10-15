@@ -270,8 +270,8 @@ GetMaxOptionBSize(nsIFrame* aContainer, WritingMode aWM)
     nscoord optionBSize;
     if (nsCOMPtr<nsIDOMHTMLOptGroupElement>
         (do_QueryInterface(option->GetContent()))) {
-      // an optgroup
-      optionBSize = GetMaxOptionBSize(option, aWM);
+      // An optgroup; drill through any scroll frame and recurse.
+      optionBSize = GetMaxOptionBSize(option->GetContentInsertionFrame(), aWM);
     } else {
       // an option
       optionBSize = option->BSize(aWM);
@@ -586,6 +586,9 @@ nsListControlFrame::ReflowAsDropdown(nsPresContext*           aPresContext,
           newBSize = visibleBSize;  // use the exact block size
         } else {
           newBSize = mNumDisplayRows * blockSizeOfARow; // approximate
+          // The approximation here might actually be too big (bug 1208978);
+          // don't let it exceed the actual block-size of the list.
+          newBSize = std::min(newBSize, visibleBSize);
         }
       } else {
         rows = availableBSize / blockSizeOfARow;

@@ -372,6 +372,14 @@ describe("loop.standaloneRoomViews", function() {
         expect(fakeWindow.document.title).to.equal("fakeName — clientShortname2");
       });
 
+      it("should set document.title brand name when there is no context available", function() {
+        activeRoomStore.setStoreState({roomState: ROOM_STATES.INIT});
+        view = mountTestComponent();
+        activeRoomStore.setStoreState({roomState: ROOM_STATES.READY});
+
+        expect(fakeWindow.document.title).to.equal("clientShortname2");
+      });
+
       it("should dispatch a `SetupStreamElements` action when the MEDIA_WAIT state " +
         "is entered", function() {
           activeRoomStore.setStoreState({roomState: ROOM_STATES.READY});
@@ -644,6 +652,17 @@ describe("loop.standaloneRoomViews", function() {
           TestUtils.findRenderedComponentWithType(view,
             loop.standaloneRoomViews.StandaloneRoomFailureView);
         });
+
+        it("should display ICE failure message", function() {
+          activeRoomStore.setStoreState({
+            roomState: ROOM_STATES.FAILED,
+            failureReason: FAILURE_DETAILS.ICE_FAILED
+          });
+
+          var ice_failed_message = view.getDOMNode().querySelector(".failed-room-message").textContent;
+          expect(ice_failed_message).eql("rooms_ice_failure_message");
+          expect(view.getDOMNode().querySelector(".btn-info")).not.eql(null);
+        });
       });
 
       describe("Join button", function() {
@@ -867,46 +886,46 @@ describe("loop.standaloneRoomViews", function() {
           return elem.getDOMNode().querySelector(".btn-hangup");
         }
 
-        it("should disable the Leave button when the room state is READY",
+        it("should remove the Leave button when the room state is READY",
           function() {
             activeRoomStore.setStoreState({roomState: ROOM_STATES.READY});
 
-            expect(getLeaveButton(view).disabled).eql(true);
+            expect(getLeaveButton(view)).eql(null);
           });
 
-        it("should disable the Leave button when the room state is FAILED",
+        it("should remove the Leave button when the room state is FAILED",
           function() {
             activeRoomStore.setStoreState({roomState: ROOM_STATES.FAILED});
 
-            expect(getLeaveButton(view).disabled).eql(true);
+            expect(getLeaveButton(view)).eql(null);
           });
 
-        it("should disable the Leave button when the room state is FULL",
+        it("should remove the Leave button when the room state is FULL",
           function() {
             activeRoomStore.setStoreState({roomState: ROOM_STATES.FULL});
 
-            expect(getLeaveButton(view).disabled).eql(true);
+            expect(getLeaveButton(view)).eql(null);
           });
 
-        it("should enable the Leave button when the room state is SESSION_CONNECTED",
+        it("should display the Leave button when the room state is SESSION_CONNECTED",
           function() {
             activeRoomStore.setStoreState({roomState: ROOM_STATES.SESSION_CONNECTED});
 
-            expect(getLeaveButton(view).disabled).eql(false);
+            expect(getLeaveButton(view)).not.eql(null);
           });
 
-        it("should enable the Leave button when the room state is JOINED",
+        it("should display the Leave button when the room state is JOINED",
           function() {
             activeRoomStore.setStoreState({roomState: ROOM_STATES.JOINED});
 
-            expect(getLeaveButton(view).disabled).eql(false);
+            expect(getLeaveButton(view)).not.eql(null);
           });
 
-        it("should enable the Leave button when the room state is HAS_PARTICIPANTS",
+        it("should display the Leave button when the room state is HAS_PARTICIPANTS",
           function() {
             activeRoomStore.setStoreState({roomState: ROOM_STATES.HAS_PARTICIPANTS});
 
-            expect(getLeaveButton(view).disabled).eql(false);
+            expect(getLeaveButton(view)).not.eql(null);
           });
 
         it("should leave the room when clicking the Leave button", function() {

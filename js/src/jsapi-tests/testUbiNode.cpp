@@ -11,6 +11,7 @@
 using JS::RootedObject;
 using JS::RootedScript;
 using JS::RootedString;
+using namespace js;
 
 // A helper JS::ubi::Node concrete implementation that can be used to make mock
 // graphs for testing traversals with.
@@ -171,7 +172,7 @@ checkString(const char* expected, F fillBufferFunction, G stringGetterFunction)
 
 BEGIN_TEST(test_ubiStackFrame)
 {
-    CHECK(js::DefineTestingFunctions(cx, global, false));
+    CHECK(js::DefineTestingFunctions(cx, global, false, false));
 
     JS::RootedValue val(cx);
     CHECK(evaluate("(function one() {                      \n"  // 1

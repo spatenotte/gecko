@@ -154,9 +154,11 @@ NativeRegExpMacroAssembler::GenerateCode(JSContext* cx, bool match_only)
     masm.reserveStack(frameSize);
     masm.checkStackAlignment();
 
-    // Check if we have space on the stack.
+    // Check if we have space on the stack. Use the *NoInterrupt stack limit to
+    // avoid failing repeatedly when the regex code is called from Ion JIT code,
+    // see bug 1208819.
     Label stack_ok;
-    void* stack_limit = runtime->addressOfJitStackLimit();
+    void* stack_limit = runtime->addressOfJitStackLimitNoInterrupt();
     masm.branchStackPtrRhs(Assembler::Below, AbsoluteAddress(stack_limit), &stack_ok);
 
     // Exit with an exception. There is not enough space on the stack
@@ -454,8 +456,10 @@ NativeRegExpMacroAssembler::GenerateCode(JSContext* cx, bool match_only)
     Linker linker(masm);
     AutoFlushICache afc("RegExp");
     JitCode* code = linker.newCode<NoGC>(cx, REGEXP_CODE);
-    if (!code)
+    if (!code) {
+        ReportOutOfMemory(cx);
         return RegExpCode();
+    }
 
 #ifdef JS_ION_PERF
     writePerfSpewerJitCodeProfile(code, "RegExp");

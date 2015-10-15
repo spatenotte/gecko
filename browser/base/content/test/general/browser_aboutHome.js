@@ -420,7 +420,7 @@ var gTests = [
   }
 },
 {
-  desc: "Cmd+f should focus the search box in the page",
+  desc: "Pressing any key should focus the search box in the page, and send the key to it",
   setup: function () {},
   run: Task.async(function* () {
     let doc = gBrowser.selectedBrowser.contentDocument;
@@ -430,9 +430,10 @@ var gTests = [
     EventUtils.synthesizeMouseAtCenter(logo, {});
     isnot(searchInput, doc.activeElement, "Search input should not be the active element.");
 
-    EventUtils.synthesizeKey("f", { accelKey: true });
+    EventUtils.synthesizeKey("a", {});
     yield promiseWaitForCondition(() => doc.activeElement === searchInput);
     is(searchInput, doc.activeElement, "Search input should be the active element.");
+    is(searchInput.value, "a", "Search input should be 'a'.");
   })
 },
 {
@@ -472,15 +473,43 @@ var gTests = [
   })
 },
 {
-  desc: "Sync button should open about:accounts page with `abouthome` entrypoint",
+  desc: "Sync button should open about:preferences#sync",
   setup: function () {},
   run: Task.async(function* () {
     let syncButton = gBrowser.selectedBrowser.contentDocument.getElementById("sync");
+    let oldOpenPrefs = window.openPreferences;
+    let openPrefsPromise = new Promise(resolve => {
+      window.openPreferences = function (pane, params) {
+        resolve({ pane: pane, params: params });
+      };
+    });
+
     yield EventUtils.synthesizeMouseAtCenter(syncButton, {}, gBrowser.contentWindow);
 
-    yield promiseTabLoadEvent(gBrowser.selectedTab, null, "load");
-    is(gBrowser.currentURI.spec, "about:accounts?entrypoint=abouthome",
-      "Entry point should be `abouthome`.");
+    let result = yield openPrefsPromise;
+    window.openPreferences = oldOpenPrefs;
+
+    is(result.pane, "paneSync", "openPreferences should be called with paneSync");
+    is(result.params.urlParams.entrypoint, "abouthome", "openPreferences should be called with abouthome entrypoint");
+  })
+},
+{
+  desc: "Pressing Space while the Addons button is focussed should activate it",
+  setup: function () {},
+  run: Task.async(function* () {
+    // Skip this test on Mac, because Space doesn't activate the button there.
+    if (navigator.platform.indexOf("Mac") == 0) {
+      return Promise.resolve();
+    }
+
+    info("Waiting for about:addons tab to open...");
+    let promiseTabOpened = BrowserTestUtils.waitForNewTab(gBrowser, "about:addons");
+    let addOnsButton = gBrowser.selectedBrowser.contentDocument.getElementById("addons");
+    addOnsButton.focus();
+    EventUtils.synthesizeKey(" ", {});
+    let tab = yield promiseTabOpened;
+    is(tab.linkedBrowser.currentURI.spec, "about:addons", "Should have seen the about:addons tab");
+    yield BrowserTestUtils.removeTab(tab);
   })
 }
 

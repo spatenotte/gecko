@@ -1982,6 +1982,7 @@ public:
   {
     InternalFocusEvent event(true, mEventMessage);
     event.mFlags.mBubbles = false;
+    event.mFlags.mCancelable = false;
     event.fromRaise = mWindowRaised;
     event.isRefocus = mIsRefocus;
     return EventDispatcher::Dispatch(mTarget, mContext, &event);
@@ -2469,7 +2470,11 @@ nsFocusManager::DetermineElementToMoveFocus(nsPIDOMWindow* aWindow,
       nsCOMPtr<nsPIDOMWindow> focusedWindow;
       startContent = GetFocusedDescendant(aWindow, true, getter_AddRefs(focusedWindow));
     }
-    else {
+    else if (aType != MOVEFOCUS_LASTDOC) {
+      // Otherwise, start at the focused node. If MOVEFOCUS_LASTDOC is used,
+      // then we are document-navigating backwards from chrome to the content
+      // process, and we don't want to use this so that we start from the end
+      // of the document.
       startContent = aWindow->GetFocusedNode();
     }
   }

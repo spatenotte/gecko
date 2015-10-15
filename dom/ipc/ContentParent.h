@@ -16,6 +16,7 @@
 #include "mozilla/HalTypes.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/UniquePtr.h"
 
 #include "nsDataHashtable.h"
 #include "nsFrameMessageManager.h"
@@ -41,6 +42,11 @@ namespace mozilla {
 class PRemoteSpellcheckEngineParent;
 #ifdef MOZ_ENABLE_PROFILER_SPS
 class ProfileGatherer;
+#endif
+
+#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+class SandboxBroker;
+class SandboxBrokerPolicyFactory;
 #endif
 
 namespace ipc {
@@ -81,6 +87,7 @@ class ContentParent final : public PContentParent
     typedef mozilla::ipc::PFileDescriptorSetParent PFileDescriptorSetParent;
     typedef mozilla::ipc::TestShellParent TestShellParent;
     typedef mozilla::ipc::URIParams URIParams;
+    typedef mozilla::ipc::PrincipalInfo PrincipalInfo;
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
 
 public:
@@ -199,11 +206,11 @@ public:
      */
     virtual bool DoLoadMessageManagerScript(const nsAString& aURL,
                                             bool aRunInGlobalScope) override;
-    virtual bool DoSendAsyncMessage(JSContext* aCx,
-                                    const nsAString& aMessage,
-                                    StructuredCloneData& aData,
-                                    JS::Handle<JSObject *> aCpows,
-                                    nsIPrincipal* aPrincipal) override;
+    virtual nsresult DoSendAsyncMessage(JSContext* aCx,
+                                        const nsAString& aMessage,
+                                        StructuredCloneData& aData,
+                                        JS::Handle<JSObject *> aCpows,
+                                        nsIPrincipal* aPrincipal) override;
     virtual bool CheckPermission(const nsAString& aPermission) override;
     virtual bool CheckManifestURL(const nsAString& aManifestURL) override;
     virtual bool CheckAppHasPermission(const nsAString& aPermission) override;
@@ -394,12 +401,14 @@ public:
     virtual POfflineCacheUpdateParent*
     AllocPOfflineCacheUpdateParent(const URIParams& aManifestURI,
                                    const URIParams& aDocumentURI,
+                                   const PrincipalInfo& aLoadingPrincipalInfo,
                                    const bool& aStickDocument,
                                    const TabId& aTabId) override;
     virtual bool
     RecvPOfflineCacheUpdateConstructor(POfflineCacheUpdateParent* aActor,
                                        const URIParams& aManifestURI,
                                        const URIParams& aDocumentURI,
+                                       const PrincipalInfo& aLoadingPrincipal,
                                        const bool& stickDocument,
                                        const TabId& aTabId) override;
     virtual bool
@@ -710,6 +719,9 @@ private:
     virtual bool DeallocPSpeechSynthesisParent(PSpeechSynthesisParent* aActor) override;
     virtual bool RecvPSpeechSynthesisConstructor(PSpeechSynthesisParent* aActor) override;
 
+    virtual PWebBrowserPersistDocumentParent* AllocPWebBrowserPersistDocumentParent(PBrowserParent* aBrowser, const uint64_t& aOuterWindowID) override;
+    virtual bool DeallocPWebBrowserPersistDocumentParent(PWebBrowserPersistDocumentParent* aActor) override;
+
     virtual bool RecvReadPrefsArray(InfallibleTArray<PrefSetting>* aPrefs) override;
     virtual bool RecvReadFontList(InfallibleTArray<FontListEntry>* retValue) override;
 
@@ -993,6 +1005,12 @@ private:
     nsCString mProfile;
 
     UniquePtr<gfx::DriverCrashGuard> mDriverCrashGuard;
+
+#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+    mozilla::UniquePtr<SandboxBroker> mSandboxBroker;
+    static mozilla::UniquePtr<SandboxBrokerPolicyFactory>
+        sSandboxBrokerPolicyFactory;
+#endif
 };
 
 } // namespace dom

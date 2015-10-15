@@ -24,6 +24,53 @@ class BluetoothReplyRunnable;
 class BluetoothValue;
 
 //
+// Address/String conversion
+//
+
+void
+AddressToString(const BluetoothAddress& aAddress, nsAString& aString);
+
+nsresult
+StringToAddress(const nsAString& aString, BluetoothAddress& aAddress);
+
+//
+// Pin code/string conversion
+//
+
+nsresult
+StringToPinCode(const nsAString& aString, BluetoothPinCode& aPinCode);
+
+//
+// Property type/string conversion
+//
+
+nsresult
+StringToPropertyType(const nsAString& aString, BluetoothPropertyType& aType);
+
+//
+// Property conversion
+//
+
+nsresult
+NamedValueToProperty(const BluetoothNamedValue& aIn,
+                     BluetoothProperty& aProperty);
+
+//
+// Remote name/string conversion
+//
+
+void
+RemoteNameToString(const BluetoothRemoteName& aRemoteName, nsAString& aString);
+
+//
+// Service name/string conversion
+//
+
+nsresult
+StringToServiceName(const nsAString& aString,
+                    BluetoothServiceName& aServiceName);
+
+//
 // BluetoothUuid <-> uuid string conversion
 //
 
@@ -224,6 +271,20 @@ void AppendNamedValue(InfallibleTArray<BluetoothNamedValue>& aArray,
 void InsertNamedValue(InfallibleTArray<BluetoothNamedValue>& aArray,
                       uint8_t aIndex, const char* aName,
                       const BluetoothValue& aValue);
+
+//
+// Big/Little endianness conversion
+//
+
+/**
+ * Convert a big/little endian uint16_t value to little/big endian one.
+ */
+uint16_t ConvertEndiannessUInt16(uint16_t aValue);
+
+/**
+ * Read an uint16_t from array and convert it to little endian one.
+ */
+uint16_t ReadLittleEndianUInt16(const uint8_t* aBuf);
 
 END_BLUETOOTH_NAMESPACE
 

@@ -917,7 +917,8 @@ class NativeObject : public JSObject
         return true;
     }
 
-    static uint32_t goodElementsAllocationAmount(uint32_t n, uint32_t length);
+    static bool goodElementsAllocationAmount(ExclusiveContext* cx, uint32_t reqAllocated,
+                                             uint32_t length, uint32_t* goodAmount);
     bool growElements(ExclusiveContext* cx, uint32_t newcap);
     void shrinkElements(ExclusiveContext* cx, uint32_t cap);
     void setDynamicElements(ObjectElements* header) {
@@ -945,8 +946,8 @@ class NativeObject : public JSObject
             const Value& v = elements_[start + i];
             if (v.isObject() && IsInsideNursery(&v.toObject())) {
                 JS::shadow::Runtime* shadowRuntime = shadowRuntimeFromMainThread();
-                shadowRuntime->gcStoreBufferPtr()->putSlotFromAnyThread(this, HeapSlot::Element,
-                                                                        start + i, count - i);
+                shadowRuntime->gcStoreBufferPtr()->putSlot(this, HeapSlot::Element,
+                                                           start + i, count - i);
                 return;
             }
         }
@@ -1161,7 +1162,7 @@ class NativeObject : public JSObject
         MOZ_ASSERT(*cellp);
         gc::StoreBuffer* storeBuffer = (*cellp)->storeBuffer();
         if (storeBuffer)
-            storeBuffer->putCellFromAnyThread(cellp);
+            storeBuffer->putCell(cellp);
     }
 
     /* Private data accessors. */

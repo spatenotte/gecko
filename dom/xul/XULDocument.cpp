@@ -916,23 +916,6 @@ XULDocument::AttributeWillChange(nsIDocument* aDocument,
     }
 }
 
-static bool
-ShouldPersistAttribute(nsIDocument* aDocument, Element* aElement)
-{
-    if (aElement->IsXULElement(nsGkAtoms::window)) {
-        if (nsCOMPtr<nsPIDOMWindow> window = aDocument->GetWindow()) {
-            bool isFullscreen;
-            window->GetFullScreen(&isFullscreen);
-            if (isFullscreen) {
-                // Don't persist attributes if it is window element and
-                // we are in fullscreen state.
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 void
 XULDocument::AttributeChanged(nsIDocument* aDocument,
                               Element* aElement, int32_t aNameSpaceID,
@@ -1007,19 +990,18 @@ XULDocument::AttributeChanged(nsIDocument* aDocument,
     bool listener, resolved;
     CheckBroadcasterHookup(aElement, &listener, &resolved);
 
-    if (ShouldPersistAttribute(aDocument, aElement)) {
-        // See if there is anything we need to persist in the localstore.
-        //
-        // XXX Namespace handling broken :-(
-        nsString persist;
-        aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::persist, persist);
-        if (!persist.IsEmpty() &&
-            // XXXldb This should check that it's a token, not just a substring.
-            persist.Find(nsDependentAtomString(aAttribute)) >= 0) {
+    // See if there is anything we need to persist in the localstore.
+    //
+    // XXX Namespace handling broken :-(
+    nsAutoString persist;
+    aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::persist, persist);
+    if (!persist.IsEmpty()) {
+        // XXXldb This should check that it's a token, not just a substring.
+        if (persist.Find(nsDependentAtomString(aAttribute)) >= 0) {
             nsContentUtils::AddScriptRunner(NS_NewRunnableMethodWithArgs
-                <nsIContent*, int32_t, nsIAtom*>
-                (this, &XULDocument::DoPersist, aElement,
-                 kNameSpaceID_None, aAttribute));
+              <nsIContent*, int32_t, nsIAtom*>
+              (this, &XULDocument::DoPersist, aElement, kNameSpaceID_None,
+               aAttribute));
         }
     }
 }
@@ -2555,25 +2537,12 @@ XULDocument::LoadOverlayInternal(nsIURI* aURI, bool aIsDynamic,
     if (aIsDynamic)
         mResolutionPhase = nsForwardReference::eStart;
 
-    // Chrome documents are allowed to load overlays from anywhere.
-    // In all other cases, the overlay is only allowed to load if
-    // the master document and prototype document have the same origin.
-
-    bool documentIsChrome = IsChromeURI(mDocumentURI);
-    if (!documentIsChrome) {
-        // Make sure we're allowed to load this overlay.
-        rv = NodePrincipal()->CheckMayLoad(aURI, true, false);
-        if (NS_FAILED(rv)) {
-            *aFailureFromContent = true;
-            return rv;
-        }
-    }
-
     // Look in the prototype cache for the prototype document with
     // the specified overlay URI. Only use the cache if the containing
     // document is chrome otherwise it may not have a system principal and
     // the cached document will, see bug 565610.
     bool overlayIsChrome = IsChromeURI(aURI);
+    bool documentIsChrome = IsChromeURI(mDocumentURI);
     mCurrentPrototype = overlayIsChrome && documentIsChrome ?
         nsXULPrototypeCache::GetInstance()->GetPrototype(aURI) : nullptr;
 
@@ -2657,12 +2626,13 @@ XULDocument::LoadOverlayInternal(nsIURI* aURI, bool aIsDynamic,
         rv = NS_NewChannel(getter_AddRefs(channel),
                            aURI,
                            NodePrincipal(),
+                           nsILoadInfo::SEC_REQUIRE_SAME_ORIGIN_DATA_INHERITS |
                            nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL,
                            nsIContentPolicy::TYPE_OTHER,
                            group);
 
         if (NS_SUCCEEDED(rv)) {
-            rv = channel->AsyncOpen(listener, nullptr);
+            rv = channel->AsyncOpen2(listener);
         }
 
         if (NS_FAILED(rv)) {

@@ -3,11 +3,10 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* globals ViewHelpers, window, document */
 
 "use strict";
 
-const {utils: Cu, interfaces: Ci, classes: Cc} = Components;
+var {utils: Cu, interfaces: Ci, classes: Cc} = Components;
 
 Cu.import("resource://gre/modules/Task.jsm");
 const {require} = Cu.import("resource://gre/modules/devtools/shared/Loader.jsm", {});
@@ -96,9 +95,9 @@ EditingSession.prototype = {
       }
 
       if (property.value == "") {
-        modifications.removeProperty(property.name);
+        modifications.removeProperty(-1, property.name);
       } else {
-        modifications.setProperty(property.name, property.value, "");
+        modifications.setProperty(-1, property.name, property.value, "");
       }
     }
 
@@ -114,9 +113,9 @@ EditingSession.prototype = {
 
     for (let [property, value] of this._modifications) {
       if (value != "") {
-        modifications.setProperty(property, value, "");
+        modifications.setProperty(-1, property, value, "");
       } else {
-        modifications.removeProperty(property);
+        modifications.removeProperty(-1, property);
       }
     }
 

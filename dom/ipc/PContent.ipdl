@@ -50,6 +50,7 @@ include protocol PTestShell;
 include protocol PVoicemail;
 include protocol PJavaScript;
 include protocol PRemoteSpellcheckEngine;
+include protocol PWebBrowserPersistDocument;
 include protocol PWebrtcGlobal;
 include protocol PPresentation;
 include DOMTypes;
@@ -59,6 +60,7 @@ include PTabContext;
 include URIParams;
 include PluginTypes;
 include ProtocolTypes;
+include PBackgroundSharedTypes;
 include PContentPermission;
 include BrowserConfiguration;
 include GraphicsMessages;
@@ -450,6 +452,7 @@ prio(normal upto urgent) sync protocol PContent
     manages PVoicemail;
     manages PJavaScript;
     manages PRemoteSpellcheckEngine;
+    manages PWebBrowserPersistDocument;
     manages PWebrtcGlobal;
     manages PPresentation;
 
@@ -462,9 +465,9 @@ both:
     // content calls window.open()), and the parent creates the PBrowser as part
     // of ContentParent::CreateBrowserOrApp.
     //
-    // When the parent constructs a PBrowser, the child trusts the app token it
-    // receives from the parent.  In that case, context can be any of the
-    // IPCTabContext subtypes.
+    // When the parent constructs a PBrowser, the child trusts the app token and
+    // other attributes it receives from the parent.  In that case, the
+    // context should be FrameIPCTabContext.
     //
     // When the child constructs a PBrowser, the parent doesn't trust the app
     // token it receives from the child.  In this case, context must have type
@@ -486,13 +489,20 @@ both:
 
     PFileDescriptorSet(FileDescriptor fd);
 
+    // For parent->child, aBrowser must be non-null; aOuterWindowID can
+    // be 0 to indicate the browser's current root document, or nonzero
+    // to persist a subdocument.  For child->parent, arguments are
+    // ignored and should be null/zero.
+    PWebBrowserPersistDocument(nullable PBrowser aBrowser,
+                               uint64_t aOuterWindowID);
+
 child:
     /**
      * Enable system-level sandboxing features, if available.  Can
      * usually only be performed zero or one times.  The child may
      * abnormally exit if this fails; the details are OS-specific.
      */
-    async SetProcessSandbox();
+    async SetProcessSandbox(MaybeFileDesc aBroker);
 
     PMemoryReportRequest(uint32_t generation, bool anonymize,
                          bool minimizeMemoryUsage, MaybeFileDesc DMDFile);
@@ -1012,6 +1022,8 @@ parent:
      *   URI of the manifest to fetch, the application cache group ID
      * @param documentURI
      *   URI of the document that referred the manifest
+     * @param loadingPrincipal
+     *   Principal of the document that referred the manifest
      * @param stickDocument
      *   True if the update was initiated by a document load that referred
      *   a manifest.
@@ -1031,7 +1043,8 @@ parent:
      *   To identify which tab owns the app.
      */
     POfflineCacheUpdate(URIParams manifestURI, URIParams documentURI,
-                        bool stickDocument, TabId tabId);
+                        PrincipalInfo loadingPrincipal, bool stickDocument,
+                        TabId tabId);
 
     /**
      * Sets "offline-app" permission for the principal.  Called when we hit

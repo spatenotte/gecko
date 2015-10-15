@@ -176,6 +176,22 @@ describe("loop.shared.views", function() {
           new sharedActions.StartScreenShare({ type: "browser" }));
       });
 
+    it("should close the dropdown on 'browser' option click", function() {
+      var comp = TestUtils.renderIntoDocument(
+        React.createElement(sharedViews.ScreenShareControlButton, {
+          dispatcher: dispatcher,
+          visible: true,
+          state: SCREEN_SHARE_STATES.INACTIVE
+        }));
+
+      sandbox.stub(comp, "hideDropdownMenu");
+
+      TestUtils.Simulate.click(comp.getDOMNode().querySelector(
+        ".screen-share-menu > li"));
+
+      sinon.assert.calledOnce(comp.hideDropdownMenu);
+    });
+
     it("should dispatch a 'window' StartScreenShare action on option click",
       function() {
         var comp = TestUtils.renderIntoDocument(
@@ -192,6 +208,22 @@ describe("loop.shared.views", function() {
         sinon.assert.calledWithExactly(dispatcher.dispatch,
           new sharedActions.StartScreenShare({ type: "window" }));
       });
+
+    it("should close the dropdown on 'window' option click", function() {
+      var comp = TestUtils.renderIntoDocument(
+        React.createElement(sharedViews.ScreenShareControlButton, {
+          dispatcher: dispatcher,
+          visible: true,
+          state: SCREEN_SHARE_STATES.INACTIVE
+        }));
+
+      sandbox.stub(comp, "hideDropdownMenu");
+
+      TestUtils.Simulate.click(comp.getDOMNode().querySelector(
+        ".screen-share-menu > li:last-child"));
+
+      sinon.assert.calledOnce(comp.hideDropdownMenu);
+    });
 
     it("should have the 'window' option enabled", function() {
       var comp = TestUtils.renderIntoDocument(
@@ -492,26 +524,14 @@ describe("loop.shared.views", function() {
       expect(comp.getDOMNode().classList.contains("idle")).eql(false);
     });
 
-    it("should accept a hangupButtonLabel optional prop", function() {
+    it("should accept a showHangup optional prop", function() {
       var comp = mountTestComponent({
-        hangupButtonLabel: "foo",
+        showHangup: false,
         hangup: hangup,
         publishStream: publishStream
       });
 
-      expect(comp.getDOMNode().querySelector("button.btn-hangup").textContent)
-            .eql("foo");
-    });
-
-    it("should accept a enableHangup optional prop", function() {
-      var comp = mountTestComponent({
-        enableHangup: false,
-        hangup: hangup,
-        publishStream: publishStream
-      });
-
-      expect(comp.getDOMNode().querySelector("button.btn-hangup").disabled)
-            .eql(true);
+      expect(comp.getDOMNode().querySelector(".btn-hangup-entry")).to.eql(null);
     });
 
     it("should hangup when hangup button is clicked", function() {

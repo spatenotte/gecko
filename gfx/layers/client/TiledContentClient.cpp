@@ -1240,7 +1240,8 @@ ClientMultiTiledLayerBuffer::ValidateTile(TileClient& aTile,
   if (aTile.IsPlaceholderTile()) {
     aTile.SetLayerManager(mManager);
     aTile.SetTextureAllocator(mManager->GetTexturePool(
-      gfxPlatform::GetPlatform()->Optimal2DFormatForContent(content)));
+      gfxPlatform::GetPlatform()->Optimal2DFormatForContent(content),
+      TextureFlags::DISALLOW_BIGIMAGE | TextureFlags::IMMEDIATE_UPLOAD));
   }
   aTile.SetCompositableClient(mCompositableClient);
 
@@ -1682,9 +1683,10 @@ TiledContentClient::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 void
 TiledContentClient::Dump(std::stringstream& aStream,
                          const char* aPrefix,
-                         bool aDumpHtml)
+                         bool aDumpHtml,
+                         TextureDumpMode aCompress)
 {
-  GetTiledBuffer()->Dump(aStream, aPrefix, aDumpHtml);
+  GetTiledBuffer()->Dump(aStream, aPrefix, aDumpHtml, aCompress);
 }
 
 void

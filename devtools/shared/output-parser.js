@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* globals DOMUtils */
-
 "use strict";
 
 const {Cc, Ci, Cu} = require("chrome");
@@ -11,8 +9,6 @@ const {colorUtils} = require("devtools/shared/css-color");
 const {Services} = Cu.import("resource://gre/modules/Services.jsm", {});
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
-
-const MAX_ITERATIONS = 100;
 
 const BEZIER_KEYWORDS = ["linear", "ease-in-out", "ease-in", "ease-out",
                          "ease"];
@@ -146,7 +142,6 @@ OutputParser.prototype = {
     this.parsed.length = 0;
 
     let tokenStream = DOMUtils.getCSSLexer(text);
-    let i = 0;
     let parenDepth = 0;
     let outerMostFunctionTakesColor = false;
 
@@ -162,16 +157,6 @@ OutputParser.prototype = {
         break;
       }
       if (token.tokenType === "comment") {
-        continue;
-      }
-
-      // Prevent this loop from slowing down the browser with too
-      // many nodes being appended into output. In practice it is very unlikely
-      // that this will ever happen.
-      i++;
-      if (i > MAX_ITERATIONS) {
-        this._appendTextNode(text.substring(token.startOffset,
-                                            token.endOffset));
         continue;
       }
 
@@ -398,20 +383,47 @@ OutputParser.prototype = {
     swatch.nextElementSibling.textContent = val;
   },
 
-   /**
-    * Append a URL to the output.
-    *
-    * @param  {String} match
-    *         Complete match that may include "url(xxx)"
-    * @param  {String} url
-    *         Actual URL
-    * @param  {Object} [options]
-    *         Options object. For valid options and default values see
-    *         _mergeOptions().
-    */
-  _appendURL: function(match, url, options={}) {
+  /**
+   * A helper function that sanitizes a possibly-unterminated URL.
+   */
+  _sanitizeURL: function(url) {
+    // Re-lex the URL and add any needed termination characters.
+    let urlTokenizer = DOMUtils.getCSSLexer(url);
+    // Just read until EOF; there will only be a single token.
+    while (urlTokenizer.nextToken()) {
+      // Nothing.
+    }
+
+    return urlTokenizer.performEOFFixup(url, true);
+  },
+
+  /**
+   * Append a URL to the output.
+   *
+   * @param  {String} match
+   *         Complete match that may include "url(xxx)"
+   * @param  {String} url
+   *         Actual URL
+   * @param  {Object} [options]
+   *         Options object. For valid options and default values see
+   *         _mergeOptions().
+   */
+  _appendURL: function(match, url, options) {
     if (options.urlClass) {
-      this._appendTextNode("url(\"");
+      // Sanitize the URL.  Note that if we modify the URL, we just
+      // leave the termination characters.  This isn't strictly
+      // "as-authored", but it makes a bit more sense.
+      match = this._sanitizeURL(match);
+      // This regexp matches a URL token.  It puts the "url(", any
+      // leading whitespace, and any opening quote into |leader|; the
+      // URL text itself into |body|, and any trailing quote, trailing
+      // whitespace, and the ")" into |trailer|.  We considered adding
+      // functionality for this to CSSLexer, in some way, but this
+      // seemed simpler on the whole.
+      let [, leader, , body, trailer] =
+        /^(url\([ \t\r\n\f]*(["']?))(.*?)(\2[ \t\r\n\f]*\))$/i.exec(match);
+
+      this._appendTextNode(leader);
 
       let href = url;
       if (options.baseURI) {
@@ -422,11 +434,11 @@ OutputParser.prototype = {
         target: "_blank",
         class: options.urlClass,
         href: href
-      }, url);
+      }, body);
 
-      this._appendTextNode("\")");
+      this._appendTextNode(trailer);
     } else {
-      this._appendTextNode("url(\"" + url + "\")");
+      this._appendTextNode(match);
     }
   },
 

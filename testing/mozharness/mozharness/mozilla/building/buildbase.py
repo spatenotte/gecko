@@ -57,8 +57,6 @@ Please make sure that either "repo" is in your config or, if \
 you are running this in buildbot, "repo_path" is in your buildbot_config.',
     'comments_undetermined': '"comments" could not be determined. This may be \
 because it was a forced build.',
-    'src_mozconfig_path_not_found': '"abs_src_mozconfig" path could not be \
-determined. Please make sure it is a valid path off of "abs_src_dir"',
     'tooltool_manifest_undetermined': '"tooltool_manifest_src" not set, \
 Skipping run_tooltool...',
 }
@@ -312,6 +310,7 @@ class BuildOptionParser(object):
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
         'b2g-debug': 'b2g/releng_sub_%s_configs/%s_debug.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
+        'cross-opt': 'builds/releng_sub_%s_configs/%s_cross_opt.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
@@ -325,6 +324,8 @@ class BuildOptionParser(object):
         'api-9-debug': 'builds/releng_sub_%s_configs/%s_api_9_debug.py',
         'api-11-debug': 'builds/releng_sub_%s_configs/%s_api_11_debug.py',
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
+        'api-11-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_11_partner_sample1.py',
+        'api-11-b2gdroid': 'builds/releng_sub_%s_configs/%s_api_11_b2gdroid.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
     branch_cfg_file = 'builds/branch_specifics.py'
@@ -680,11 +681,18 @@ or run without that action (ie: --no-{action})"
             app_ini_path = dirs['abs_app_ini_path']
         if (os.path.exists(print_conf_setting_path) and
                 os.path.exists(app_ini_path)):
+            python = self.query_exe('python2.7')
             cmd = [
-                'python', print_conf_setting_path, app_ini_path,
+                python, os.path.join(dirs['abs_src_dir'], 'mach'), 'python',
+                print_conf_setting_path, app_ini_path,
                 'App', prop
             ]
-            return self.get_output_from_command(cmd, cwd=dirs['base_work_dir'])
+            env = self.query_build_env()
+            # dirs['abs_obj_dir'] can be different from env['MOZ_OBJDIR'] on
+            # mac, and that confuses mach.
+            del env['MOZ_OBJDIR']
+            return self.get_output_from_command_m(cmd,
+                cwd=dirs['abs_obj_dir'], env=env)
         else:
             return None
 
@@ -1016,23 +1024,32 @@ or run without that action (ie: --no-{action})"
         """assign mozconfig."""
         c = self.config
         dirs = self.query_abs_dirs()
-        if c.get('src_mozconfig'):
+        abs_mozconfig_path = ''
+
+        # first determine the mozconfig path
+        if c.get('src_mozconfig') and not c.get('src_mozconfig_manifest'):
             self.info('Using in-tree mozconfig')
-            abs_src_mozconfig = os.path.join(dirs['abs_src_dir'],
-                                             c.get('src_mozconfig'))
-            if not os.path.exists(abs_src_mozconfig):
-                self.info('abs_src_mozconfig: %s' % (abs_src_mozconfig,))
-                self.fatal(ERROR_MSGS['src_mozconfig_path_not_found'])
-            self.copyfile(abs_src_mozconfig,
-                          os.path.join(dirs['abs_src_dir'], '.mozconfig'))
-            self.info("mozconfig content:")
-            with open(abs_src_mozconfig) as mozconfig:
-                for line in mozconfig:
-                    self.info(line)
+            abs_mozconfig_path = os.path.join(dirs['abs_src_dir'], c.get('src_mozconfig'))
+        elif c.get('src_mozconfig_manifest') and not c.get('src_mozconfig'):
+            self.info('Using mozconfig based on manifest contents')
+            manifest = os.path.join(dirs['abs_work_dir'], c['src_mozconfig_manifest'])
+            if not os.path.exists(manifest):
+                self.fatal('src_mozconfig_manifest: "%s" not found. Does it exist?' % (manifest,))
+            with self.opened(manifest, error_level=ERROR) as (fh, err):
+                if err:
+                    self.fatal("%s exists but coud not read properties" % manifest)
+                abs_mozconfig_path = os.path.join(dirs['abs_src_dir'], json.load(fh)['gecko_path'])
         else:
-            self.fatal("To build, you must supply a mozconfig from inside the "
-                       "tree to use use. Please provide the path in your "
-                       "config via 'src_mozconfig'")
+            self.fatal("'src_mozconfig' or 'src_mozconfig_manifest' must be "
+                       "in the config but not both in order to determine the mozconfig.")
+
+        # print its contents
+        content = self.read_from_file(abs_mozconfig_path, error_level=FATAL)
+        self.info("mozconfig content:")
+        self.info(content)
+
+        # finally, copy the mozconfig to a path that 'mach build' expects it to be
+        self.copyfile(abs_mozconfig_path, os.path.join(dirs['abs_src_dir'], '.mozconfig'))
 
     # TODO: replace with ToolToolMixin
     def _get_tooltool_auth_file(self):
@@ -1297,18 +1314,24 @@ or run without that action (ie: --no-{action})"
                                             dirs['abs_app_ini_path']),
                      level=error_level)
         self.info("Setting properties found in: %s" % dirs['abs_app_ini_path'])
+        python = self.query_exe('python2.7')
         base_cmd = [
-            'python', print_conf_setting_path, dirs['abs_app_ini_path'], 'App'
+            python, os.path.join(dirs['abs_src_dir'], 'mach'), 'python',
+            print_conf_setting_path, dirs['abs_app_ini_path'], 'App'
         ]
         properties_needed = [
             {'ini_name': 'SourceStamp', 'prop_name': 'sourcestamp'},
             {'ini_name': 'Version', 'prop_name': 'appVersion'},
             {'ini_name': 'Name', 'prop_name': 'appName'}
         ]
+        env = self.query_build_env()
+        # dirs['abs_obj_dir'] can be different from env['MOZ_OBJDIR'] on
+        # mac, and that confuses mach.
+        del env['MOZ_OBJDIR']
         for prop in properties_needed:
-            prop_val = self.get_output_from_command(
-                base_cmd + [prop['ini_name']], cwd=dirs['base_work_dir'],
-                halt_on_failure=halt_on_failure
+            prop_val = self.get_output_from_command_m(
+                base_cmd + [prop['ini_name']], cwd=dirs['abs_obj_dir'],
+                halt_on_failure=halt_on_failure, env=env
             )
             self.set_buildbot_property(prop['prop_name'],
                                        prop_val,
@@ -1358,10 +1381,6 @@ or run without that action (ie: --no-{action})"
         # which is necessary before the virtualenv can be created.
         self.create_virtualenv()
         self.activate_virtualenv()
-
-        # Enable Taskcluster debug logging, so at least we get some debug
-        # messages while we are testing uploads.
-        logging.getLogger('taskcluster').setLevel(logging.DEBUG)
 
         routes_file = os.path.join(dirs['abs_src_dir'],
                                    'testing/taskcluster/routes.json')
@@ -1594,10 +1613,17 @@ or run without that action (ie: --no-{action})"
                                        'config',
                                        'printconfigsetting.py')
         abs_prev_ini_path = os.path.join(dirs['abs_obj_dir'], prev_ini_path)
-        previous_buildid = self.get_output_from_command(['python',
-                                                         print_conf_path,
-                                                         abs_prev_ini_path,
-                                                         'App', 'BuildID'])
+        python = self.query_exe('python2.7')
+        cmd = [
+            python, os.path.join(dirs['abs_src_dir'], 'mach'), 'python',
+            print_conf_path, abs_prev_ini_path, 'App', 'BuildID'
+        ]
+        env = self.query_build_env()
+        # dirs['abs_obj_dir'] can be different from env['MOZ_OBJDIR'] on
+        # mac, and that confuses mach.
+        del env['MOZ_OBJDIR']
+        previous_buildid = self.get_output_from_command_m(cmd,
+            cwd=dirs['abs_obj_dir'], env=env)
         if not previous_buildid:
             self.fatal("Could not determine previous_buildid. This property"
                        "requires the upload action creating a partial mar.")

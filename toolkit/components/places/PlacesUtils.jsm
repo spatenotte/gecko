@@ -490,7 +490,7 @@ this.PlacesUtils = {
                    Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER_SHORTCUT,
                    Ci.nsINavHistoryResultNode.RESULT_TYPE_QUERY],
   nodeIsContainer: function PU_nodeIsContainer(aNode) {
-    return this.containerTypes.indexOf(aNode.type) != -1;
+    return this.containerTypes.includes(aNode.type);
   },
 
   /**
@@ -581,11 +581,11 @@ this.PlacesUtils = {
       if (PlacesUtils.nodeIsFolder(node) &&
           node.type != Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER_SHORTCUT &&
           asQuery(node).queryOptions.excludeItems) {
-        let node = PlacesUtils.getFolderContents(node.itemId, false, true).root;
+        let folderRoot = PlacesUtils.getFolderContents(node.itemId, false, true).root;
         try {
-          return gatherDataFunc(node);
+          return gatherDataFunc(folderRoot);
         } finally {
-          node.containerOpen = false;
+          folderRoot.containerOpen = false;
         }
       }
       // If we didn't create our own query, do not alter the node's state.
@@ -1660,40 +1660,6 @@ this.PlacesUtils = {
   },
 
   /**
-   * Returns the passed URL with a #-moz-resolution fragment
-   * for the specified dimensions and devicePixelRatio.
-   *
-   * @param aWindow
-   *        A window from where we want to get the device
-   *        pixel Ratio
-   *
-   * @param aURL
-   *        The URL where we should add the fragment
-   *
-   * @param aWidth
-   *        The target image width
-   *
-   * @param aHeight
-   *        The target image height
-   *
-   * @return The URL with the fragment at the end
-   */
-  getImageURLForResolution:
-  function PU_getImageURLForResolution(aWindow, aURL, aWidth = 16, aHeight = 16) {
-    // We only want to modify the URL when the file extension is ".ico" or
-    // it's a data URI with an icon media-type.
-    let uri = Services.io.newURI(aURL, null, null);
-    if ((!(uri instanceof Ci.nsIURL) || uri.fileExtension.toLowerCase() != "ico") &&
-        !/^data:image\/(?:x-icon|icon|ico)/.test(aURL)) {
-      return aURL;
-    }
-    let width  = Math.round(aWidth * aWindow.devicePixelRatio);
-    let height = Math.round(aHeight * aWindow.devicePixelRatio);
-    return aURL + (aURL.includes("#") ? "&" : "#") +
-           "-moz-resolution=" + width + "," + height;
-  },
-
-  /**
    * Get the unique id for an item (a bookmark, a folder or a separator) given
    * its item id.
    *
@@ -2075,6 +2041,19 @@ XPCOMUtils.defineLazyGetter(this, "bundle", function() {
          createBundle(PLACES_STRING_BUNDLE_URI);
 });
 
+// A promise resolved once the Sqlite.jsm connections
+// can be closed.
+var promiseCanCloseConnection = function() {
+  let TOPIC = "places-will-close-connection";
+  return new Promise(resolve => {
+    let observer = function() {
+      Services.obs.removeObserver(observer, TOPIC);
+      resolve();
+    }
+    Services.obs.addObserver(observer, TOPIC, false)
+  });
+};
+
 XPCOMUtils.defineLazyGetter(this, "gAsyncDBConnPromised",
   () => new Promise((resolve) => {
     Sqlite.cloneStorageConnection({
@@ -2082,12 +2061,23 @@ XPCOMUtils.defineLazyGetter(this, "gAsyncDBConnPromised",
       readOnly:   true
     }).then(conn => {
       try {
-        Sqlite.shutdown.addBlocker(
-          "PlacesUtils read-only connection closing",
-          conn.close.bind(conn));
-        PlacesUtils.history.shutdownClient.jsclient.addBlocker(
-          "PlacesUtils read-only connection closing",
-          conn.close.bind(conn));
+        let state = "0. not started";
+
+        let promiseReady = promiseCanCloseConnection();
+        let promiseShutdownComplete = Task.async(function*() {
+          // Don't close the connection as long as it might be used.
+          state = "1. waiting for `places-will-close-connection`";
+          yield promiseReady;
+
+          // But close the connection before Sqlite shutdown.
+          state = "2. closing the connection";
+          yield conn.close();
+
+          state = "3. done";
+        })();
+        Sqlite.shutdown.addBlocker("PlacesUtils read-only connection closing",
+          promiseShutdownComplete,
+          () => state);
       } catch(ex) {
         // It's too late to block shutdown, just close the connection.
         conn.close();
@@ -2104,12 +2094,23 @@ XPCOMUtils.defineLazyGetter(this, "gAsyncDBWrapperPromised",
       connection: PlacesUtils.history.DBConnection,
     }).then(conn => {
       try {
-        Sqlite.shutdown.addBlocker(
-          "PlacesUtils wrapped connection closing",
-          conn.close.bind(conn));
-        PlacesUtils.history.shutdownClient.jsclient.addBlocker(
-          "PlacesUtils wrapped connection closing",
-          conn.close.bind(conn));
+        let state = "0. not started";
+
+        let promiseReady = promiseCanCloseConnection();
+        let promiseShutdownComplete = Task.async(function*() {
+          // Don't close the connection as long as it might be used.
+          state = "1. waiting for `places-will-close-connection`";
+          yield promiseReady;
+
+          // But close the connection before Sqlite shutdown.
+          state = "2. closing the connection";
+          yield conn.close();
+
+          state = "3. done";
+        })();
+        Sqlite.shutdown.addBlocker("PlacesUtils wrapped connection closing",
+          promiseShutdownComplete,
+          () => state);
       } catch(ex) {
         // It's too late to block shutdown, just close the connection.
         conn.close();
@@ -2987,7 +2988,7 @@ function PlacesRemoveLivemarkTransaction(aLivemarkId)
   let annosToExclude = [PlacesUtils.LMANNO_FEEDURI,
                         PlacesUtils.LMANNO_SITEURI];
   this.item.annotations = annos.filter(function(aValue, aIndex, aArray) {
-      return annosToExclude.indexOf(aValue.name) == -1;
+      return !annosToExclude.includes(aValue.name);
     });
   this.item.dateAdded = PlacesUtils.bookmarks.getItemDateAdded(this.item.id);
   this.item.lastModified =
@@ -3760,7 +3761,7 @@ PlacesUntagURITransaction.prototype = {
     // set nonexistent tags.
     let tags = PlacesUtils.tagging.getTagsForURI(this.item.uri);
     this.item.tags = this.item.tags.filter(function (aTag) {
-      return tags.indexOf(aTag) != -1;
+      return tags.includes(aTag);
     });
     PlacesUtils.tagging.untagURI(this.item.uri, this.item.tags);
   },

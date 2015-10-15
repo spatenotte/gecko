@@ -181,6 +181,11 @@
   background: url(chrome://browser/skin/controlcenter/warning-yellow.svg) no-repeat 0 50%;
 }
 
+.identity-popup-warning-gray:-moz-locale-dir(rtl),
+.identity-popup-warning-yellow:-moz-locale-dir(rtl) {
+  background-position: 100% 50%;
+}
+
 /* SECURITY */
 
 .identity-popup-connection-secure {
@@ -289,6 +294,10 @@ description#identity-popup-content-verifier,
   background-image: url(chrome://browser/skin/controlcenter/permissions.svg);
 }
 
+#identity-popup-permission-list menulist {
+  min-width: 60px;
+}
+
 #identity-popup-permission-list:not(:empty) {
   margin-top: 5px;
 }
@@ -299,5 +308,6 @@ description#identity-popup-content-verifier,
 
 .identity-popup-permission-label {
   -moz-margin-start: 0;
+  word-wrap: break-word;
 }
 

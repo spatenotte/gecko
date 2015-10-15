@@ -7,6 +7,7 @@
 #include "jit/MIR.h"
 
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/SizePrintfMacros.h"
 
@@ -26,8 +27,6 @@
 #include "jsatominlines.h"
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
-
-#include "jit/AtomicOperations-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -1088,7 +1087,7 @@ void
 MConstantElements::printOpcode(GenericPrinter& out) const
 {
     PrintOpcodeName(out, op());
-    out.printf(" %p", value());
+    out.printf(" 0x%" PRIxPTR, value().asValue());
 }
 
 void
@@ -4572,7 +4571,7 @@ InlinePropertyTable::buildTypeSetForFunction(JSFunction* func) const
     return types;
 }
 
-void*
+SharedMem<void*>
 MLoadTypedArrayElementStatic::base() const
 {
     return AnyTypedArrayViewData(someTypedArray_);
@@ -4601,14 +4600,14 @@ MLoadTypedArrayElementStatic::congruentTo(const MDefinition* ins) const
     return congruentIfOperandsEqual(other);
 }
 
-void*
+SharedMem<void*>
 MStoreTypedArrayElementStatic::base() const
 {
     return AnyTypedArrayViewData(someTypedArray_);
 }
 
 bool
-MGetElementCache::allowDoubleResult() const
+MGetPropertyCache::allowDoubleResult() const
 {
     if (!resultTypeSet())
         return true;
@@ -4669,7 +4668,8 @@ MGetPropertyCache::setBlock(MBasicBlock* block)
 }
 
 bool
-MGetPropertyCache::updateForReplacement(MDefinition* ins) {
+MGetPropertyCache::updateForReplacement(MDefinition* ins)
+{
     MGetPropertyCache* other = ins->toGetPropertyCache();
     location_.append(&other->location_);
     return true;

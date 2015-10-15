@@ -2710,6 +2710,10 @@ nsContentUtils::SubjectPrincipal()
   MOZ_ASSERT(NS_IsMainThread());
   JSContext* cx = GetCurrentJSContext();
   if (!cx) {
+#ifndef RELEASE_BUILD
+    MOZ_CRASH("Accessing the Subject Principal without an AutoJSAPI on the stack is forbidden");
+#endif
+    Telemetry::Accumulate(Telemetry::SUBJECT_PRINCIPAL_ACCESSED_WITHOUT_SCRIPT_ON_STACK, true);
     return GetSystemPrincipal();
   }
 
@@ -3493,6 +3497,8 @@ nsContentUtils::MaybeReportInterceptionErrorToConsole(nsIDocument* aDocument,
     messageName = "BadOpaqueRedirectInterception";
   } else if (aError == NS_ERROR_INTERCEPTION_CANCELED) {
     messageName = "InterceptionCanceled";
+  } else if (aError == NS_ERROR_REJECTED_RESPONSE_INTERCEPTION) {
+    messageName = "InterceptionRejectedResponse";
   }
 
   if (messageName) {
@@ -3601,6 +3607,8 @@ nsContentUtils::IsChildOfSameType(nsIDocument* aDoc)
 bool
 nsContentUtils::IsPlainTextType(const nsACString& aContentType)
 {
+  // NOTE: if you add a type here, add it to the CONTENTDLF_CATEGORIES
+  // define in nsContentDLF.h as well.
   return aContentType.EqualsLiteral(TEXT_PLAIN) ||
          aContentType.EqualsLiteral(TEXT_CSS) ||
          aContentType.EqualsLiteral(TEXT_CACHE_MANIFEST) ||
@@ -3609,7 +3617,9 @@ nsContentUtils::IsPlainTextType(const nsACString& aContentType)
          aContentType.EqualsLiteral(TEXT_ECMASCRIPT) ||
          aContentType.EqualsLiteral(APPLICATION_ECMASCRIPT) ||
          aContentType.EqualsLiteral(TEXT_JAVASCRIPT) ||
-         aContentType.EqualsLiteral(APPLICATION_JSON);
+         aContentType.EqualsLiteral(APPLICATION_JSON) ||
+         aContentType.EqualsLiteral(TEXT_JSON) ||
+         aContentType.EqualsLiteral(TEXT_VTT);
 }
 
 bool
@@ -7191,7 +7201,7 @@ nsContentUtils::IsAllowedNonCorsContentType(const nsACString& aHeaderValue)
   nsAutoCString contentType;
   nsAutoCString unused;
 
-  nsresult rv = NS_ParseContentType(aHeaderValue, contentType, unused);
+  nsresult rv = NS_ParseRequestContentType(aHeaderValue, contentType, unused);
   if (NS_FAILED(rv)) {
     return false;
   }
@@ -7818,23 +7828,26 @@ nsContentUtils::SendMouseEvent(nsCOMPtr<nsIPresShell> aPresShell,
 
   EventMessage msg;
   bool contextMenuKey = false;
-  if (aType.EqualsLiteral("mousedown"))
+  if (aType.EqualsLiteral("mousedown")) {
     msg = eMouseDown;
-  else if (aType.EqualsLiteral("mouseup"))
+  } else if (aType.EqualsLiteral("mouseup")) {
     msg = eMouseUp;
-  else if (aType.EqualsLiteral("mousemove"))
+  } else if (aType.EqualsLiteral("mousemove")) {
     msg = eMouseMove;
-  else if (aType.EqualsLiteral("mouseover"))
+  } else if (aType.EqualsLiteral("mouseover")) {
     msg = eMouseEnterIntoWidget;
-  else if (aType.EqualsLiteral("mouseout"))
+  } else if (aType.EqualsLiteral("mouseout")) {
     msg = eMouseExitFromWidget;
-  else if (aType.EqualsLiteral("contextmenu")) {
+  } else if (aType.EqualsLiteral("mouselongtap")) {
+    msg = eMouseLongTap;
+  } else if (aType.EqualsLiteral("contextmenu")) {
     msg = eContextMenu;
     contextMenuKey = (aButton == 0);
-  } else if (aType.EqualsLiteral("MozMouseHittest"))
+  } else if (aType.EqualsLiteral("MozMouseHittest")) {
     msg = eMouseHitTest;
-  else
+  } else {
     return NS_ERROR_FAILURE;
+  }
 
   if (aInputSourceArg == nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN) {
     aInputSourceArg = nsIDOMMouseEvent::MOZ_SOURCE_MOUSE;
@@ -8091,10 +8104,21 @@ nsContentUtils::PushEnabled(JSContext* aCx, JSObject* aObj)
 
 // static
 bool
-nsContentUtils::IsWorkerLoad(nsContentPolicyType aType)
+nsContentUtils::IsNonSubresourceRequest(nsIChannel* aChannel)
 {
-  return aType == nsIContentPolicy::TYPE_INTERNAL_WORKER ||
-         aType == nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER;
+  nsLoadFlags loadFlags = 0;
+  aChannel->GetLoadFlags(&loadFlags);
+  if (loadFlags & nsIChannel::LOAD_DOCUMENT_URI) {
+    return true;
+  }
+
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
+  if (!loadInfo) {
+    return false;
+  }
+  nsContentPolicyType type = loadInfo->InternalContentPolicyType();
+  return type == nsIContentPolicy::TYPE_INTERNAL_WORKER ||
+         type == nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER;
 }
 
 // static, public
@@ -8209,10 +8233,8 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
     return access;
   }
 
-  // We don't want to prompt for every attempt to access permissions, so we
-  // treat the cookie ASK_BEFORE_ACCEPT as though it was a reject.
-  if (sCookiesBehavior == nsICookieService::BEHAVIOR_REJECT ||
-      sCookiesLifetimePolicy == nsICookieService::ASK_BEFORE_ACCEPT) {
+  // We don't want to prompt for every attempt to access permissions.
+  if (sCookiesBehavior == nsICookieService::BEHAVIOR_REJECT) {
     return StorageAccess::eDeny;
   }
 

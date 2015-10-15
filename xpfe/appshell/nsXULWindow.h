@@ -96,7 +96,7 @@ protected:
    bool       LoadSizeFromXUL();
    bool       LoadMiscPersistentAttributesFromXUL();
    void       SyncAttributesToWidget();
-   void       SaveAttributes();
+   NS_IMETHOD SavePersistentAttributes();
 
    NS_IMETHOD GetWindowDOMWindow(nsIDOMWindow** aDOMWindow);
    mozilla::dom::Element* GetWindowDOMElement() const;
@@ -119,7 +119,7 @@ protected:
                                       nsIXULWindow *aBehind);
    void       SetContentScrollbarVisibility(bool aVisible);
    bool       GetContentScrollbarVisibility();
-   void       SetAttributesDirty(uint32_t aDirtyFlags);
+   void       PersistentAttributesDirty(uint32_t aDirtyFlags);
 
    nsChromeTreeOwner*      mChromeTreeOwner;
    nsContentTreeOwner*     mContentTreeOwner;
@@ -157,6 +157,8 @@ protected:
    nsIntRect               mOpenerScreenRect; // the screen rect of the opener
 
    nsCOMArray<nsIWeakReference> mTargetableShells; // targetable shells only
+
+   nsCOMPtr<nsITabParent> mPrimaryTabParent;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsXULWindow, NS_XULWINDOW_IMPL_CID)

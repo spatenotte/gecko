@@ -20,7 +20,7 @@ public:
   explicit AppleMP3Reader(AbstractMediaDecoder *aDecoder);
   virtual ~AppleMP3Reader() override;
 
-  virtual nsresult Init(MediaDecoderReader* aCloneDonor) override;
+  virtual nsresult Init() override;
 
   nsresult PushDataToDemuxer();
 
@@ -82,6 +82,7 @@ private:
   MP3FrameParser mMP3FrameParser;
 
   MediaResourceIndex mResource;
+  NotifyDataArrivedFilter mFilter;
 };
 
 } // namespace mozilla

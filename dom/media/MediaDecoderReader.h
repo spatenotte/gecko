@@ -20,6 +20,7 @@
 
 namespace mozilla {
 
+class CDMProxy;
 class MediaDecoderReader;
 
 struct WaitForDataRejectValue
@@ -48,7 +49,6 @@ private:
 
 enum class ReadMetadataFailureReason : int8_t
 {
-  WAITING_FOR_RESOURCES,
   METADATA_ERROR
 };
 
@@ -82,7 +82,7 @@ public:
 
   // The caller must ensure that Shutdown() is called before aDecoder is
   // destroyed.
-  explicit MediaDecoderReader(AbstractMediaDecoder* aDecoder, TaskQueue* aBorrowedTaskQueue = nullptr);
+  explicit MediaDecoderReader(AbstractMediaDecoder* aDecoder);
 
   // Does any spinup that needs to happen on this task queue. This runs on a
   // different thread than Init, and there should not be ordering dependencies
@@ -92,16 +92,32 @@ public:
 
   // Initializes the reader, returns NS_OK on success, or NS_ERROR_FAILURE
   // on failure.
-  virtual nsresult Init(MediaDecoderReader* aCloneDonor) = 0;
+  virtual nsresult Init() { return NS_OK; }
 
-  // True if this reader is waiting media resource allocation
-  virtual bool IsWaitingMediaResources() { return false; }
-  // True if this reader is waiting for a Content Decryption Module to become
-  // available.
-  virtual bool IsWaitingOnCDMResource() { return false; }
   // Release media resources they should be released in dormant state
   // The reader can be made usable again by calling ReadMetadata().
-  virtual void ReleaseMediaResources() {};
+  void ReleaseMediaResources()
+  {
+    if (OnTaskQueue()) {
+      ReleaseMediaResourcesInternal();
+      return;
+    }
+    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+      this, &MediaDecoderReader::ReleaseMediaResourcesInternal);
+    OwnerThread()->Dispatch(r.forget());
+  }
+
+  void DisableHardwareAcceleration()
+  {
+    if (OnTaskQueue()) {
+      DisableHardwareAccelerationInternal();
+      return;
+    }
+    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
+      this, &MediaDecoderReader::DisableHardwareAccelerationInternal);
+    OwnerThread()->Dispatch(r.forget());
+  }
+
   // Breaks reference-counted cycles. Called during shutdown.
   // WARNING: If you override this, you must call the base implementation
   // in your override.
@@ -113,7 +129,7 @@ public:
   // thread.
   virtual nsRefPtr<ShutdownPromise> Shutdown();
 
-  virtual bool OnTaskQueue()
+  virtual bool OnTaskQueue() const
   {
     return OwnerThread()->IsCurrentThreadIn();
   }
@@ -195,6 +211,10 @@ public:
   // when to call SetIdle().
   virtual void SetIdle() { }
 
+#ifdef MOZ_EME
+  virtual void SetCDMProxy(CDMProxy* aProxy) {}
+#endif
+
   // Tell the reader that the data decoded are not for direct playback, so it
   // can accept more files, in particular those which have more channels than
   // available in the audio output.
@@ -243,6 +263,10 @@ public:
 
   virtual size_t SizeOfVideoQueueInFrames();
   virtual size_t SizeOfAudioQueueInFrames();
+
+private:
+  virtual void ReleaseMediaResourcesInternal() {}
+  virtual void DisableHardwareAccelerationInternal() {}
 
 protected:
   friend class TrackBuffer;
@@ -309,7 +333,7 @@ public:
     OwnerThread()->Dispatch(r.forget());
   }
 
-  TaskQueue* OwnerThread() {
+  TaskQueue* OwnerThread() const {
     return mTaskQueue;
   }
 
@@ -322,8 +346,6 @@ public:
   // Returns true if this decoder reader uses hardware accelerated video
   // decoding.
   virtual bool VideoIsHardwareAccelerated() const { return false; }
-
-  virtual void DisableHardwareAcceleration() {}
 
   TimedMetadataEventSource& TimedMetadataEvent() {
     return mTimedMetadataEvent;
@@ -428,8 +450,6 @@ private:
   // of Request{Audio,Video}Data.
   MozPromiseHolder<AudioDataPromise> mBaseAudioPromise;
   MozPromiseHolder<VideoDataPromise> mBaseVideoPromise;
-
-  bool mTaskQueueIsBorrowed;
 
   // Flags whether a the next audio/video sample comes after a "gap" or
   // "discontinuity" in the stream. For example after a seek.

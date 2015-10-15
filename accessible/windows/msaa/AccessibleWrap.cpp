@@ -913,9 +913,6 @@ AccessibleWrap::accSelect(
     if (flagsSelect & SELFLAG_REMOVESELECTION)
       xpAccessible->SetSelected(false);
 
-    if (flagsSelect & SELFLAG_EXTENDSELECTION)
-      xpAccessible->ExtendSelection();
-
     return S_OK;
   }
 
@@ -952,11 +949,13 @@ AccessibleWrap::accLocation(
   if (xpAccessible->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  // TODO make this work with proxies.
-  if (xpAccessible->IsProxy())
-    return E_NOTIMPL;
+  nsIntRect rect;
+  if (xpAccessible->IsProxy()) {
+    rect = xpAccessible->Proxy()->Bounds();
+  } else {
+    rect = xpAccessible->Bounds();
+  }
 
-  nsIntRect rect = xpAccessible->Bounds();
   *pxLeft = rect.x;
   *pyTop = rect.y;
   *pcxWidth = rect.width;

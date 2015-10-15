@@ -262,7 +262,7 @@
 
 }
 
-*|*:not(:root):-moz-full-screen {
+*|*:-moz-full-screen:not(:root) {
   position: fixed !important;
   top: 0 !important;
   left: 0 !important;
@@ -280,11 +280,10 @@
   box-sizing: border-box !important;
 }
 
-/* If there is a full-screen element that is not the root then
-   we should hide the viewport scrollbar. We exclude the chrome
-   document to prevent reframing of contained plugins. */
-:not(xul|*):root:-moz-full-screen-ancestor {
-  overflow: hidden !important;
+/* Selectors here should match the check in
+ * nsViewportFrame.cpp:ShouldInTopLayerForFullscreen() */
+*|*:-moz-full-screen:not(:root):not(:-moz-browser-frame) {
+  -moz-top-layer: top !important;
 }
 
 /* XML parse error reporting */

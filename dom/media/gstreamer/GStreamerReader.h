@@ -40,7 +40,7 @@ public:
   explicit GStreamerReader(AbstractMediaDecoder* aDecoder);
   virtual ~GStreamerReader();
 
-  virtual nsresult Init(MediaDecoderReader* aCloneDonor) override;
+  virtual nsresult Init() override;
   virtual nsRefPtr<ShutdownPromise> Shutdown() override;
   virtual nsresult ResetDecode() override;
   virtual bool DecodeAudioData() override;
@@ -265,6 +265,7 @@ private:
   int fpsDen;
 
   MediaResourceIndex mResource;
+  NotifyDataArrivedFilter mFilter;
 };
 
 } // namespace mozilla

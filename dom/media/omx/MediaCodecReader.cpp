@@ -283,15 +283,11 @@ MediaCodecReader::~MediaCodecReader()
 {
 }
 
-nsresult
-MediaCodecReader::Init(MediaDecoderReader* aCloneDonor)
-{
-  return NS_OK;
-}
-
 void
-MediaCodecReader::ReleaseMediaResources()
+MediaCodecReader::ReleaseMediaResourcesInternal()
 {
+  MOZ_ASSERT(OnTaskQueue());
+
   // Stop the mSource because we are in the dormant state and the stop function
   // will rewind the mSource to the beginning of the stream.
   if (mVideoTrack.mSource != nullptr && !mVideoTrack.mSourceIsStopped) {
@@ -526,27 +522,28 @@ void
 MediaCodecReader::NotifyDataArrivedInternal(uint32_t aLength,
                                             int64_t aOffset)
 {
-  nsRefPtr<MediaByteBuffer> bytes =
-    mDecoder->GetResource()->MediaReadAt(aOffset, aLength);
-  NS_ENSURE_TRUE_VOID(bytes);
-
-  MonitorAutoLock monLock(mParserMonitor);
-  if (mNextParserPosition == mParsedDataLength &&
-      mNextParserPosition >= aOffset &&
-      mNextParserPosition <= aOffset + aLength) {
-    // No pending parsing runnable currently. And available data are adjacent to
-    // parsed data.
-    int64_t shift = mNextParserPosition - aOffset;
-    const char* buffer = reinterpret_cast<const char*>(bytes->Elements()) + shift;
-    uint32_t length = aLength - shift;
-    int64_t offset = mNextParserPosition;
-    if (length > 0) {
-      MonitorAutoUnlock monUnlock(mParserMonitor);
-      ParseDataSegment(buffer, length, offset);
+  IntervalSet<int64_t> intervals = mFilter.NotifyDataArrived(aLength, aOffset);
+  for (const auto& interval : intervals) {
+    nsRefPtr<MediaByteBuffer> bytes =
+      mDecoder->GetResource()->MediaReadAt(interval.mStart, interval.Length());
+    MonitorAutoLock monLock(mParserMonitor);
+    if (mNextParserPosition == mParsedDataLength &&
+        mNextParserPosition >= interval.mStart &&
+        mNextParserPosition <= interval.mEnd) {
+      // No pending parsing runnable currently. And available data are adjacent to
+      // parsed data.
+      int64_t shift = mNextParserPosition - interval.mStart;
+      const char* buffer = reinterpret_cast<const char*>(bytes->Elements()) + shift;
+      uint32_t length = interval.Length() - shift;
+      int64_t offset = mNextParserPosition;
+      if (length > 0) {
+        MonitorAutoUnlock monUnlock(mParserMonitor);
+        ParseDataSegment(buffer, length, offset);
+      }
+      mParseDataFromCache = false;
+      mParsedDataLength = offset + length;
+      mNextParserPosition = mParsedDataLength;
     }
-    mParseDataFromCache = false;
-    mParsedDataLength = offset + length;
-    mNextParserPosition = mParsedDataLength;
   }
 }
 

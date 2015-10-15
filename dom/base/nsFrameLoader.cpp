@@ -79,6 +79,7 @@
 #include "mozilla/plugins/PPluginWidgetParent.h"
 #include "../plugins/ipc/PluginWidgetParent.h"
 #include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/unused.h"
@@ -283,19 +284,8 @@ nsFrameLoader::SwitchProcessAndLoadURI(nsIURI* aURI)
   nsRefPtr<TabParent> tp = nullptr;
 
   MutableTabContext context;
-  nsCOMPtr<mozIApplication> ownApp = GetOwnApp();
-  nsCOMPtr<mozIApplication> containingApp = GetContainingApp();
-
-  bool tabContextUpdated = true;
-  if (ownApp) {
-    tabContextUpdated = context.SetTabContextForAppFrame(ownApp, containingApp);
-  } else if (OwnerIsBrowserFrame()) {
-    // The |else| above is unnecessary; OwnerIsBrowserFrame() implies !ownApp.
-    tabContextUpdated = context.SetTabContextForBrowserFrame(containingApp);
-  } else {
-    tabContextUpdated = context.SetTabContextForNormalFrame();
-  }
-  NS_ENSURE_STATE(tabContextUpdated);
+  nsresult rv = GetNewTabContext(&context);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<Element> ownerElement = mOwnerContent;
   tp = ContentParent::CreateBrowserOrApp(context, ownerElement, nullptr);
@@ -304,7 +294,7 @@ nsFrameLoader::SwitchProcessAndLoadURI(nsIURI* aURI)
   }
   mRemoteBrowserShown = false;
 
-  nsresult rv = SwapRemoteBrowser(tp);
+  rv = SwapRemoteBrowser(tp);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -956,11 +946,17 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
     }
   }
 
+  MaybeUpdatePrimaryTabParent(eTabParentRemoved);
+  aOther->MaybeUpdatePrimaryTabParent(eTabParentRemoved);
+
   SetOwnerContent(otherContent);
   aOther->SetOwnerContent(ourContent);
 
   mRemoteBrowser->SetOwnerElement(otherContent);
   aOther->mRemoteBrowser->SetOwnerElement(ourContent);
+
+  MaybeUpdatePrimaryTabParent(eTabParentChanged);
+  aOther->MaybeUpdatePrimaryTabParent(eTabParentChanged);
 
   nsRefPtr<nsFrameMessageManager> ourMessageManager = mMessageManager;
   nsRefPtr<nsFrameMessageManager> otherMessageManager = aOther->mMessageManager;
@@ -1404,7 +1400,7 @@ nsFrameLoader::StartDestroy()
     doc = mOwnerContent->OwnerDoc();
     dynamicSubframeRemoval = !mIsTopLevelContent && !doc->InUnlinkOrDeletion();
     doc->SetSubDocumentFor(mOwnerContent, nullptr);
-
+    MaybeUpdatePrimaryTabParent(eTabParentRemoved);
     SetOwnerContent(nullptr);
   }
 
@@ -2263,25 +2259,16 @@ nsFrameLoader::TryRemoteBrowser()
     js::ProfileEntry::Category::OTHER);
 
   MutableTabContext context;
-  nsCOMPtr<mozIApplication> ownApp = GetOwnApp();
-  nsCOMPtr<mozIApplication> containingApp = GetContainingApp();
-
-  bool rv = true;
-  if (ownApp) {
-    rv = context.SetTabContextForAppFrame(ownApp, containingApp);
-  } else if (OwnerIsBrowserFrame()) {
-    // The |else| above is unnecessary; OwnerIsBrowserFrame() implies !ownApp.
-    rv = context.SetTabContextForBrowserFrame(containingApp);
-  } else {
-    rv = context.SetTabContextForNormalFrame();
-  }
-  NS_ENSURE_TRUE(rv, false);
+  nsresult rv = GetNewTabContext(&context);
+  NS_ENSURE_SUCCESS(rv, false);
 
   nsCOMPtr<Element> ownerElement = mOwnerContent;
   mRemoteBrowser = ContentParent::CreateBrowserOrApp(context, ownerElement, openerContentParent);
   if (!mRemoteBrowser) {
     return false;
   }
+
+  MaybeUpdatePrimaryTabParent(eTabParentChanged);
 
   mChildID = mRemoteBrowser->Manager()->ChildID();
 
@@ -2445,13 +2432,8 @@ class nsAsyncMessageToChild : public nsSameProcessAsyncMessageBase,
                               public nsRunnable
 {
 public:
-  nsAsyncMessageToChild(JSContext* aCx,
-                        nsFrameLoader* aFrameLoader,
-                        const nsAString& aMessage,
-                        StructuredCloneData& aData,
-                        JS::Handle<JSObject *> aCpows,
-                        nsIPrincipal* aPrincipal)
-    : nsSameProcessAsyncMessageBase(aCx, aMessage, aData, aCpows, aPrincipal)
+  nsAsyncMessageToChild(JSContext* aCx, JS::Handle<JSObject*> aCpows, nsFrameLoader* aFrameLoader)
+    : nsSameProcessAsyncMessageBase(aCx, aCpows)
     , mFrameLoader(aFrameLoader)
   {
   }
@@ -2470,7 +2452,7 @@ public:
   nsRefPtr<nsFrameLoader> mFrameLoader;
 };
 
-bool
+nsresult
 nsFrameLoader::DoSendAsyncMessage(JSContext* aCx,
                                   const nsAString& aMessage,
                                   StructuredCloneData& aData,
@@ -2482,27 +2464,37 @@ nsFrameLoader::DoSendAsyncMessage(JSContext* aCx,
     ClonedMessageData data;
     nsIContentParent* cp = tabParent->Manager();
     if (!BuildClonedMessageDataForParent(cp, aData, data)) {
-      return false;
+      MOZ_CRASH();
+      return NS_ERROR_DOM_DATA_CLONE_ERR;
     }
     InfallibleTArray<mozilla::jsipc::CpowEntry> cpows;
     jsipc::CPOWManager* mgr = cp->GetCPOWManager();
     if (aCpows && (!mgr || !mgr->Wrap(aCx, aCpows, &cpows))) {
-      return false;
+      return NS_ERROR_UNEXPECTED;
     }
-    return tabParent->SendAsyncMessage(nsString(aMessage), data, cpows,
-                                       IPC::Principal(aPrincipal));
+    if (tabParent->SendAsyncMessage(nsString(aMessage), data, cpows,
+                                    IPC::Principal(aPrincipal))) {
+      return NS_OK;
+    } else {
+      return NS_ERROR_UNEXPECTED;
+    }
   }
 
   if (mChildMessageManager) {
-    nsCOMPtr<nsIRunnable> ev = new nsAsyncMessageToChild(aCx, this, aMessage,
-                                                         aData, aCpows,
-                                                         aPrincipal);
-    NS_DispatchToCurrentThread(ev);
-    return true;
+    nsRefPtr<nsAsyncMessageToChild> ev = new nsAsyncMessageToChild(aCx, aCpows, this);
+    nsresult rv = ev->Init(aCx, aMessage, aData, aPrincipal);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    rv = NS_DispatchToCurrentThread(ev);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    return rv;
   }
 
   // We don't have any targets to send our asynchronous message to.
-  return false;
+  return NS_ERROR_UNEXPECTED;
 }
 
 bool
@@ -2635,6 +2627,7 @@ nsFrameLoader::SetRemoteBrowser(nsITabParent* aTabParent)
   mRemoteFrame = true;
   mRemoteBrowser = TabParent::GetFrom(aTabParent);
   mChildID = mRemoteBrowser ? mRemoteBrowser->Manager()->ChildID() : 0;
+  MaybeUpdatePrimaryTabParent(eTabParentChanged);
   ReallyLoadFrameScripts();
   InitializeBrowserAPI();
   ShowRemoteFrame(ScreenIntSize(0, 0));
@@ -2658,6 +2651,8 @@ nsFrameLoader::SwapRemoteBrowser(nsITabParent* aTabParent)
   if (newParent == mRemoteBrowser) {
     return NS_OK;
   }
+
+  MaybeUpdatePrimaryTabParent(eTabParentRemoved);
   mRemoteBrowser->CacheFrameLoader(nullptr);
   mRemoteBrowser->SetOwnerElement(nullptr);
   mRemoteBrowser->Detach();
@@ -2666,6 +2661,8 @@ nsFrameLoader::SwapRemoteBrowser(nsITabParent* aTabParent)
   mRemoteBrowser = newParent;
   mRemoteBrowser->Attach(this);
   mChildID = mRemoteBrowser->Manager()->ChildID();
+
+  MaybeUpdatePrimaryTabParent(eTabParentChanged);
 
   // Force the new remote frame manager to load pending scripts
   mMessageManager->LoadPendingScripts();
@@ -2718,8 +2715,6 @@ nsFrameLoader::AttributeChanged(nsIDocument* aDocument,
                                 const nsAttrValue* aOldValue)
 {
   MOZ_ASSERT(mObservingOwnerContent);
-  // TODO: Implement ContentShellAdded for remote browsers (bug 658304)
-  MOZ_ASSERT(!mRemoteBrowser);
 
   if (aNameSpaceID != kNameSpaceID_None || aAttribute != TypeAttrName()) {
     return;
@@ -2736,6 +2731,7 @@ nsFrameLoader::AttributeChanged(nsIDocument* aDocument,
   // if our parent is chrome, since in all other cases we're random content
   // subframes and the treeowner shouldn't worry about us.
   if (!mDocShell) {
+    MaybeUpdatePrimaryTabParent(eTabParentChanged);
     return;
   }
 
@@ -2994,5 +2990,69 @@ nsFrameLoader::StartPersistence(uint64_t aOuterWindowID,
       new mozilla::WebBrowserPersistLocalDocument(foundDoc);
     aRecv->OnDocumentReady(pdoc);
   }
+  return NS_OK;
+}
+
+void
+nsFrameLoader::MaybeUpdatePrimaryTabParent(TabParentChange aChange)
+{
+  if (mRemoteBrowser && mOwnerContent) {
+    nsCOMPtr<nsIDocShell> docShell = mOwnerContent->OwnerDoc()->GetDocShell();
+    if (!docShell) {
+      return;
+    }
+
+    int32_t parentType = docShell->ItemType();
+    if (parentType != nsIDocShellTreeItem::typeChrome) {
+      return;
+    }
+
+    nsCOMPtr<nsIDocShellTreeOwner> parentTreeOwner;
+    docShell->GetTreeOwner(getter_AddRefs(parentTreeOwner));
+    if (!parentTreeOwner) {
+      return;
+    }
+
+    if (!mObservingOwnerContent) {
+      mOwnerContent->AddMutationObserver(this);
+      mObservingOwnerContent = true;
+    }
+
+    parentTreeOwner->TabParentRemoved(mRemoteBrowser);
+    if (aChange == eTabParentChanged) {
+      bool isPrimary =
+        mOwnerContent->AttrValueIs(kNameSpaceID_None,
+                                   TypeAttrName(),
+                                   NS_LITERAL_STRING("content-primary"),
+                                   eIgnoreCase);
+      parentTreeOwner->TabParentAdded(mRemoteBrowser, isPrimary);
+    }
+  }
+}
+
+nsresult
+nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext)
+{
+  nsCOMPtr<mozIApplication> ownApp = GetOwnApp();
+  nsCOMPtr<mozIApplication> containingApp = GetContainingApp();
+  OriginAttributes attrs = OriginAttributes();
+  attrs.mInBrowser = OwnerIsBrowserFrame();
+
+  // Get the AppId from ownApp
+  uint32_t appId = nsIScriptSecurityManager::NO_APP_ID;
+  if (ownApp) {
+    nsresult rv = ownApp->GetLocalId(&appId);
+    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ENSURE_STATE(appId != nsIScriptSecurityManager::NO_APP_ID);
+  } else if (containingApp) {
+    nsresult rv = containingApp->GetLocalId(&appId);
+    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ENSURE_STATE(appId != nsIScriptSecurityManager::NO_APP_ID);
+  }
+  attrs.mAppId = appId;
+
+  bool tabContextUpdated = aTabContext->SetTabContext(ownApp, containingApp, attrs);
+  NS_ENSURE_STATE(tabContextUpdated);
+
   return NS_OK;
 }
