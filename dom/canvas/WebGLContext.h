@@ -249,7 +249,8 @@ public:
     NS_IMETHOD SetIsOpaque(bool) override { return NS_OK; };
     bool GetIsOpaque() override { return false; }
     NS_IMETHOD SetContextOptions(JSContext* cx,
-                                 JS::Handle<JS::Value> options) override;
+                                 JS::Handle<JS::Value> options,
+                                 ErrorResult& aRvForDictionaryInit) override;
 
     NS_IMETHOD SetIsIPC(bool) override {
         return NS_ERROR_NOT_IMPLEMENTED;
@@ -445,7 +446,7 @@ public:
 
     void
     GetAttachedShaders(WebGLProgram* prog,
-                       dom::Nullable<nsTArray<nsRefPtr<WebGLShader>>>& retval);
+                       dom::Nullable<nsTArray<RefPtr<WebGLShader>>>& retval);
 
     GLint GetAttribLocation(WebGLProgram* prog, const nsAString& name);
     JS::Value GetBufferParameter(GLenum target, GLenum pname);
@@ -457,9 +458,9 @@ public:
     }
 
     GLenum GetError();
-    JS::Value GetFramebufferAttachmentParameter(JSContext* cx, GLenum target,
-                                                GLenum attachment, GLenum pname,
-                                                ErrorResult& rv);
+    virtual JS::Value GetFramebufferAttachmentParameter(JSContext* cx, GLenum target,
+                                                        GLenum attachment, GLenum pname,
+                                                        ErrorResult& rv);
 
     void GetFramebufferAttachmentParameter(JSContext* cx, GLenum target,
                                            GLenum attachment, GLenum pname,
@@ -1144,7 +1145,7 @@ protected:
     // -------------------------------------------------------------------------
     // WebGL extensions (implemented in WebGLContextExtensions.cpp)
     typedef EnumeratedArray<WebGLExtensionID, WebGLExtensionID::Max,
-                            nsRefPtr<WebGLExtensionBase>> ExtensionsArrayType;
+                            RefPtr<WebGLExtensionBase>> ExtensionsArrayType;
 
     ExtensionsArrayType mExtensions;
 

@@ -1513,7 +1513,8 @@ OptimizeMIR(MIRGenerator* mir)
 
     {
         AutoTraceLog log(logger, TraceLogger_FoldTests);
-        FoldTests(graph);
+        if (!FoldTests(graph))
+            return false;
         gs.spewPass("Fold Tests");
         AssertBasicGraphCoherency(graph);
 
@@ -2203,6 +2204,11 @@ IonCompile(JSContext* cx, JSScript* script,
             const char* abortMessage;
             builder->actionableAbortLocationAndMessage(&abortScript, &abortPc, &abortMessage);
             TrackIonAbort(cx, abortScript, abortPc, abortMessage);
+        }
+
+        if (cx->isThrowingOverRecursed()) {
+            // Non-analysis compilations should never fail with stack overflow.
+            MOZ_CRASH("Stack overflow during compilation");
         }
 
         return reason;

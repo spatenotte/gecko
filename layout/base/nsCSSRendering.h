@@ -13,6 +13,7 @@
 #include "imgIContainer.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/gfx/Rect.h"
+#include "mozilla/TypedEnumBits.h"
 #include "nsLayoutUtils.h"
 #include "nsStyleStruct.h"
 #include "nsIFrame.h"
@@ -98,6 +99,12 @@ struct CSSSizeOrRatio
   bool mHasWidth;
   bool mHasHeight;
 };
+
+enum class PaintBorderFlags : uint8_t
+{
+  SYNC_DECODE_IMAGES = 1 << 0
+};
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(PaintBorderFlags)
 
 } // namespace mozilla
 
@@ -225,7 +232,7 @@ public:
    *                                  3 4 5
    *                                  6 7 8
    */
-  void
+  DrawResult
   DrawBorderImageComponent(nsPresContext*       aPresContext,
                            nsRenderingContext&  aRenderingContext,
                            const nsRect&        aDirtyRect,
@@ -284,7 +291,7 @@ private:
   const nsStyleImage*       mImage;
   nsStyleImageType          mType;
   nsCOMPtr<imgIContainer>   mImageContainer;
-  nsRefPtr<nsStyleGradient> mGradientData;
+  RefPtr<nsStyleGradient> mGradientData;
   nsIFrame*                 mPaintServerFrame;
   nsLayoutUtils::SurfaceFromElementResult mImageElementSurface;
   DrawResult                mPrepareResult;
@@ -380,27 +387,29 @@ struct nsCSSRendering {
    * for borders. aSkipSides says which sides to skip
    * when rendering, the default is to skip none.
    */
-  static void PaintBorder(nsPresContext* aPresContext,
-                          nsRenderingContext& aRenderingContext,
-                          nsIFrame* aForFrame,
-                          const nsRect& aDirtyRect,
-                          const nsRect& aBorderArea,
-                          nsStyleContext* aStyleContext,
-                          Sides aSkipSides = Sides());
+  static DrawResult PaintBorder(nsPresContext* aPresContext,
+                                nsRenderingContext& aRenderingContext,
+                                nsIFrame* aForFrame,
+                                const nsRect& aDirtyRect,
+                                const nsRect& aBorderArea,
+                                nsStyleContext* aStyleContext,
+                                mozilla::PaintBorderFlags aFlags,
+                                Sides aSkipSides = Sides());
 
   /**
    * Like PaintBorder, but taking an nsStyleBorder argument instead of
    * getting it from aStyleContext. aSkipSides says which sides to skip
    * when rendering, the default is to skip none.
    */
-  static void PaintBorderWithStyleBorder(nsPresContext* aPresContext,
-                                         nsRenderingContext& aRenderingContext,
-                                         nsIFrame* aForFrame,
-                                         const nsRect& aDirtyRect,
-                                         const nsRect& aBorderArea,
-                                         const nsStyleBorder& aBorderStyle,
-                                         nsStyleContext* aStyleContext,
-                                         Sides aSkipSides = Sides());
+  static DrawResult PaintBorderWithStyleBorder(nsPresContext* aPresContext,
+                                               nsRenderingContext& aRenderingContext,
+                                               nsIFrame* aForFrame,
+                                               const nsRect& aDirtyRect,
+                                               const nsRect& aBorderArea,
+                                               const nsStyleBorder& aBorderStyle,
+                                               nsStyleContext* aStyleContext,
+                                               mozilla::PaintBorderFlags aFlags,
+                                               Sides aSkipSides = Sides());
 
 
   /**
@@ -982,7 +991,8 @@ public:
                     int32_t aAppUnitsPerDevPixel,
                     bool aHasBorderRadius,
                     RectCornerRadii& aInnerClipRectRadii,
-                    mozilla::gfx::Rect aSkipRect);
+                    mozilla::gfx::Rect aSkipRect,
+                    mozilla::gfx::Point aShadowOffset);
 
 protected:
   static void GetBlurAndSpreadRadius(gfxContext* aContext,
@@ -994,7 +1004,7 @@ protected:
                                      bool aConstrainSpreadRadius = true);
 
   gfxAlphaBoxBlur mAlphaBoxBlur;
-  nsRefPtr<gfxContext> mContext;
+  RefPtr<gfxContext> mContext;
   gfxContext* mDestinationCtx;
 
   /* This is true if the blur already has it's content transformed

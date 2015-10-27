@@ -273,7 +273,7 @@ GetGtkWindow(nsIDOMDocument *aDocument)
     if (!presShell)
         return nullptr;
 
-    nsRefPtr<nsViewManager> vm = presShell->GetViewManager();
+    RefPtr<nsViewManager> vm = presShell->GetViewManager();
     if (!vm)
         return nullptr;
 
@@ -312,11 +312,16 @@ nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
     if (mSourceNode)
         return NS_ERROR_NOT_AVAILABLE;
 
-    nsresult rv = nsBaseDragService::InvokeDragSession(aDOMNode,
-                                                       aArrayTransferables,
-                                                       aRegion, aActionType);
-    NS_ENSURE_SUCCESS(rv, rv);
+    return nsBaseDragService::InvokeDragSession(aDOMNode, aArrayTransferables,
+                                                aRegion, aActionType);
+}
 
+// nsBaseDragService
+nsresult
+nsDragService::InvokeDragSessionImpl(nsISupportsArray* aArrayTransferables,
+                                     nsIScriptableRegion* aRegion,
+                                     uint32_t aActionType)
+{
     // make sure that we have an array of transferables to use
     if (!aArrayTransferables)
         return NS_ERROR_INVALID_ARG;
@@ -377,6 +382,7 @@ nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
 
     mSourceRegion = nullptr;
 
+    nsresult rv;
     if (context) {
         StartDragSession();
 
@@ -391,6 +397,7 @@ nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
         }
         // We don't have a drag end point yet.
         mEndDragPoint = nsIntPoint(-1, -1);
+        rv = NS_OK;
     }
     else {
         rv = NS_ERROR_FAILURE;
@@ -428,7 +435,7 @@ nsDragService::SetAlphaPixmap(SourceSurface *aSurface,
     gdk_drawable_set_colormap(GDK_DRAWABLE(pixmap), alphaColormap);
 
     // Make a gfxXlibSurface wrapped around the pixmap to render on
-    nsRefPtr<gfxASurface> xPixmapSurface =
+    RefPtr<gfxASurface> xPixmapSurface =
          nsWindow::GetSurfaceForGdkDrawable(GDK_DRAWABLE(pixmap),
                                             dragRect.Size());
     if (!xPixmapSurface)
@@ -1861,7 +1868,7 @@ nsDragService::Schedule(DragTask aTask, nsWindow *aWindow,
 gboolean
 nsDragService::TaskDispatchCallback(gpointer data)
 {
-    nsRefPtr<nsDragService> dragService = static_cast<nsDragService*>(data);
+    RefPtr<nsDragService> dragService = static_cast<nsDragService*>(data);
     return dragService->RunScheduledTask();
 }
 

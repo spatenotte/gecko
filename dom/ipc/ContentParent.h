@@ -427,6 +427,8 @@ public:
     virtual bool
     DeallocPContentPermissionRequestParent(PContentPermissionRequestParent* actor) override;
 
+    virtual bool HandleWindowsMessages(const Message& aMsg) const override;
+
     bool HasGamepadListener() const { return mHasGamepadListener; }
 
     void SetNuwaParent(NuwaParent* aNuwaParent) { mNuwaParent = aNuwaParent; }
@@ -754,6 +756,8 @@ private:
     virtual bool RecvSetURITitle(const URIParams& uri,
                                  const nsString& title) override;
 
+    bool HasNotificationPermission(const IPC::Principal& aPrincipal);
+
     virtual bool RecvShowAlertNotification(const nsString& aImageUrl, const nsString& aTitle,
                                            const nsString& aText, const bool& aTextClickable,
                                            const nsString& aCookie, const nsString& aName,
@@ -764,6 +768,10 @@ private:
 
     virtual bool RecvCloseAlert(const nsString& aName,
                                 const IPC::Principal& aPrincipal) override;
+
+    virtual bool RecvDisableNotifications(const IPC::Principal& aPrincipal) override;
+
+    virtual bool RecvOpenNotificationSettings(const IPC::Principal& aPrincipal) override;
 
     virtual bool RecvLoadURIExternal(const URIParams& uri) override;
 
@@ -977,7 +985,7 @@ private:
     // Allows NuwaParent to access OnNuwaReady() and OnNewProcessCreated().
     friend class NuwaParent;
 
-    nsRefPtr<nsConsoleService>  mConsoleService;
+    RefPtr<nsConsoleService>  mConsoleService;
     nsConsoleService* GetConsoleService();
 
     nsTArray<nsCOMPtr<nsIObserver>> mIdleListeners;
@@ -997,10 +1005,10 @@ private:
 
     // NuwaParent and ContentParent hold strong references to each other. The
     // cycle will be broken when either actor is destroyed.
-    nsRefPtr<NuwaParent> mNuwaParent;
+    RefPtr<NuwaParent> mNuwaParent;
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
-    nsRefPtr<mozilla::ProfileGatherer> mGatherer;
+    RefPtr<mozilla::ProfileGatherer> mGatherer;
 #endif
     nsCString mProfile;
 
@@ -1028,7 +1036,7 @@ public:
   {}
 private:
   virtual ~ParentIdleListener() {}
-  nsRefPtr<mozilla::dom::ContentParent> mParent;
+  RefPtr<mozilla::dom::ContentParent> mParent;
   uint64_t mObserver;
   uint32_t mTime;
 };
