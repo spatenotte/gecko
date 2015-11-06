@@ -1026,7 +1026,7 @@ CanvasRenderingContext2D::ParseColor(const nsAString& aString,
         mCanvasElement, nullptr, presShell);
     }
 
-    unused << nsRuleNode::ComputeColor(
+    Unused << nsRuleNode::ComputeColor(
       value, presShell ? presShell->GetPresContext() : nullptr, parentContext,
       *aColor);
   }
@@ -1414,7 +1414,7 @@ CanvasRenderingContext2D::EnsureTarget(RenderingMode aRenderingMode)
             mBufferProvider = new PersistentBufferProviderBasic(mTarget);
             mIsSkiaGL = true;
           } else {
-            printf_stderr("Failed to create a SkiaGL DrawTarget, falling back to software\n");
+            gfxCriticalNote << "Failed to create a SkiaGL DrawTarget, falling back to software\n";
             mode = RenderingMode::SoftwareBackendMode;
           }
         }
@@ -1470,6 +1470,10 @@ CanvasRenderingContext2D::EnsureTarget(RenderingMode aRenderingMode)
     mTarget = sErrorTarget;
   }
 
+  // Drop a note in the debug builds if we ever use accelerated Skia canvas.
+  if (mIsSkiaGL && mTarget && mTarget->GetType() == DrawTargetType::HARDWARE_RASTER) {
+    gfxWarningOnce() << "Using SkiaGL canvas.";
+  }
   return mode;
 }
 
@@ -1642,26 +1646,24 @@ CanvasRenderingContext2D::SetContextOptions(JSContext* aCx,
   return NS_OK;
 }
 
-void
-CanvasRenderingContext2D::GetImageBuffer(uint8_t** aImageBuffer,
-                                         int32_t* aFormat)
+UniquePtr<uint8_t[]>
+CanvasRenderingContext2D::GetImageBuffer(int32_t* aFormat)
 {
-  *aImageBuffer = nullptr;
   *aFormat = 0;
 
   EnsureTarget();
   RefPtr<SourceSurface> snapshot = mTarget->Snapshot();
   if (!snapshot) {
-    return;
+    return nullptr;
   }
 
   RefPtr<DataSourceSurface> data = snapshot->GetDataSurface();
   if (!data || data->GetSize() != IntSize(mWidth, mHeight)) {
-    return;
+    return nullptr;
   }
 
-  *aImageBuffer = SurfaceToPackedBGRA(data);
   *aFormat = imgIEncoder::INPUT_FORMAT_HOSTARGB;
+  return SurfaceToPackedBGRA(data);
 }
 
 nsString CanvasRenderingContext2D::GetHitRegion(const mozilla::gfx::Point& aPoint)
@@ -1687,15 +1689,15 @@ CanvasRenderingContext2D::GetInputStream(const char *aMimeType,
     return NS_ERROR_FAILURE;
   }
 
-  nsAutoArrayPtr<uint8_t> imageBuffer;
   int32_t format = 0;
-  GetImageBuffer(getter_Transfers(imageBuffer), &format);
+  UniquePtr<uint8_t[]> imageBuffer = GetImageBuffer(&format);
   if (!imageBuffer) {
     return NS_ERROR_FAILURE;
   }
 
-  return ImageEncoder::GetInputStream(mWidth, mHeight, imageBuffer, format,
-                                      encoder, aEncoderOptions, aStream);
+  return ImageEncoder::GetInputStream(mWidth, mHeight, imageBuffer.get(),
+                                      format, encoder, aEncoderOptions,
+                                      aStream);
 }
 
 SurfaceFormat
@@ -2133,8 +2135,8 @@ CanvasRenderingContext2D::SetShadowColor(const nsAString& shadowColor)
 // filters
 //
 
-static already_AddRefed<StyleRule>
-CreateStyleRule(nsINode* aNode,
+static already_AddRefed<Declaration>
+CreateDeclaration(nsINode* aNode,
   const nsCSSProperty aProp1, const nsAString& aValue1, bool* aChanged1,
   const nsCSSProperty aProp2, const nsAString& aValue2, bool* aChanged2,
   ErrorResult& error)
@@ -2167,19 +2169,19 @@ CreateStyleRule(nsINode* aNode,
                          rule->GetDeclaration(), aChanged2, false);
   }
 
-  rule->RuleMatched();
-
-  return rule.forget();
+  RefPtr<Declaration> declaration = rule->GetDeclaration();
+  declaration->SetImmutable();
+  return declaration.forget();
 }
 
-static already_AddRefed<StyleRule>
-CreateFontStyleRule(const nsAString& aFont,
-                    nsINode* aNode,
-                    bool* aOutFontChanged,
-                    ErrorResult& error)
+static already_AddRefed<Declaration>
+CreateFontDeclaration(const nsAString& aFont,
+                      nsINode* aNode,
+                      bool* aOutFontChanged,
+                      ErrorResult& error)
 {
   bool lineHeightChanged;
-  return CreateStyleRule(aNode,
+  return CreateDeclaration(aNode,
     eCSSProperty_font, aFont, aOutFontChanged,
     eCSSProperty_line_height, NS_LITERAL_STRING("normal"), &lineHeightChanged,
     error);
@@ -2203,9 +2205,9 @@ GetFontParentStyleContext(Element* aElement, nsIPresShell* presShell,
 
   // otherwise inherit from default (10px sans-serif)
   bool changed;
-  RefPtr<css::StyleRule> parentRule =
-    CreateFontStyleRule(NS_LITERAL_STRING("10px sans-serif"),
-                        presShell->GetDocument(), &changed, error);
+  RefPtr<css::Declaration> parentRule =
+    CreateFontDeclaration(NS_LITERAL_STRING("10px sans-serif"),
+                          presShell->GetDocument(), &changed, error);
 
   if (error.Failed()) {
     return nullptr;
@@ -2224,13 +2226,12 @@ GetFontParentStyleContext(Element* aElement, nsIPresShell* presShell,
 }
 
 static bool
-PropertyIsInheritOrInitial(StyleRule* aRule, const nsCSSProperty aProperty)
+PropertyIsInheritOrInitial(Declaration* aDeclaration, const nsCSSProperty aProperty)
 {
-  css::Declaration* declaration = aRule->GetDeclaration();
   // We know the declaration is not !important, so we can use
   // GetNormalBlock().
   const nsCSSValue* filterVal =
-    declaration->GetNormalBlock()->ValueFor(aProperty);
+    aDeclaration->GetNormalBlock()->ValueFor(aProperty);
   return (!filterVal || (filterVal->GetUnit() == eCSSUnit_Unset ||
                          filterVal->GetUnit() == eCSSUnit_Inherit ||
                          filterVal->GetUnit() == eCSSUnit_Initial));
@@ -2243,9 +2244,9 @@ GetFontStyleContext(Element* aElement, const nsAString& aFont,
                     ErrorResult& error)
 {
   bool fontParsedSuccessfully = false;
-  RefPtr<css::StyleRule> rule =
-    CreateFontStyleRule(aFont, presShell->GetDocument(),
-                        &fontParsedSuccessfully, error);
+  RefPtr<css::Declaration> decl =
+    CreateFontDeclaration(aFont, presShell->GetDocument(),
+                          &fontParsedSuccessfully, error);
 
   if (error.Failed()) {
     return nullptr;
@@ -2260,7 +2261,7 @@ GetFontStyleContext(Element* aElement, const nsAString& aFont,
   // 'inherit' and 'initial'. The easiest way to check for this is to look
   // at font-size-adjust, which the font shorthand resets to either 'none' or
   // '-moz-system-font'.
-  if (PropertyIsInheritOrInitial(rule, eCSSProperty_font_size_adjust)) {
+  if (PropertyIsInheritOrInitial(decl, eCSSProperty_font_size_adjust)) {
     return nullptr;
   }
 
@@ -2281,7 +2282,7 @@ GetFontStyleContext(Element* aElement, const nsAString& aFont,
              "GetFontParentStyleContext should have returned an error if the presshell is being destroyed.");
 
   nsTArray<nsCOMPtr<nsIStyleRule>> rules;
-  rules.AppendElement(rule);
+  rules.AppendElement(decl);
   // add a rule to prevent text zoom from affecting the style
   rules.AppendElement(new nsDisableTextZoomStyleRule);
 
@@ -2293,34 +2294,34 @@ GetFontStyleContext(Element* aElement, const nsAString& aFont,
   // parsed (including having line-height removed).  (Older drafts of
   // the spec required font sizes be converted to pixels, but that no
   // longer seems to be required.)
-  rule->GetDeclaration()->GetValue(eCSSProperty_font, aOutUsedFont);
+  decl->GetValue(eCSSProperty_font, aOutUsedFont);
 
   return sc.forget();
 }
 
-static already_AddRefed<StyleRule>
-CreateFilterStyleRule(const nsAString& aFilter,
-                      nsINode* aNode,
-                      bool* aOutFilterChanged,
-                      ErrorResult& error)
+static already_AddRefed<Declaration>
+CreateFilterDeclaration(const nsAString& aFilter,
+                        nsINode* aNode,
+                        bool* aOutFilterChanged,
+                        ErrorResult& error)
 {
   bool dummy;
-  return CreateStyleRule(aNode,
+  return CreateDeclaration(aNode,
     eCSSProperty_filter, aFilter, aOutFilterChanged,
     eCSSProperty_UNKNOWN, EmptyString(), &dummy,
     error);
 }
 
 static already_AddRefed<nsStyleContext>
-ResolveStyleForFilterRule(const nsAString& aFilterString,
-                          nsIPresShell* aPresShell,
-                          nsStyleContext* aParentContext,
-                          ErrorResult& error)
+ResolveStyleForFilter(const nsAString& aFilterString,
+                      nsIPresShell* aPresShell,
+                      nsStyleContext* aParentContext,
+                      ErrorResult& error)
 {
   nsIDocument* document = aPresShell->GetDocument();
   bool filterChanged = false;
-  RefPtr<css::StyleRule> rule =
-    CreateFilterStyleRule(aFilterString, document, &filterChanged, error);
+  RefPtr<css::Declaration> decl =
+    CreateFilterDeclaration(aFilterString, document, &filterChanged, error);
 
   if (error.Failed()) {
     return nullptr;
@@ -2333,12 +2334,12 @@ ResolveStyleForFilterRule(const nsAString& aFilterString,
 
   // In addition to unparseable values, the spec says we need to reject
   // 'inherit' and 'initial'.
-  if (PropertyIsInheritOrInitial(rule, eCSSProperty_filter)) {
+  if (PropertyIsInheritOrInitial(decl, eCSSProperty_filter)) {
     return nullptr;
   }
 
   nsTArray<nsCOMPtr<nsIStyleRule>> rules;
-  rules.AppendElement(rule);
+  rules.AppendElement(decl);
 
   RefPtr<nsStyleContext> sc =
     aPresShell->StyleSet()->ResolveStyleForRules(aParentContext, rules);
@@ -2373,7 +2374,7 @@ CanvasRenderingContext2D::ParseFilter(const nsAString& aString,
   }
 
   RefPtr<nsStyleContext> sc =
-    ResolveStyleForFilterRule(aString, presShell, parentContext, error);
+    ResolveStyleForFilter(aString, presShell, parentContext, error);
 
   if (!sc) {
     return false;
@@ -4310,7 +4311,8 @@ CanvasRenderingContext2D::CachedSurfaceFromElement(Element* aElement)
     return res;
   }
 
-  res.mSourceSurface = CanvasImageCache::SimpleLookup(aElement);
+  res.mSourceSurface =
+    CanvasImageCache::SimpleLookup(aElement, mIsSkiaGL);
   if (!res.mSourceSurface) {
     return res;
   }
@@ -4416,7 +4418,7 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& image,
     }
 
     srcSurf =
-      CanvasImageCache::Lookup(element, mCanvasElement, &imgSize);
+      CanvasImageCache::Lookup(element, mCanvasElement, &imgSize, mIsSkiaGL);
   }
 
   nsLayoutUtils::DirectDrawInfo drawInfo;
@@ -4495,7 +4497,7 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& image,
     if (ok) {
       NativeSurface texSurf;
       texSurf.mType = NativeSurfaceType::OPENGL_TEXTURE;
-      texSurf.mFormat = SurfaceFormat::R5G6B5;
+      texSurf.mFormat = SurfaceFormat::R5G6B5_UINT16;
       texSurf.mSize.width = mCurrentVideoSize.width;
       texSurf.mSize.height = mCurrentVideoSize.height;
       texSurf.mSurface = (void*)((uintptr_t)mVideoTexture);
@@ -4564,7 +4566,7 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& image,
     if (res.mSourceSurface) {
       if (res.mImageRequest) {
         CanvasImageCache::NotifyDrawImage(element, mCanvasElement, res.mImageRequest,
-                                          res.mSourceSurface, imgSize);
+                                          res.mSourceSurface, imgSize, mIsSkiaGL);
       }
 
       srcSurf = res.mSourceSurface;
@@ -4886,7 +4888,7 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& window, double x,
   }
 
   nsCOMPtr<nsIPresShell> shell = presContext->PresShell();
-  unused << shell->RenderDocument(r, renderDocFlags, backgroundColor, thebes);
+  Unused << shell->RenderDocument(r, renderDocFlags, backgroundColor, thebes);
   if (drawDT) {
     RefPtr<SourceSurface> snapshot = drawDT->Snapshot();
     RefPtr<DataSourceSurface> data = snapshot->GetDataSurface();
@@ -5328,9 +5330,6 @@ CanvasRenderingContext2D::PutImageData(ImageData& imageData, double dx,
                                 JS::ToInt32(dirtyWidth),
                                 JS::ToInt32(dirtyHeight));
 }
-
-// void putImageData (in ImageData d, in float x, in float y);
-// void putImageData (in ImageData d, in double x, in double y, in double dirtyX, in double dirtyY, in double dirtyWidth, in double dirtyHeight);
 
 nsresult
 CanvasRenderingContext2D::PutImageData_explicit(int32_t x, int32_t y, uint32_t w, uint32_t h,

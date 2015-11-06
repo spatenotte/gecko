@@ -1441,6 +1441,8 @@ JitCompartment::generateRegExpExecStub(JSContext* cx)
     Linker linker(masm);
     AutoFlushICache afc("RegExpExecStub");
     JitCode* code = linker.newCode<CanGC>(cx, OTHER_CODE);
+    if (!code)
+        return nullptr;
 
 #ifdef JS_ION_PERF
     writePerfSpewerJitCodeProfile(code, "RegExpExecStub");
@@ -1572,6 +1574,8 @@ JitCompartment::generateRegExpTestStub(JSContext* cx)
     Linker linker(masm);
     AutoFlushICache afc("RegExpTestStub");
     JitCode* code = linker.newCode<CanGC>(cx, OTHER_CODE);
+    if (!code)
+        return nullptr;
 
 #ifdef JS_ION_PERF
     writePerfSpewerJitCodeProfile(code, "RegExpTestStub");
@@ -4095,7 +4099,7 @@ CodeGenerator::generateBody()
         if (current->isTrivial())
             continue;
 
-#ifdef DEBUG
+#ifdef JS_JITSPEW
         const char* filename = nullptr;
         size_t lineNumber = 0;
         unsigned columnNumber = 0;
@@ -4105,8 +4109,10 @@ CodeGenerator::generateBody()
                 lineNumber = PCToLineNumber(current->mir()->info().script(), current->mir()->pc(),
                                             &columnNumber);
         } else {
+#ifdef DEBUG
             lineNumber = current->mir()->lineno();
             columnNumber = current->mir()->columnIndex();
+#endif
         }
         JitSpew(JitSpew_Codegen, "# block%" PRIuSIZE " %s:%" PRIuSIZE ":%u%s:",
                 i, filename ? filename : "?", lineNumber, columnNumber,
@@ -4127,7 +4133,7 @@ CodeGenerator::generateBody()
 #endif
 
         for (LInstructionIterator iter = current->begin(); iter != current->end(); iter++) {
-#ifdef DEBUG
+#ifdef JS_JITSPEW
             JitSpewStart(JitSpew_Codegen, "instruction %s", iter->opName());
             if (const char* extra = iter->extraName())
                 JitSpewCont(JitSpew_Codegen, ":%s", extra);
@@ -5096,13 +5102,13 @@ void
 CodeGenerator::visitComputeThis(LComputeThis* lir)
 {
     ValueOperand value = ToValue(lir, LComputeThis::ValueIndex);
-    Register output = ToRegister(lir->output());
+    ValueOperand output = ToOutValue(lir);
 
-    OutOfLineCode* ool = oolCallVM(BoxNonStrictThisInfo, lir, ArgList(value), StoreValueTo(value));
+    OutOfLineCode* ool = oolCallVM(BoxNonStrictThisInfo, lir, ArgList(value), StoreValueTo(output));
 
     masm.branchTestObject(Assembler::NotEqual, value, ool->entry());
+    masm.moveValue(value, output);
     masm.bind(ool->rejoin());
-    masm.unboxObject(value, output);
 }
 
 void
@@ -8138,13 +8144,11 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
 
     {
         AutoWritableJitCode awjc(code);
-        invalidateEpilogueData_.fixup(&masm);
         Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, invalidateEpilogueData_),
                                            ImmPtr(ionScript),
                                            ImmPtr((void*)-1));
 
         for (size_t i = 0; i < ionScriptLabels_.length(); i++) {
-            ionScriptLabels_[i].fixup(&masm);
             Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, ionScriptLabels_[i]),
                                                ImmPtr(ionScript),
                                                ImmPtr((void*)-1));
@@ -8153,7 +8157,6 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
 #ifdef JS_TRACE_LOGGING
         TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
         for (uint32_t i = 0; i < patchableTraceLoggers_.length(); i++) {
-            patchableTraceLoggers_[i].fixup(&masm);
             Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, patchableTraceLoggers_[i]),
                                                ImmPtr(logger),
                                                ImmPtr(nullptr));
@@ -8165,7 +8168,6 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
             ionScript->setTraceLoggerEvent(event);
             uint32_t textId = event.payload()->textId();
             for (uint32_t i = 0; i < patchableTLScripts_.length(); i++) {
-                patchableTLScripts_[i].fixup(&masm);
                 Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, patchableTLScripts_[i]),
                                                    ImmPtr((void*) uintptr_t(textId)),
                                                    ImmPtr((void*)0));
@@ -8175,11 +8177,9 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
         // Patch shared stub IC loads using IC entries
         for (size_t i = 0; i < sharedStubs_.length(); i++) {
             CodeOffsetLabel label = sharedStubs_[i].label;
-            label.fixup(&masm);
 
             IonICEntry& entry = ionScript->sharedStubList()[i];
             entry = sharedStubs_[i].entry;
-            entry.fixupReturnOffset(masm);
             Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, label),
                                                ImmPtr(&entry),
                                                ImmPtr((void*)-1));
@@ -8203,8 +8203,7 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
     ionScript->setInvalidationEpilogueDataOffset(invalidateEpilogueData_.offset());
     ionScript->setOsrPc(gen->info().osrPc());
     ionScript->setOsrEntryOffset(getOsrEntryOffset());
-    ptrdiff_t real_invalidate = masm.actualOffset(invalidate_.offset());
-    ionScript->setInvalidationEpilogueOffset(real_invalidate);
+    ionScript->setInvalidationEpilogueOffset(invalidate_.offset());
 
     ionScript->setDeoptTable(deoptTable_);
 
@@ -9298,49 +9297,6 @@ CodeGenerator::visitAtomicIsLockFree(LAtomicIsLockFree* lir)
         masm.bind(&Lfailed);
     masm.move32(Imm32(0), output);
     masm.bind(&Ldone);
-}
-
-void
-CodeGenerator::visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir)
-{
-    Register elements = ToRegister(lir->elements());
-    AnyRegister output = ToAnyRegister(lir->output());
-    Register temp = lir->temp()->isBogusTemp() ? InvalidReg : ToRegister(lir->temp());
-
-    Register oldval = ToRegister(lir->oldval());
-    Register newval = ToRegister(lir->newval());
-
-    Scalar::Type arrayType = lir->mir()->arrayType();
-    int width = Scalar::byteSize(arrayType);
-
-    if (lir->index()->isConstant()) {
-        Address dest(elements, ToInt32(lir->index()) * width);
-        masm.compareExchangeToTypedIntArray(arrayType, dest, oldval, newval, temp, output);
-    } else {
-        BaseIndex dest(elements, ToRegister(lir->index()), ScaleFromElemWidth(width));
-        masm.compareExchangeToTypedIntArray(arrayType, dest, oldval, newval, temp, output);
-    }
-}
-
-void
-CodeGenerator::visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir)
-{
-    Register elements = ToRegister(lir->elements());
-    AnyRegister output = ToAnyRegister(lir->output());
-    Register temp = lir->temp()->isBogusTemp() ? InvalidReg : ToRegister(lir->temp());
-
-    Register value = ToRegister(lir->value());
-
-    Scalar::Type arrayType = lir->mir()->arrayType();
-    int width = Scalar::byteSize(arrayType);
-
-    if (lir->index()->isConstant()) {
-        Address dest(elements, ToInt32(lir->index()) * width);
-        masm.atomicExchangeToTypedIntArray(arrayType, dest, value, temp, output);
-    } else {
-        BaseIndex dest(elements, ToRegister(lir->index()), ScaleFromElemWidth(width));
-        masm.atomicExchangeToTypedIntArray(arrayType, dest, value, temp, output);
-    }
 }
 
 void

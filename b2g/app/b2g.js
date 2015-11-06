@@ -343,7 +343,6 @@ pref("image.mem.surfacecache.max_size_kb", 131072);  // 128MB
 pref("image.mem.surfacecache.size_factor", 8);  // 1/8 of main memory
 pref("image.mem.surfacecache.discard_factor", 2);  // Discard 1/2 of the surface cache at a time.
 pref("image.mem.surfacecache.min_expiration_ms", 86400000); // 24h, we rely on the out of memory hook
-pref("image.onload.decode.limit", 24); /* don't decode more than 24 images eagerly */
 
 // XXX this isn't a good check for "are touch events supported", but
 // we don't really have a better one at the moment.
@@ -679,7 +678,7 @@ pref("javascript.options.mem.gc_max_empty_chunk_count", 2);
 pref("ui.showHideScrollbars", 1);
 pref("ui.useOverlayScrollbars", 1);
 pref("ui.scrollbarFadeBeginDelay", 450);
-pref("ui.scrollbarFadeDuration", 200);
+pref("ui.scrollbarFadeDuration", 0);
 
 // Scrollbar position follows the document `dir` attribute
 pref("layout.scrollbar.side", 1);
@@ -694,6 +693,7 @@ pref("layout.css.scroll-snap.enabled", true);
 pref("dom.ipc.processPriorityManager.enabled", true);
 pref("dom.ipc.processPriorityManager.backgroundGracePeriodMS", 1000);
 pref("dom.ipc.processPriorityManager.backgroundPerceivableGracePeriodMS", 5000);
+pref("dom.ipc.processPriorityManager.memoryPressureGracePeriodMS", 3000);
 pref("dom.ipc.processPriorityManager.temporaryPriorityLockMS", 5000);
 
 // Number of different background/foreground levels for background/foreground
@@ -1151,6 +1151,12 @@ pref("dom.performance.enable_notify_performance_timing", true);
 // Multi-screen
 pref("b2g.multiscreen.chrome_remote_url", "chrome://b2g/content/shell_remote.html");
 pref("b2g.multiscreen.system_remote_url", "index_remote.html");
+
+// Blocklist service
+pref("extensions.blocklist.enabled", true);
+pref("extensions.blocklist.interval", 86400);
+pref("extensions.blocklist.url", "https://blocklist.addons.mozilla.org/blocklist/3/%APP_ID%/%APP_VERSION%/%PRODUCT%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%PING_COUNT%/%TOTAL_PING_COUNT%/%DAYS_SINCE_LAST_PING%/");
+pref("extensions.blocklist.detailsURL", "https://www.mozilla.com/%LOCALE%/blocklist/");
 
 // Because we can't have nice things.
 #ifdef MOZ_GRAPHENE

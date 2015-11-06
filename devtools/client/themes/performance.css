@@ -506,6 +506,17 @@
 }
 
 /**
+ * OTMT markers
+ */
+
+.waterfall-tree-item[otmt=true] .waterfall-marker-bullet,
+.waterfall-tree-item[otmt=true] .waterfall-marker-bar {
+  background-color: transparent;
+  border-width: 1px;
+  border-style: solid;
+}
+
+/**
  * Marker details view
  */
 
@@ -549,37 +560,56 @@
  * Marker colors
  */
 
+menuitem.marker-color-graphs-full-red:before,
+.marker-color-graphs-full-red {
+  background-color: var(--theme-graphs-full-red);
+  border-color: var(--theme-graphs-full-red);
+}
+menuitem.marker-color-graphs-full-blue:before,
+.marker-color-graphs-full-blue {
+  background-color: var(--theme-graphs-full-blue);
+  border-color: var(--theme-graphs-full-blue);
+}
+
 menuitem.marker-color-graphs-green:before,
 .marker-color-graphs-green {
   background-color: var(--theme-graphs-green);
+  border-color: var(--theme-graphs-green);
 }
 menuitem.marker-color-graphs-blue:before,
 .marker-color-graphs-blue {
   background-color: var(--theme-graphs-blue);
+  border-color: var(--theme-graphs-blue);
 }
 menuitem.marker-color-graphs-bluegrey:before,
 .marker-color-graphs-bluegrey {
   background-color: var(--theme-graphs-bluegrey);
+  border-color: var(--theme-graphs-bluegrey);
 }
 menuitem.marker-color-graphs-purple:before,
 .marker-color-graphs-purple {
   background-color: var(--theme-graphs-purple);
+  border-color: var(--theme-graphs-purple);
 }
 menuitem.marker-color-graphs-yellow:before,
 .marker-color-graphs-yellow {
   background-color: var(--theme-graphs-yellow);
+  border-color: var(--theme-graphs-yellow);
 }
 menuitem.marker-color-graphs-orange:before,
 .marker-color-graphs-orange {
   background-color: var(--theme-graphs-orange);
+  border-color: var(--theme-graphs-orange);
 }
 menuitem.marker-color-graphs-red:before,
 .marker-color-graphs-red {
   background-color: var(--theme-graphs-red);
+  border-color: var(--theme-graphs-red);
 }
 menuitem.marker-color-graphs-grey:before,
 .marker-color-graphs-grey{
   background-color: var(--theme-graphs-grey);
+  border-color: var(--theme-graphs-grey);
 }
 
 /**
@@ -686,7 +716,7 @@ menuitem.marker-color-graphs-grey:before,
 
 .opt-icon::before {
   content: "";
-  background-image: url(chrome://devtools/skin/themes/images/webconsole.svg);
+  background-image: url(chrome://devtools/skin/images/webconsole.svg);
   background-repeat: no-repeat;
   background-size: 72px 60px;
   /* show grey "i" bubble by default */
@@ -708,7 +738,7 @@ description.opt-icon::before {
   margin: 1px 4px 0px 0px;
 }
 .theme-light .opt-icon::before {
-  background-image: url(chrome://devtools/skin/themes/images/webconsole.svg#light-icons);
+  background-image: url(chrome://devtools/skin/images/webconsole.svg#light-icons);
 }
 .opt-icon[severity=warning]::before {
   background-position: -24px -24px;
@@ -741,7 +771,7 @@ ul.frames-list li.selected {
  */
 menuitem.experimental-option::before {
   content: "";
-  background-image: url(chrome://devtools/skin/themes/images/webconsole.svg);
+  background-image: url(chrome://devtools/skin/images/webconsole.svg);
   background-repeat: no-repeat;
   background-size: 72px 60px;
   width: 12px;
@@ -753,7 +783,7 @@ menuitem.experimental-option::before {
   max-height: 12px;
 }
 .theme-light menuitem.experimental-option::before {
-  background-image: url(chrome://devtools/skin/themes/images/webconsole.svg#light-icons);
+  background-image: url(chrome://devtools/skin/images/webconsole.svg#light-icons);
 }
 
 #performance-options-menupopup:not(.experimental-enabled) .experimental-option,

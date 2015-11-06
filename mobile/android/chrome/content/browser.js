@@ -721,6 +721,9 @@ var BrowserApp = {
     NativeWindow.contextmenus.add(stringGetter("contextmenu.addToReadingList"),
       NativeWindow.contextmenus.linkOpenableContext,
       function(aTarget) {
+        UITelemetry.addEvent("action.1", "contextmenu", null, "web_reading_list");
+        UITelemetry.addEvent("save.1", "contextmenu", null, "reading_list");
+
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
         Messaging.sendRequestForResult({
             type: "Reader:AddToList",
@@ -840,6 +843,7 @@ var BrowserApp = {
       NativeWindow.contextmenus._disableRestricted("BOOKMARK", NativeWindow.contextmenus.linkBookmarkableContext),
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_bookmark");
+        UITelemetry.addEvent("save.1", "contextmenu", null, "bookmark");
 
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
         let title = aTarget.textContent || aTarget.title || url;
@@ -928,7 +932,7 @@ var BrowserApp = {
         let doc = aTarget.ownerDocument;
         let imageCache = Cc["@mozilla.org/image/tools;1"].getService(Ci.imgITools)
                                                          .getImgCacheForDocument(doc);
-        let props = imageCache.findEntryProperties(aTarget.currentURI, doc.characterSet);
+        let props = imageCache.findEntryProperties(aTarget.currentURI, doc);
         let src = aTarget.src;
         return {
           title: src,
@@ -2573,12 +2577,24 @@ var NativeWindow = {
 
     imageLocationCopyableContext: {
       matches: function imageLinkCopyableContextMatches(aElement) {
+        if (aElement instanceof Ci.nsIDOMHTMLImageElement) {
+          // The image is blocked by Tap-to-load Images
+          if (aElement.hasAttribute("data-ctv-src") && !aElement.hasAttribute("data-ctv-show")) {
+            return false;
+          }
+        }
         return (aElement instanceof Ci.nsIImageLoadingContent && aElement.currentURI);
       }
     },
 
     imageSaveableContext: {
       matches: function imageSaveableContextMatches(aElement) {
+        if (aElement instanceof Ci.nsIDOMHTMLImageElement) {
+          // The image is blocked by Tap-to-load Images
+          if (aElement.hasAttribute("data-ctv-src") && !aElement.hasAttribute("data-ctv-show")) {
+            return false;
+          }
+        }
         if (aElement instanceof Ci.nsIImageLoadingContent && aElement.currentURI) {
           // The image must be loaded to allow saving
           let request = aElement.getRequest(Ci.nsIImageLoadingContent.CURRENT_REQUEST);
@@ -4486,10 +4502,7 @@ Tab.prototype = {
     if (!ParentalControls.isAllowed(ParentalControls.VISIT_FILE_URLS, fixedURI)) {
       aRequest.cancel(Cr.NS_BINDING_ABORTED);
 
-      aRequest = this.browser.docShell.displayLoadError(Cr.NS_ERROR_UNKNOWN_PROTOCOL, fixedURI, null);
-      if (aRequest) {
-        fixedURI = aRequest.URI;
-      }
+      this.browser.docShell.displayLoadError(Cr.NS_ERROR_UNKNOWN_PROTOCOL, fixedURI, null);
     }
 
     let contentType = contentWin.document.contentType;
@@ -4751,6 +4764,9 @@ var BrowserEventHandler = {
 
     InitLater(() => BrowserApp.deck.addEventListener("click", InputWidgetHelper, true));
     InitLater(() => BrowserApp.deck.addEventListener("click", SelectHelper, true));
+    if (AppConstants.NIGHTLY_BUILD) {
+      InitLater(() => BrowserApp.deck.addEventListener("InsecureLoginFormsStateChange", IdentityHandler.sendLoginInsecure, true));
+    }
 
     // ReaderViews support backPress listeners.
     Messaging.addListener(() => {
@@ -5090,7 +5106,8 @@ var BrowserEventHandler = {
        * - It's a select element showing multiple rows
        */
       if (checkElem) {
-        if ((elem.scrollTopMax > 0 || elem.scrollLeftMax > 0) &&
+        if ((elem.scrollTopMin != elem.scrollTopMax ||
+             elem.scrollLeftMin != elem.scrollLeftMax) &&
             (this._hasScrollableOverflow(elem) ||
              elem.matches("textarea")) ||
             (elem instanceof HTMLInputElement && elem.mozIsTextField(false)) ||
@@ -5860,8 +5877,8 @@ var XPInstallObserver = {
 
   observe: function(aSubject, aTopic, aData) {
     let installInfo, tab, host;
-    if (aSubject) {
-      installInfo = aSubject.QueryInterface(Ci.amIWebInstallInfo);
+    if (aSubject && aSubject instanceof Ci.amIWebInstallInfo) {
+      installInfo = aSubject;
       tab = BrowserApp.getTabForBrowser(installInfo.browser);
       if (installInfo.originatingURI) {
         host = installInfo.originatingURI.host;
@@ -6603,6 +6620,18 @@ var IdentityHandler = {
     this.shieldHistogramAdd(aBrowser, 0);
     return this.TRACKING_MODE_UNKNOWN;
   },
+
+  sendLoginInsecure: function sendLoginInsecure() {
+    let loginInsecure = LoginManagerParent.hasInsecureLoginForms(BrowserApp.selectedBrowser);
+        if (loginInsecure) {
+          let message = {
+            type: "Content:LoginInsecure",
+            tabID: BrowserApp.selectedTab.id
+          };
+          Messaging.sendRequest(message);
+        }
+    },
+
 
   shieldHistogramAdd: function(browser, value) {
     if (PrivateBrowsingUtils.isBrowserPrivate(browser)) {

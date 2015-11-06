@@ -4041,8 +4041,9 @@ ICSetElem_DenseOrUnboxedArray::Compiler::generateStubCode(MacroAssembler& masm)
     EmitReturnFromIC(masm);
 
     if (failurePopR0.used()) {
+        // Failure case: restore the value of R0
         masm.bind(&failurePopR0);
-        masm.Pop(R0);
+        masm.popValue(R0);
     }
 
     // Failure case - jump to next stub
@@ -4277,8 +4278,9 @@ ICSetElemDenseOrUnboxedArrayAddCompiler::generateStubCode(MacroAssembler& masm)
     EmitReturnFromIC(masm);
 
     if (failurePopR0.used()) {
+        // Failure case: restore the value of R0
         masm.bind(&failurePopR0);
-        masm.Pop(R0);
+        masm.popValue(R0);
         masm.jump(&failure);
     }
 
@@ -6254,9 +6256,7 @@ ICGetProp_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
 void
 ICGetProp_Fallback::Compiler::postGenerateStubCode(MacroAssembler& masm, Handle<JitCode*> code)
 {
-    CodeOffsetLabel offset(returnOffset_);
-    offset.fixup(&masm);
-    cx->compartment()->jitCompartment()->initBaselineGetPropReturnAddr(code->raw() + offset.offset());
+    cx->compartment()->jitCompartment()->initBaselineGetPropReturnAddr(code->raw() + returnOffset_);
 }
 
 bool
@@ -7753,9 +7753,7 @@ ICSetProp_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
 void
 ICSetProp_Fallback::Compiler::postGenerateStubCode(MacroAssembler& masm, Handle<JitCode*> code)
 {
-    CodeOffsetLabel offset(returnOffset_);
-    offset.fixup(&masm);
-    cx->compartment()->jitCompartment()->initBaselineSetPropReturnAddr(code->raw() + offset.offset());
+    cx->compartment()->jitCompartment()->initBaselineSetPropReturnAddr(code->raw() + returnOffset_);
 }
 
 static void
@@ -9531,9 +9529,7 @@ ICCall_Fallback::Compiler::postGenerateStubCode(MacroAssembler& masm, Handle<Jit
     if (MOZ_UNLIKELY(isSpread_))
         return;
 
-    CodeOffsetLabel offset(returnOffset_);
-    offset.fixup(&masm);
-    cx->compartment()->jitCompartment()->initBaselineCallReturnAddr(code->raw() + offset.offset(),
+    cx->compartment()->jitCompartment()->initBaselineCallReturnAddr(code->raw() + returnOffset_,
                                                                     isConstructing_);
 }
 

@@ -321,7 +321,11 @@ if test -n "$gonkdir" ; then
     direct_nspr_config=1
     android_cxx_stl=mozstlport
 else
-    MOZ_ANDROID_NDK
+    if test "$COMPILE_ENVIRONMENT"; then
+        MOZ_ANDROID_NDK
+    else
+        AC_DEFINE(ANDROID)
+    fi # COMPILE_ENVIRONMENT
 
     case "$target" in
     *-android*|*-linuxandroid*)
@@ -1197,7 +1201,14 @@ esac
 
 dnl Configure platform-specific CPU architecture compiler options.
 dnl ==============================================================
-MOZ_ARCH_OPTS
+if test "$COMPILE_ENVIRONMENT"; then
+    MOZ_ARCH_OPTS
+else
+    if test "$OS_TARGET" = Android -a x"$MOZ_WIDGET_TOOLKIT" != x"gonk"; then
+        dnl Default Android builds to ARMv7.
+        MOZ_ARCH=armv7-a
+    fi
+fi # COMPILE_ENVIRONMENT
 
 dnl =================================================================
 dnl Set up and test static assertion macros used to avoid AC_TRY_RUN,
@@ -1246,7 +1257,10 @@ dnl Android libstdc++, placed here so it can use MOZ_ARCH
 dnl computed above.
 dnl ========================================================
 
-MOZ_ANDROID_STLPORT
+MOZ_ANDROID_CPU_ARCH
+if test "$COMPILE_ENVIRONMENT"; then
+    MOZ_ANDROID_STLPORT
+fi # COMPILE_ENVIRONMENT
 
 dnl ========================================================
 dnl Suppress Clang Argument Warnings
@@ -2532,6 +2546,7 @@ esac
 if test -z "$COMPILE_ENVIRONMENT"; then
     SKIP_COMPILER_CHECKS=1
     SKIP_LIBRARY_CHECKS=1
+    PKG_SKIP_STRIP=1
 else
     MOZ_COMPILER_OPTS
 fi # COMPILE_ENVIRONMENT
@@ -3755,6 +3770,7 @@ MOZ_LOCALE_SWITCHER=
 MOZ_ANDROID_READING_LIST_SERVICE=
 MOZ_ANDROID_SEARCH_ACTIVITY=
 MOZ_ANDROID_DOWNLOADS_INTEGRATION=
+MOZ_ANDROID_GCM=
 MOZ_ANDROID_MLS_STUMBLER=
 MOZ_ANDROID_SHARE_OVERLAY=
 MOZ_EXCLUDE_HYPHENATION_DICTIONARIES=
@@ -3911,6 +3927,14 @@ MOZ_ARG_WITH_STRING(adjust-sdk-keyfile,
   MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN=`cat $withval`)
 AC_SUBST(MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN)
 
+# Allow specifying a GCM sender ID key file that contains the sender ID used for
+# GCM requests.  Note that GCM sender IDs are not sensitive: see, for example,
+# http://stackoverflow.com/a/18216063.
+MOZ_ARG_WITH_STRING(gcm-senderid-keyfile,
+[  --with-gcm-senderid-keyfile=file GCM sender ID for GCM requests],
+  MOZ_ANDROID_GCM_SENDERID=`cat $withval`)
+AC_SUBST(MOZ_ANDROID_GCM_SENDERID)
+
 # Whether to include optional-but-large font files in the final APK.
 # We want this in mobile/android/confvars.sh, so it goes early.
 MOZ_ARG_DISABLE_BOOL(android-include-fonts,
@@ -4019,6 +4043,13 @@ fi
 
 if test -n "$MOZ_B2GDROID"; then
     AC_DEFINE(MOZ_B2GDROID)
+fi
+
+# Propagate feature switches for code written in rust from confvars.sh
+if test -n "$MOZ_RUST"; then
+    if test -n "$MOZ_RUST_MP4PARSE"; then
+        AC_DEFINE(MOZ_RUST_MP4PARSE)
+    fi
 fi
 
 AC_SUBST(MOZ_BUILD_APP)
@@ -4580,6 +4611,7 @@ dnl values set by configure.sh above.
 dnl ========================================================
 
 MOZ_ANDROID_GOOGLE_PLAY_SERVICES
+MOZ_ANDROID_GOOGLE_CLOUD_MESSAGING
 
 
 dnl ========================================================
@@ -4887,6 +4919,13 @@ if test -n "$MOZ_SWITCHBOARD"; then
 fi
 
 dnl ========================================================
+dnl = Enable GCM on Android.
+dnl ========================================================
+if test -n "$MOZ_ANDROID_GCM"; then
+    AC_DEFINE(MOZ_ANDROID_GCM)
+fi
+
+dnl ========================================================
 dnl = Enable IPDL's "expensive" unit tests
 dnl ========================================================
 MOZ_IPDL_TESTS=
@@ -4962,7 +5001,7 @@ AC_SUBST(MOZ_WEBRTC_HAVE_ETHTOOL_SPEED_HI)
 
 # target_arch is from {ia32|x64|arm|ppc}
 case "$CPU_ARCH" in
-x86_64 | arm | x86 | ppc* | ia64)
+x86_64 | arm | aarch64 | x86 | ppc* | ia64)
     :
     ;;
 *)
@@ -5147,7 +5186,7 @@ fi;
 dnl ========================================================
 dnl = Apple platform decoder support
 dnl ========================================================
-if test "$MOZ_WIDGET_TOOLKIT" = "cocoa"; then
+if test "$MOZ_WIDGET_TOOLKIT" = "cocoa" || test "$MOZ_WIDGET_TOOLKIT" = "uikit"; then
   MOZ_APPLEMEDIA=1
 fi
 
@@ -7030,18 +7069,10 @@ elif test "$GNU_CC"; then
 fi
 
 dnl ========================================================
-dnl = Disable runtime logging checks
+dnl = Enable runtime logging
 dnl ========================================================
-MOZ_ARG_DISABLE_BOOL(logging,
-[  --disable-logging       Disable logging facilities],
-    NS_DISABLE_LOGGING=1,
-    NS_DISABLE_LOGGING= )
-if test "$NS_DISABLE_LOGGING"; then
-    AC_DEFINE(NS_DISABLE_LOGGING)
-else
-    AC_DEFINE(MOZ_LOGGING)
-    AC_DEFINE(FORCE_PR_LOG)
-fi
+AC_DEFINE(MOZ_LOGGING)
+AC_DEFINE(FORCE_PR_LOG)
 
 dnl ========================================================
 dnl = This will enable logging of addref, release, ctor, dtor.
@@ -7238,9 +7269,6 @@ if test -z "$MOZ_MEMORY"; then
   esac
 else
   AC_DEFINE(MOZ_MEMORY)
-  if test -n "$NIGHTLY_BUILD"; then
-    MOZ_JEMALLOC4=1
-  fi
   if test -n "$MOZ_JEMALLOC4"; then
     AC_DEFINE(MOZ_JEMALLOC4)
   fi
@@ -8592,6 +8620,7 @@ AC_SUBST(MOZ_WEBSMS_BACKEND)
 AC_SUBST(MOZ_ANDROID_BEAM)
 AC_SUBST(MOZ_LOCALE_SWITCHER)
 AC_SUBST(MOZ_DISABLE_GECKOVIEW)
+AC_SUBST(MOZ_ANDROID_GCM)
 AC_SUBST(MOZ_ANDROID_GECKOLIBS_AAR)
 AC_SUBST(MOZ_ANDROID_READING_LIST_SERVICE)
 AC_SUBST(MOZ_ANDROID_SEARCH_ACTIVITY)

@@ -1479,8 +1479,9 @@ nsObjectLoadingContent::IsYoutubeEmbed()
     do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
   NS_ASSERTION(thisContent, "Must be an instance of content");
 
-  // We're only interested in switching out embed tags
-  if (!thisContent->NodeInfo()->Equals(nsGkAtoms::embed)) {
+  // We're only interested in switching out embed and object tags
+  if (!thisContent->NodeInfo()->Equals(nsGkAtoms::embed) &&
+      !thisContent->NodeInfo()->Equals(nsGkAtoms::object)) {
     return false;
   }
   nsCOMPtr<nsIEffectiveTLDService> tldService =
@@ -1496,11 +1497,18 @@ nsObjectLoadingContent::IsYoutubeEmbed()
     // Data URIs won't parse correctly, so just fail silently here.
     return false;
   }
+  // See if URL is referencing youtube
   nsAutoCString domain("youtube.com");
-  if (StringEndsWith(domain, currentBaseDomain)) {
-    return true;
+  if (!StringEndsWith(domain, currentBaseDomain)) {
+    return false;
   }
-  return false;
+  // See if requester is planning on using the JS API.
+  nsAutoCString uri;
+  mURI->GetSpec(uri);
+  if (uri.Find("enablejsapi=1", true, 0, -1) == kNotFound) {
+    return false;
+  }
+  return true;
 }
 
 bool
@@ -2856,8 +2864,7 @@ nsObjectLoadingContent::ScriptRequestPluginInstance(JSContext* aCx,
                 aCx == nsContentUtils::GetCurrentJSContext());
   bool callerIsContentJS = (nsContentUtils::GetCurrentJSContext() &&
                             !nsContentUtils::IsCallerChrome() &&
-                            !nsContentUtils::IsCallerContentXBL() &&
-                            JS_IsRunning(aCx));
+                            !nsContentUtils::IsCallerContentXBL());
 
   nsCOMPtr<nsIContent> thisContent =
     do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
@@ -3300,17 +3307,14 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
   MOZ_ASSERT(thisContent);
   nsIDocument* ownerDoc = thisContent->OwnerDoc();
 
-  nsCOMPtr<nsIDOMWindow> window = ownerDoc->GetWindow();
+  nsCOMPtr<nsPIDOMWindow> window = ownerDoc->GetWindow();
   if (!window) {
     return false;
   }
-  nsCOMPtr<nsIDOMWindow> topWindow;
-  rv = window->GetTop(getter_AddRefs(topWindow));
-  NS_ENSURE_SUCCESS(rv, false);
-  nsCOMPtr<nsIDOMDocument> topDocument;
-  rv = topWindow->GetDocument(getter_AddRefs(topDocument));
-  NS_ENSURE_SUCCESS(rv, false);
-  nsCOMPtr<nsIDocument> topDoc = do_QueryInterface(topDocument);
+  nsCOMPtr<nsPIDOMWindow> topWindow = window->GetTop();
+  NS_ENSURE_TRUE(topWindow, false);
+  nsCOMPtr<nsIDocument> topDoc = topWindow->GetDoc();
+  NS_ENSURE_TRUE(topDoc, false);
 
   nsCOMPtr<nsIPermissionManager> permissionManager = services::GetPermissionManager();
   NS_ENSURE_TRUE(permissionManager, false);

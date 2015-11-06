@@ -152,7 +152,7 @@ pref("dom.serviceWorkers.enabled", false);
 pref("dom.serviceWorkers.interception.enabled", false);
 
 // Allow service workers to intercept opaque (cross origin) responses
-pref("dom.serviceWorkers.interception.opaque.enabled", false);
+pref("dom.serviceWorkers.interception.opaque.enabled", true);
 
 // The amount of time (milliseconds) service workers keep running after each event.
 pref("dom.serviceWorkers.idle_timeout", 30000);
@@ -345,7 +345,7 @@ pref("media.wave.enabled", true);
 #ifdef MOZ_WEBM
 pref("media.webm.enabled", true);
 #if defined(MOZ_FMP4) && defined(MOZ_WMF)
-pref("media.webm.intel_decoder.enabled", false);
+pref("media.webm.intel_decoder.enabled", true);
 #endif
 #endif
 #ifdef MOZ_GSTREAMER
@@ -353,6 +353,9 @@ pref("media.gstreamer.enabled", true);
 pref("media.gstreamer.enable-blacklist", true);
 #endif
 #ifdef MOZ_APPLEMEDIA
+#ifdef MOZ_WIDGET_UIKIT
+pref("media.mp3.enabled", true);
+#endif
 pref("media.apple.mp3.enabled", true);
 pref("media.apple.mp4.enabled", true);
 #endif
@@ -523,6 +526,9 @@ pref("media.video-queue.send-to-compositor-size", 9999);
 
 // Whether to disable the video stats to prevent fingerprinting
 pref("media.video_stats.enabled", true);
+
+// Weather we allow AMD switchable graphics
+pref("layers.amd-switchable-gfx.enabled", true);
 
 // Whether to use async panning and zooming
 pref("layers.async-pan-zoom.enabled", false);
@@ -1520,7 +1526,7 @@ pref("dom.server-events.default-reconnection-time", 5000); // in milliseconds
 // by the jar channel.
 pref("network.jar.open-unsafe-types", false);
 // If true, loading remote JAR files using the jar: protocol will be prevented.
-pref("network.jar.block-remote-files", false);
+pref("network.jar.block-remote-files", true);
 
 // This preference, if true, causes all UTF-8 domain names to be normalized to
 // punycode.  The intention is to allow UTF-8 domain names as input, but never
@@ -2350,7 +2356,11 @@ pref("layout.css.variables.enabled", true);
 pref("layout.css.overflow-clip-box.enabled", false);
 
 // Is support for CSS grid enabled?
+#ifdef RELEASE_BUILD
 pref("layout.css.grid.enabled", false);
+#else
+pref("layout.css.grid.enabled", true);
+#endif
 
 // Is support for CSS contain enabled?
 pref("layout.css.contain.enabled", false);
@@ -4145,9 +4155,6 @@ pref("image.multithreaded_decoding.limit", -1);
 // cache.
 pref("canvas.image.cache.limit", 0);
 
-// How many images to eagerly decode on a given page. 0 means "no limit".
-pref("image.onload.decode.limit", 0);
-
 // WebGL prefs
 #ifdef ANDROID
 // Disable MSAA on mobile.
@@ -4394,6 +4401,7 @@ pref("xpinstall.whitelist.required", true);
 pref("xpinstall.signatures.required", false);
 pref("extensions.alwaysUnpack", false);
 pref("extensions.minCompatiblePlatformVersion", "2.0");
+pref("extensions.webExtensionsMinPlatformVersion", "42.0a1");
 
 pref("network.buffer.cache.count", 24);
 pref("network.buffer.cache.size",  32768);

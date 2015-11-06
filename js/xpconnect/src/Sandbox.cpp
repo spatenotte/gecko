@@ -1025,6 +1025,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     priv->allowWaivers = options.allowWaivers;
     priv->writeToGlobalPrototype = options.writeToGlobalPrototype;
     priv->isWebExtensionContentScript = options.isWebExtensionContentScript;
+    priv->waiveInterposition = options.waiveInterposition;
 
     // Set up the wantXrays flag, which indicates whether xrays are desired even
     // for same-origin access.
@@ -1152,13 +1153,6 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     return NS_OK;
 }
 
-/* bool call(in nsIXPConnectWrappedNative wrapper,
- *           in JSContextPtr cx,
- *           in JSObjectPtr obj,
- *           in uint32_t argc,
- *           in JSValPtr argv,
- *           in JSValPtr vp);
- */
 NS_IMETHODIMP
 nsXPCComponents_utils_Sandbox::Call(nsIXPConnectWrappedNative* wrapper, JSContext* cx,
                                     JSObject* objArg, const CallArgs& args, bool* _retval)
@@ -1167,13 +1161,6 @@ nsXPCComponents_utils_Sandbox::Call(nsIXPConnectWrappedNative* wrapper, JSContex
     return CallOrConstruct(wrapper, cx, obj, args, _retval);
 }
 
-/* bool construct(in nsIXPConnectWrappedNative wrapper,
- *                in JSContextPtr cx,
- *                in JSObjectPtr obj,
- *                in uint32_t argc,
- *                in JSValPtr argv,
- *                in JSValPtr vp);
- */
 NS_IMETHODIMP
 nsXPCComponents_utils_Sandbox::Construct(nsIXPConnectWrappedNative* wrapper, JSContext* cx,
                                          JSObject* objArg, const CallArgs& args, bool* _retval)
@@ -1505,6 +1492,7 @@ SandboxOptions::Parse()
               ParseBoolean("wantComponents", &wantComponents) &&
               ParseBoolean("wantExportHelpers", &wantExportHelpers) &&
               ParseBoolean("isWebExtensionContentScript", &isWebExtensionContentScript) &&
+              ParseBoolean("waiveInterposition", &waiveInterposition) &&
               ParseString("sandboxName", sandboxName) &&
               ParseObject("sameZoneAs", &sameZoneAs) &&
               ParseBoolean("freshZone", &freshZone) &&

@@ -82,6 +82,7 @@
 #include "nsViewSourceHandler.h"
 #include "nsWhitespaceTokenizer.h"
 #include "nsICookieService.h"
+#include "nsIConsoleReportCollector.h"
 
 // we want to explore making the document own the load group
 // so we can associate the document URI with the load group.
@@ -3503,14 +3504,13 @@ nsDocShell::CanAccessItem(nsIDocShellTreeItem* aTargetItem,
     return false;
   }
 
-  nsCOMPtr<nsIDOMWindow> targetWindow = aTargetItem->GetWindow();
+  nsCOMPtr<nsPIDOMWindow> targetWindow = aTargetItem->GetWindow();
   if (!targetWindow) {
     NS_ERROR("This should not happen, really");
     return false;
   }
 
-  nsCOMPtr<nsIDOMWindow> targetOpener;
-  targetWindow->GetOpener(getter_AddRefs(targetOpener));
+  nsCOMPtr<nsIDOMWindow> targetOpener = targetWindow->GetOpener();
   nsCOMPtr<nsIWebNavigation> openerWebNav(do_GetInterface(targetOpener));
   nsCOMPtr<nsIDocShellTreeItem> openerItem(do_QueryInterface(openerWebNav));
 
@@ -5016,17 +5016,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         error.AssignLiteral("corruptedContentError");
         break;
       case NS_ERROR_INTERCEPTION_FAILED:
-      case NS_ERROR_OPAQUE_INTERCEPTION_DISABLED:
-      case NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE:
-      case NS_ERROR_INTERCEPTED_ERROR_RESPONSE:
-      case NS_ERROR_INTERCEPTED_USED_RESPONSE:
-      case NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION:
-      case NS_ERROR_BAD_OPAQUE_REDIRECT_INTERCEPTION:
-      case NS_ERROR_INTERCEPTION_CANCELED:
-      case NS_ERROR_REJECTED_RESPONSE_INTERCEPTION:
         // ServiceWorker intercepted request, but something went wrong.
-        nsContentUtils::MaybeReportInterceptionErrorToConsole(GetDocument(),
-                                                              aError);
         error.AssignLiteral("corruptedContentError");
         break;
       default:
@@ -5117,7 +5107,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     // asserts). Satisfy that assertion now since GetDoc will force
     // creation of one if it hasn't already been created.
     if (mScriptGlobal) {
-      unused << mScriptGlobal->GetDoc();
+      Unused << mScriptGlobal->GetDoc();
     }
 
     // Display a message box
@@ -7358,6 +7348,11 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
     return NS_ERROR_NULL_POINTER;
   }
 
+  nsCOMPtr<nsIConsoleReportCollector> reporter = do_QueryInterface(aChannel);
+  if (reporter) {
+    reporter->FlushConsoleReports(GetDocument());
+  }
+
   nsCOMPtr<nsIURI> url;
   nsresult rv = aChannel->GetURI(getter_AddRefs(url));
   if (NS_FAILED(rv)) {
@@ -7490,7 +7485,7 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
         return NS_OK;
       }
 
-      thisWindow->GetFrameElement(getter_AddRefs(frameElement));
+      frameElement = thisWindow->GetFrameElement();
       if (!frameElement) {
         return NS_OK;
       }
@@ -7684,13 +7679,6 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
                aStatus == NS_ERROR_UNSAFE_CONTENT_TYPE ||
                aStatus == NS_ERROR_REMOTE_XUL ||
                aStatus == NS_ERROR_INTERCEPTION_FAILED ||
-               aStatus == NS_ERROR_OPAQUE_INTERCEPTION_DISABLED ||
-               aStatus == NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE ||
-               aStatus == NS_ERROR_INTERCEPTED_ERROR_RESPONSE ||
-               aStatus == NS_ERROR_INTERCEPTED_USED_RESPONSE ||
-               aStatus == NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION ||
-               aStatus == NS_ERROR_INTERCEPTION_CANCELED ||
-               aStatus == NS_ERROR_REJECTED_RESPONSE_INTERCEPTION ||
                NS_ERROR_GET_MODULE(aStatus) == NS_ERROR_MODULE_SECURITY) {
       // Errors to be shown for any frame
       DisplayLoadError(aStatus, url, nullptr, aChannel);
@@ -9739,8 +9727,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
           // So, the best we can do, is to tear down the new window
           // that was just created!
           //
-          nsCOMPtr<nsIDOMWindow> domWin = targetDocShell->GetWindow();
-          if (domWin) {
+          if (nsCOMPtr<nsPIDOMWindow> domWin = targetDocShell->GetWindow()) {
             domWin->Close();
           }
         }
@@ -13006,10 +12993,11 @@ nsDocShell::GetAssociatedWindow(nsIDOMWindow** aWindow)
 NS_IMETHODIMP
 nsDocShell::GetTopWindow(nsIDOMWindow** aWindow)
 {
-  nsCOMPtr<nsIDOMWindow> win = GetWindow();
+  nsCOMPtr<nsPIDOMWindow> win = GetWindow();
   if (win) {
-    win->GetTop(aWindow);
+    win = win->GetTop();
   }
+  win.forget(aWindow);
   return NS_OK;
 }
 
@@ -13017,23 +13005,19 @@ NS_IMETHODIMP
 nsDocShell::GetTopFrameElement(nsIDOMElement** aElement)
 {
   *aElement = nullptr;
-  nsCOMPtr<nsIDOMWindow> win = GetWindow();
+  nsCOMPtr<nsPIDOMWindow> win = GetWindow();
   if (!win) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDOMWindow> top;
-  win->GetScriptableTop(getter_AddRefs(top));
+  nsCOMPtr<nsPIDOMWindow> top = win->GetScriptableTop();
   NS_ENSURE_TRUE(top, NS_ERROR_FAILURE);
-
-  nsCOMPtr<nsPIDOMWindow> piTop = do_QueryInterface(top);
-  NS_ENSURE_TRUE(piTop, NS_ERROR_FAILURE);
 
   // GetFrameElementInternal, /not/ GetScriptableFrameElement -- if |top| is
   // inside <iframe mozbrowser>, we want to return the iframe, not null.
   // And we want to cross the content/chrome boundary.
   nsCOMPtr<nsIDOMElement> elt =
-    do_QueryInterface(piTop->GetFrameElementInternal());
+    do_QueryInterface(top->GetFrameElementInternal());
   elt.forget(aElement);
   return NS_OK;
 }

@@ -278,7 +278,7 @@ CodeGeneratorShared::addNativeToBytecodeEntry(const BytecodeSite* site)
 void
 CodeGeneratorShared::dumpNativeToBytecodeEntries()
 {
-#ifdef DEBUG
+#ifdef JS_JITSPEW
     InlineScriptTree* topTree = gen->info().inlineScriptTree();
     JitSpewStart(JitSpew_Profiling, "Native To Bytecode Entries for %s:%d\n",
                  topTree->script()->filename(), topTree->script()->lineno());
@@ -290,7 +290,7 @@ CodeGeneratorShared::dumpNativeToBytecodeEntries()
 void
 CodeGeneratorShared::dumpNativeToBytecodeEntry(uint32_t idx)
 {
-#ifdef DEBUG
+#ifdef JS_JITSPEW
     NativeToBytecode& ref = nativeToBytecodeList_[idx];
     InlineScriptTree* tree = ref.tree;
     JSScript* script = tree->script();
@@ -632,10 +632,8 @@ CodeGeneratorShared::encodeSafepoints()
     for (SafepointIndex& index : safepointIndices_) {
         LSafepoint* safepoint = index.safepoint();
 
-        if (!safepoint->encoded()) {
-            safepoint->fixupOffset(&masm);
+        if (!safepoint->encoded())
             safepoints_.encode(safepoint);
-        }
 
         index.resolve();
     }
@@ -709,14 +707,6 @@ CodeGeneratorShared::generateCompactNativeToBytecodeMap(JSContext* cx, JitCode* 
     MOZ_ASSERT(nativeToBytecodeMapSize_ == 0);
     MOZ_ASSERT(nativeToBytecodeTableOffset_ == 0);
     MOZ_ASSERT(nativeToBytecodeNumRegions_ == 0);
-
-    // Iterate through all nativeToBytecode entries, fix up their masm offsets.
-    for (unsigned i = 0; i < nativeToBytecodeList_.length(); i++) {
-        NativeToBytecode& entry = nativeToBytecodeList_[i];
-
-        // Fixup code offsets.
-        entry.nativeOffset = CodeOffsetLabel(masm.actualOffset(entry.nativeOffset.offset()));
-    }
 
     if (!createNativeToBytecodeScriptList(cx))
         return false;
@@ -863,12 +853,9 @@ CodeGeneratorShared::generateCompactTrackedOptimizationsMap(JSContext* cx, JitCo
     if (!unique.init())
         return false;
 
-    // Iterate through all entries, fix up their masm offsets and deduplicate
-    // their optimization attempts.
+    // Iterate through all entries to deduplicate their optimization attempts.
     for (size_t i = 0; i < trackedOptimizations_.length(); i++) {
         NativeToTrackedOptimizations& entry = trackedOptimizations_[i];
-        entry.startOffset = CodeOffsetLabel(masm.actualOffset(entry.startOffset.offset()));
-        entry.endOffset = CodeOffsetLabel(masm.actualOffset(entry.endOffset.offset()));
         if (!unique.add(entry.optimizations))
             return false;
     }
@@ -1610,8 +1597,8 @@ CodeGeneratorShared::jumpToBlock(MBasicBlock* mir)
     }
 }
 
-// This function is not used for MIPS. MIPS has branchToBlock.
-#ifndef JS_CODEGEN_MIPS32
+// This function is not used for MIPS/MIPS64. MIPS has branchToBlock.
+#if !defined(JS_CODEGEN_MIPS32) && !defined(JS_CODEGEN_MIPS64)
 void
 CodeGeneratorShared::jumpToBlock(MBasicBlock* mir, Assembler::Condition cond)
 {

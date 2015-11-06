@@ -10,8 +10,7 @@ import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
-import org.mozilla.gecko.menu.MenuItemActionView;
-import org.mozilla.gecko.overlays.ui.ShareDialog;
+import org.mozilla.gecko.menu.MenuItemSwitcherLayout;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
@@ -92,14 +91,14 @@ public class GeckoActionProvider {
     public View onCreateActionView(final ActionViewType viewType) {
         // Create the view and set its data model.
         ActivityChooserModel dataModel = ActivityChooserModel.get(mContext, mHistoryFileName);
-        final MenuItemActionView view;
+        final MenuItemSwitcherLayout view;
         switch (viewType) {
             case DEFAULT:
-                view = new MenuItemActionView(mContext, null);
+                view = new MenuItemSwitcherLayout(mContext, null);
                 break;
 
             case CONTEXT_MENU:
-                view = new MenuItemActionView(mContext, null);
+                view = new MenuItemSwitcherLayout(mContext, null);
                 view.initContextMenuStyles();
                 break;
 
@@ -234,7 +233,7 @@ public class GeckoActionProvider {
             chooseActivity(item.getItemId());
 
             // Context: Sharing via chrome mainmenu list (no explicit session is active)
-            Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.LIST);
+            Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.LIST, "actionprovider");
             return true;
         }
 
@@ -244,7 +243,7 @@ public class GeckoActionProvider {
             chooseActivity(index);
 
             // Context: Sharing via chrome mainmenu and content contextmenu quickshare (no explicit session is active)
-            Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.BUTTON);
+            Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.BUTTON, "actionprovider");
         }
     }
 

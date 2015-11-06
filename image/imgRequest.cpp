@@ -413,7 +413,7 @@ imgRequest::ContinueEvict()
 }
 
 void
-imgRequest::RequestDecode()
+imgRequest::StartDecoding()
 {
   MutexAutoLock lock(mMutex);
   mDecodeRequested = true;
@@ -501,7 +501,7 @@ imgRequest::RemoveFromCache()
     if (mCacheEntry) {
       mLoader->RemoveFromCache(mCacheEntry);
     } else {
-      mLoader->RemoveFromCache(ImageCacheKey(mURI));
+      mLoader->RemoveFromCache(mCacheKey);
     }
   }
 
@@ -804,8 +804,6 @@ imgRequest::OnStartRequest(nsIRequest* aRequest, nsISupports* ctxt)
   return NS_OK;
 }
 
-/* void onStopRequest (in nsIRequest request, in nsISupports ctxt,
-                       nsresult status); */
 NS_IMETHODIMP
 imgRequest::OnStopRequest(nsIRequest* aRequest,
                           nsISupports* ctxt, nsresult status)
@@ -1055,7 +1053,7 @@ imgRequest::FinishPreparingForNewPart(const NewPartResult& aResult)
   }
 
   if (IsDecodeRequested()) {
-    aResult.mImage->RequestDecode();
+    aResult.mImage->StartDecoding();
   }
 }
 

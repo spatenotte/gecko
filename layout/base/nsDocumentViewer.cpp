@@ -990,6 +990,14 @@ nsDocumentViewer::LoadComplete(nsresult aStatus)
                           "content-document-loaded",
                           nullptr);
 
+      // Notify any devtools about the load.
+      RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
+
+      if (timelines && timelines->HasConsumer(docShell)) {
+        timelines->AddMarkerForDocShell(
+          docShell, "document::Load", MarkerTracingType::TIMESTAMP);
+      }
+
       EventDispatcher::Dispatch(window, mPresContext, &event, nullptr, &status);
       if (timing) {
         timing->NotifyLoadEventEnd();
@@ -2824,29 +2832,6 @@ nsDocumentViewer::CallChildren(CallChildFunc aFunc, void* aClosure)
   }
 }
 
-struct LineBoxInfo
-{
-  nscoord mMaxLineBoxWidth;
-};
-
-static void
-ChangeChildPaintingEnabled(nsIContentViewer* aChild, void* aClosure)
-{
-  bool* enablePainting = (bool*) aClosure;
-  if (*enablePainting) {
-    aChild->ResumePainting();
-  } else {
-    aChild->PausePainting();
-  }
-}
-
-static void
-ChangeChildMaxLineBoxWidth(nsIContentViewer* aChild, void* aClosure)
-{
-  struct LineBoxInfo* lbi = (struct LineBoxInfo*) aClosure;
-  aChild->ChangeMaxLineBoxWidth(lbi->mMaxLineBoxWidth);
-}
-
 struct ZoomInfo
 {
   float mZoom;
@@ -3273,52 +3258,6 @@ NS_IMETHODIMP nsDocumentViewer::AppendSubtree(nsTArray<nsCOMPtr<nsIContentViewer
 {
   aArray.AppendElement(this);
   CallChildren(AppendChildSubtree, &aArray);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDocumentViewer::PausePainting()
-{
-  bool enablePaint = false;
-  CallChildren(ChangeChildPaintingEnabled, &enablePaint);
-
-  nsIPresShell* presShell = GetPresShell();
-  if (presShell) {
-    presShell->PausePainting();
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDocumentViewer::ResumePainting()
-{
-  bool enablePaint = true;
-  CallChildren(ChangeChildPaintingEnabled, &enablePaint);
-
-  nsIPresShell* presShell = GetPresShell();
-  if (presShell) {
-    presShell->ResumePainting();
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDocumentViewer::ChangeMaxLineBoxWidth(int32_t aMaxLineBoxWidth)
-{
-  // Change the max line box width for all children.
-  struct LineBoxInfo lbi = { aMaxLineBoxWidth };
-  CallChildren(ChangeChildMaxLineBoxWidth, &lbi);
-
-  // Now, change our max line box width.
-  // Convert to app units, since our input is in CSS pixels.
-  nscoord mlbw = nsPresContext::CSSPixelsToAppUnits(aMaxLineBoxWidth);
-  nsIPresShell* presShell = GetPresShell();
-  if (presShell) {
-    presShell->SetMaxLineBoxWidth(mlbw);
-  }
-
   return NS_OK;
 }
 
@@ -3777,9 +3716,9 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIDOMDocument> domDoc;
-  aChildDOMWin->GetDocument(getter_AddRefs(domDoc));
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aChildDOMWin);
+  MOZ_ASSERT(window);
+  nsCOMPtr<nsIDocument> doc = window->GetDoc();
   NS_ENSURE_STATE(doc);
 
   nsAutoPtr<nsPrintEventDispatcher> beforeAndAfterPrint(
@@ -4141,7 +4080,7 @@ nsDocumentViewer::ShouldAttachToTopLevel()
   if (nsIWidget::UsePuppetWidgets())
     return true;
 
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_ANDROID)
+#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_UIKIT)
   // On windows, in the parent process we also attach, but just to
   // chrome items
   nsWindowType winType = mParentWidget->WindowType();
@@ -4349,9 +4288,9 @@ nsDocumentViewer::OnDonePrinting()
     if (mDeferredWindowClose) {
       mDeferredWindowClose = false;
       if (mContainer) {
-        nsCOMPtr<nsIDOMWindow> win = mContainer->GetWindow();
-        if (win)
+        if (nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(mContainer->GetWindow())) {
           win->Close();
+        }
       }
     } else if (mClosingWhilePrinting) {
       if (mDocument) {

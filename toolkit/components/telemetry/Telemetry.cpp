@@ -40,6 +40,8 @@
 #include "nsIMemoryReporter.h"
 #include "nsISeekableStream.h"
 #include "Telemetry.h"
+#include "TelemetryCommon.h"
+#include "WebrtcTelemetry.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
 #include "nsBaseHashtable.h"
@@ -85,6 +87,11 @@ using base::Histogram;
 using base::LinearHistogram;
 using base::StatisticsRecorder;
 
+// The maximum number of chrome hangs stacks that we're keeping.
+const size_t kMaxChromeStacksKept = 50;
+// The maximum depth of a single chrome hang stack.
+const size_t kMaxChromeStackDepth = 50;
+
 #define KEYED_HISTOGRAM_NAME_SEPARATOR "#"
 #define SUBSESSION_HISTOGRAM_PREFIX "sub#"
 
@@ -102,53 +109,24 @@ HistogramGet(const char *name, const char *expiration, uint32_t histogramType,
 enum reflectStatus
 ReflectHistogramSnapshot(JSContext *cx, JS::Handle<JSObject*> obj, Histogram *h);
 
-template<class EntryType>
-class AutoHashtable : public nsTHashtable<EntryType>
-{
-public:
-  explicit AutoHashtable(uint32_t initLength =
-                         PLDHashTable::kDefaultInitialLength);
-  typedef bool (*ReflectEntryFunc)(EntryType *entry, JSContext *cx, JS::Handle<JSObject*> obj);
-  bool ReflectIntoJS(ReflectEntryFunc entryFunc, JSContext *cx, JS::Handle<JSObject*> obj);
-};
-
-template<class EntryType>
-AutoHashtable<EntryType>::AutoHashtable(uint32_t initLength)
-  : nsTHashtable<EntryType>(initLength)
-{
-}
-
-/**
- * Reflect the individual entries of table into JS, usually by defining
- * some property and value of obj.  entryFunc is called for each entry.
- */
-template<typename EntryType>
-bool
-AutoHashtable<EntryType>::ReflectIntoJS(ReflectEntryFunc entryFunc,
-                                        JSContext *cx, JS::Handle<JSObject*> obj)
-{
-  for (auto iter = this->Iter(); !iter.Done(); iter.Next()) {
-    if (!entryFunc(iter.Get(), cx, obj)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // This class is conceptually a list of ProcessedStack objects, but it represents them
 // more efficiently by keeping a single global list of modules.
 class CombinedStacks {
 public:
+  CombinedStacks() : mNextIndex(0) {}
   typedef std::vector<Telemetry::ProcessedStack::Frame> Stack;
   const Telemetry::ProcessedStack::Module& GetModule(unsigned aIndex) const;
   size_t GetModuleCount() const;
   const Stack& GetStack(unsigned aIndex) const;
-  void AddStack(const Telemetry::ProcessedStack& aStack);
+  size_t AddStack(const Telemetry::ProcessedStack& aStack);
   size_t GetStackCount() const;
   size_t SizeOfExcludingThis() const;
 private:
   std::vector<Telemetry::ProcessedStack::Module> mModules;
+  // A circular buffer to hold the stacks.
   std::vector<Stack> mStacks;
+  // The index of the next buffer element to write to in mStacks.
+  size_t mNextIndex;
 };
 
 static JSObject *
@@ -164,10 +142,18 @@ CombinedStacks::GetModule(unsigned aIndex) const {
   return mModules[aIndex];
 }
 
-void
+size_t
 CombinedStacks::AddStack(const Telemetry::ProcessedStack& aStack) {
-  mStacks.resize(mStacks.size() + 1);
-  CombinedStacks::Stack& adjustedStack = mStacks.back();
+  // Advance the indices of the circular queue holding the stacks.
+  size_t index = mNextIndex++ % kMaxChromeStacksKept;
+  // Grow the vector up to the maximum size, if needed.
+  if (mStacks.size() < kMaxChromeStacksKept) {
+    mStacks.resize(mStacks.size() + 1);
+  }
+  // Get a reference to the location holding the new stack.
+  CombinedStacks::Stack& adjustedStack = mStacks[index];
+  // If we're using an old stack to hold aStack, clear it.
+  adjustedStack.clear();
 
   size_t stackSize = aStack.GetStackSize();
   for (size_t i = 0; i < stackSize; ++i) {
@@ -190,6 +176,7 @@ CombinedStacks::AddStack(const Telemetry::ProcessedStack& aStack) {
     Telemetry::ProcessedStack::Frame adjustedFrame = { frame.mOffset, modIndex };
     adjustedStack.push_back(adjustedFrame);
   }
+  return index;
 }
 
 const CombinedStacks::Stack&
@@ -280,6 +267,7 @@ public:
   void AddHang(const Telemetry::ProcessedStack& aStack, uint32_t aDuration,
                int32_t aSystemUptime, int32_t aFirefoxUptime,
                HangAnnotationsPtr aAnnotations);
+  void PruneStackReferences(const size_t aRemovedStackIndex);
   uint32_t GetDuration(unsigned aIndex) const;
   int32_t GetSystemUptime(unsigned aIndex) const;
   int32_t GetFirefoxUptime(unsigned aIndex) const;
@@ -309,17 +297,24 @@ HangReports::AddHang(const Telemetry::ProcessedStack& aStack,
                      int32_t aSystemUptime,
                      int32_t aFirefoxUptime,
                      HangAnnotationsPtr aAnnotations) {
+  // Append the new stack to the stack's circular queue.
+  size_t hangIndex = mStacks.AddStack(aStack);
+  // Append the hang info at the same index, in mHangInfo.
   HangInfo info = { aDuration, aSystemUptime, aFirefoxUptime };
-  mHangInfo.push_back(info);
-  mStacks.AddStack(aStack);
+  if (mHangInfo.size() < kMaxChromeStacksKept) {
+    mHangInfo.push_back(info);
+  } else {
+    mHangInfo[hangIndex] = info;
+    // Remove any reference to the stack overwritten in the circular queue
+    // from the annotations.
+    PruneStackReferences(hangIndex);
+  }
 
   if (!aAnnotations) {
     return;
   }
 
   nsAutoString annotationsKey;
-  uint32_t hangIndex = static_cast<uint32_t>(mHangInfo.size() - 1);
-
   // Generate a key to index aAnnotations in the hash map.
   nsresult rv = ComputeAnnotationsKey(aAnnotations, annotationsKey);
   if (NS_FAILED(rv)) {
@@ -336,6 +331,38 @@ HangReports::AddHang(const Telemetry::ProcessedStack& aStack,
 
   // If the key was not found, add the annotations to the hash map.
   mAnnotationInfo.Put(annotationsKey, new AnnotationInfo(hangIndex, Move(aAnnotations)));
+}
+
+/**
+ * This function removes links to discarded chrome hangs stacks and prunes unused
+ * annotations.
+ */
+void
+HangReports::PruneStackReferences(const size_t aRemovedStackIndex) {
+  // We need to adjust the indices that link annotations to chrome hangs. Since we
+  // removed a stack, we must remove all references to it and prune annotations
+  // linked to no stacks.
+  for (auto iter = mAnnotationInfo.Iter(); !iter.Done(); iter.Next()) {
+    nsTArray<uint32_t>& stackIndices = iter.Data()->mHangIndices;
+    size_t toRemove = stackIndices.NoIndex;
+    for (size_t k = 0; k < stackIndices.Length(); k++) {
+      // Is this index referencing the removed stack?
+      if (stackIndices[k] == aRemovedStackIndex) {
+        toRemove = k;
+        break;
+      }
+    }
+
+    // Remove the index referencing the old stack from the annotation.
+    if (toRemove != stackIndices.NoIndex) {
+      stackIndices.RemoveElementAt(toRemove);
+    }
+
+    // If this annotation no longer references any stack, drop it.
+    if (!stackIndices.Length()) {
+      iter.Remove();
+    }
+  }
 }
 
 size_t
@@ -702,6 +729,9 @@ public:
 
   static KeyedHistogram* GetKeyedHistogramById(const nsACString &id);
 
+  static void RecordIceCandidates(const uint32_t iceCandidateBitmask,
+                                  const bool success,
+                                  const bool loop);
 private:
   TelemetryImpl();
   ~TelemetryImpl();
@@ -777,14 +807,10 @@ private:
   nsCOMArray<nsIFetchTelemetryDataCallback> mCallbacks;
   friend class nsFetchTelemetryData;
 
+  WebrtcTelemetry mWebrtcTelemetry;
+
   typedef nsClassHashtable<nsCStringHashKey, KeyedHistogram> KeyedHistogramMapType;
   KeyedHistogramMapType mKeyedHistograms;
-
-  struct KeyedHistogramReflectArgs {
-    JSContext* jsContext;
-    JS::Handle<JSObject*> object;
-  };
-  static PLDHashOperator KeyedHistogramsReflector(const nsACString&, nsAutoPtr<KeyedHistogram>&, void* args);
 };
 
 TelemetryImpl*  TelemetryImpl::sTelemetry = nullptr;
@@ -2435,29 +2461,6 @@ TelemetryImpl::GetAddonHistogramSnapshots(JSContext *cx, JS::MutableHandle<JS::V
   return NS_OK;
 }
 
-/* static */
-PLDHashOperator
-TelemetryImpl::KeyedHistogramsReflector(const nsACString& key, nsAutoPtr<KeyedHistogram>& entry, void* arg)
-{
-  KeyedHistogramReflectArgs* args = static_cast<KeyedHistogramReflectArgs*>(arg);
-  JSContext *cx = args->jsContext;
-  JS::RootedObject snapshot(cx, JS_NewPlainObject(cx));
-  if (!snapshot) {
-    return PL_DHASH_STOP;
-  }
-
-  if (!NS_SUCCEEDED(entry->GetJSSnapshot(cx, snapshot, false, false))) {
-    return PL_DHASH_STOP;
-  }
-
-  if (!JS_DefineProperty(cx, args->object, PromiseFlatCString(key).get(),
-                         snapshot, JSPROP_ENUMERATE)) {
-    return PL_DHASH_STOP;
-  }
-
-  return PL_DHASH_NEXT;
-}
-
 NS_IMETHODIMP
 TelemetryImpl::GetKeyedHistogramSnapshots(JSContext *cx, JS::MutableHandle<JS::Value> ret)
 {
@@ -2466,11 +2469,20 @@ TelemetryImpl::GetKeyedHistogramSnapshots(JSContext *cx, JS::MutableHandle<JS::V
     return NS_ERROR_FAILURE;
   }
 
-  KeyedHistogramReflectArgs reflectArgs = {cx, obj};
-  const uint32_t num = mKeyedHistograms.Enumerate(&TelemetryImpl::KeyedHistogramsReflector,
-                                                      static_cast<void*>(&reflectArgs));
-  if (num != mKeyedHistograms.Count()) {
-    return NS_ERROR_FAILURE;
+  for (auto iter = mKeyedHistograms.Iter(); !iter.Done(); iter.Next()) {
+    JS::RootedObject snapshot(cx, JS_NewPlainObject(cx));
+    if (!snapshot) {
+      return NS_ERROR_FAILURE;
+    }
+
+    if (!NS_SUCCEEDED(iter.Data()->GetJSSnapshot(cx, snapshot, false, false))) {
+      return NS_ERROR_FAILURE;
+    }
+
+    if (!JS_DefineProperty(cx, obj, PromiseFlatCString(iter.Key()).get(),
+                           snapshot, JSPROP_ENUMERATE)) {
+      return NS_ERROR_FAILURE;
+    }
   }
 
   ret.setObject(*obj);
@@ -2510,6 +2522,14 @@ TelemetryImpl::GetDebugSlowSQL(JSContext *cx, JS::MutableHandle<JS::Value> ret)
   bool revealPrivateSql =
     Preferences::GetBool("toolkit.telemetry.debugSlowSql", false);
   if (GetSQLStats(cx, ret, revealPrivateSql))
+    return NS_OK;
+  return NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+TelemetryImpl::GetWebrtcStats(JSContext *cx, JS::MutableHandle<JS::Value> ret)
+{
+  if (mWebrtcTelemetry.GetWebrtcStats(cx, ret))
     return NS_OK;
   return NS_ERROR_FAILURE;
 }
@@ -2903,13 +2923,18 @@ CreateJSHangStack(JSContext* cx, const Telemetry::HangStack& stack)
   return ret;
 }
 
-static JSObject*
-CreateJSHangAnnotations(JSContext* cx, const HangAnnotationsVector& annotations)
+static void
+CreateJSHangAnnotations(JSContext* cx, const HangAnnotationsVector& annotations,
+                        JS::MutableHandleObject returnedObject)
 {
   JS::RootedObject annotationsArray(cx, JS_NewArrayObject(cx, 0));
   if (!annotationsArray) {
-    return nullptr;
+    returnedObject.set(nullptr);
+    return;
   }
+  // We keep track of the annotations we reported in this hash set, so we can
+  // discard duplicated ones.
+  nsTHashtable<nsStringHashKey> reportedAnnotations;
   size_t annotationIndex = 0;
   for (const HangAnnotationsPtr *i = annotations.begin(), *e = annotations.end();
        i != e; ++i) {
@@ -2918,6 +2943,18 @@ CreateJSHangAnnotations(JSContext* cx, const HangAnnotationsVector& annotations)
       continue;
     }
     const HangAnnotationsPtr& curAnnotations = *i;
+    // Build a key to index the current annotations in our hash set.
+    nsAutoString annotationsKey;
+    nsresult rv = ComputeAnnotationsKey(curAnnotations, annotationsKey);
+    if (NS_FAILED(rv)) {
+      continue;
+    }
+    // Check if the annotations are in the set. If that's the case, don't double report.
+    if (reportedAnnotations.GetEntry(annotationsKey)) {
+      continue;
+    }
+    // If not, report them.
+    reportedAnnotations.PutEntry(annotationsKey);
     UniquePtr<HangAnnotations::Enumerator> annotationsEnum =
       curAnnotations->GetEnumerator();
     if (!annotationsEnum) {
@@ -2930,7 +2967,8 @@ CreateJSHangAnnotations(JSContext* cx, const HangAnnotationsVector& annotations)
       jsValue.setString(JS_NewUCStringCopyN(cx, value.get(), value.Length()));
       if (!JS_DefineUCProperty(cx, jsAnnotation, key.get(), key.Length(),
                                jsValue, JSPROP_ENUMERATE)) {
-        return nullptr;
+        returnedObject.set(nullptr);
+        return;
       }
     }
     if (!JS_SetElement(cx, annotationsArray, annotationIndex, jsAnnotation)) {
@@ -2938,7 +2976,9 @@ CreateJSHangAnnotations(JSContext* cx, const HangAnnotationsVector& annotations)
     }
     ++annotationIndex;
   }
-  return annotationsArray;
+  // Return the array using a |MutableHandleObject| to avoid triggering a false
+  // positive rooting issue in the hazard analysis build.
+  returnedObject.set(annotationsArray);
 }
 
 static JSObject*
@@ -2952,7 +2992,8 @@ CreateJSHangHistogram(JSContext* cx, const Telemetry::HangHistogram& hang)
   JS::RootedObject stack(cx, CreateJSHangStack(cx, hang.GetStack()));
   JS::RootedObject time(cx, CreateJSTimeHistogram(cx, hang));
   auto& hangAnnotations = hang.GetAnnotations();
-  JS::RootedObject annotations(cx, CreateJSHangAnnotations(cx, hangAnnotations));
+  JS::RootedObject annotations(cx);
+  CreateJSHangAnnotations(cx, hangAnnotations, &annotations);
 
   if (!stack ||
       !time ||
@@ -3543,6 +3584,16 @@ TelemetryImpl::RecordSlowStatement(const nsACString &sql,
   StoreSlowSQL(fullSQL, delay, Unsanitized);
 }
 
+void
+TelemetryImpl::RecordIceCandidates(const uint32_t iceCandidateBitmask,
+                                   const bool success, const bool loop)
+{
+  if (!sTelemetry)
+    return;
+
+  sTelemetry->mWebrtcTelemetry.RecordIceCandidateMask(iceCandidateBitmask, success, loop);
+}
+
 #if defined(MOZ_ENABLE_PROFILER_SPS)
 void
 TelemetryImpl::RecordChromeHang(uint32_t aDuration,
@@ -3645,6 +3696,7 @@ TelemetryImpl::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
   // Ignore the hashtables in mAddonMap; they are not significant.
   n += mAddonMap.ShallowSizeOfExcludingThis(aMallocSizeOf);
   n += mHistogramMap.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  n += mWebrtcTelemetry.SizeOfExcludingThis(aMallocSizeOf);
   { // Scope for mHashMutex lock
     MutexAutoLock lock(mHashMutex);
     n += mPrivateSQL.SizeOfExcludingThis(aMallocSizeOf);
@@ -3843,6 +3895,13 @@ RecordSlowSQLStatement(const nsACString &statement,
   TelemetryImpl::RecordSlowStatement(statement, dbName, delay);
 }
 
+void
+RecordWebrtcIceCandidates(const uint32_t iceCandidateBitmask,
+                          const bool success, const bool loop)
+{
+  TelemetryImpl::RecordIceCandidates(iceCandidateBitmask, success, loop);
+}
+
 void Init()
 {
   // Make the service manager hold a long-lived reference to the service
@@ -3939,8 +3998,8 @@ ProcessedStack
 GetStackAndModules(const std::vector<uintptr_t>& aPCs)
 {
   std::vector<StackFrame> rawStack;
-  for (std::vector<uintptr_t>::const_iterator i = aPCs.begin(),
-         e = aPCs.end(); i != e; ++i) {
+  auto stackEnd = aPCs.begin() + std::min(aPCs.size(), kMaxChromeStackDepth);
+  for (auto i = aPCs.begin(); i != stackEnd; ++i) {
     uintptr_t aPC = *i;
     StackFrame Frame = {aPC, static_cast<uint16_t>(rawStack.size()),
                         std::numeric_limits<uint16_t>::max()};

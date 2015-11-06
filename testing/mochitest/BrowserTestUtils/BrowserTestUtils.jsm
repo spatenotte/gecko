@@ -139,17 +139,33 @@ this.BrowserTestUtils = {
    *        A xul:browser.
    * @param {Boolean} includeSubFrames
    *        A boolean indicating if loads from subframes should be included.
+   * @param {optional string or function} wantLoad
+   *        If a function, takes a URL and returns true if that's the load we're
+   *        interested in. If a string, gives the URL of the load we're interested
+   *        in. If not present, the first load resolves the promise.
    *
    * @return {Promise}
    * @resolves When a load event is triggered for the browser.
    */
-  browserLoaded(browser, includeSubFrames=false) {
+  browserLoaded(browser, includeSubFrames=false, wantLoad=null) {
+    function isWanted(url) {
+      if (!wantLoad) {
+        return true;
+      } else if (typeof(wantLoad) == "function") {
+        return wantLoad(url);
+      } else {
+        // It's a string.
+        return wantLoad == url;
+      }
+    }
+
     return new Promise(resolve => {
       let mm = browser.ownerDocument.defaultView.messageManager;
       mm.addMessageListener("browser-test-utils:loadEvent", function onLoad(msg) {
-        if (msg.target == browser && (!msg.data.subframe || includeSubFrames)) {
+        if (msg.target == browser && (!msg.data.subframe || includeSubFrames) &&
+            isWanted(msg.data.url)) {
           mm.removeMessageListener("browser-test-utils:loadEvent", onLoad);
-          resolve();
+          resolve(msg.data.url);
         }
       });
     });
@@ -602,6 +618,34 @@ this.BrowserTestUtils = {
 
     return extra;
   }),
+
+  /**
+   * Returns a promise that is resolved when element gains attribute (or,
+   * optionally, when it is set to value).
+   * @param {String} attr
+   *        The attribute to wait for
+   * @param {Element} element
+   *        The element which should gain the attribute
+   * @param {String} value (optional)
+   *        Optional, the value the attribute should have.
+   *
+   * @returns {Promise}
+   */
+  waitForAttribute(attr, element, value) {
+    let MutationObserver = element.ownerDocument.defaultView.MutationObserver;
+    return new Promise(resolve => {
+      let mut = new MutationObserver(mutations => {
+        if ((!value && element.getAttribute(attr)) ||
+            (value && element.getAttribute(attr) === value)) {
+          resolve();
+          mut.disconnect();
+          return;
+        }
+      });
+
+      mut.observe(element, {attributeFilter: [attr]});
+    });
+  },
 
   /**
    * Version of EventUtils' `sendChar` function; it will synthesize a keypress

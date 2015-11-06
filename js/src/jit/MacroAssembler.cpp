@@ -446,95 +446,6 @@ template void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const A
 template void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const BaseIndex& src, const ValueOperand& dest,
                                                  bool allowDouble, Register temp, Label* fail);
 
-template<typename T>
-void
-MacroAssembler::compareExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem,
-                                               Register oldval, Register newval,
-                                               Register temp, AnyRegister output)
-{
-    switch (arrayType) {
-      case Scalar::Int8:
-        compareExchange8SignExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Uint8:
-        compareExchange8ZeroExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Uint8Clamped:
-        compareExchange8ZeroExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Int16:
-        compareExchange16SignExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Uint16:
-        compareExchange16ZeroExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Int32:
-        compareExchange32(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Uint32:
-        // At the moment, the code in MCallOptimize.cpp requires the output
-        // type to be double for uint32 arrays.  See bug 1077305.
-        MOZ_ASSERT(output.isFloat());
-        compareExchange32(mem, oldval, newval, temp);
-        convertUInt32ToDouble(temp, output.fpu());
-        break;
-      default:
-        MOZ_CRASH("Invalid typed array type");
-    }
-}
-
-template void
-MacroAssembler::compareExchangeToTypedIntArray(Scalar::Type arrayType, const Address& mem,
-                                               Register oldval, Register newval, Register temp,
-                                               AnyRegister output);
-template void
-MacroAssembler::compareExchangeToTypedIntArray(Scalar::Type arrayType, const BaseIndex& mem,
-                                               Register oldval, Register newval, Register temp,
-                                               AnyRegister output);
-
-template<typename T>
-void
-MacroAssembler::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem,
-                                              Register value, Register temp, AnyRegister output)
-{
-    switch (arrayType) {
-      case Scalar::Int8:
-        atomicExchange8SignExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Uint8:
-        atomicExchange8ZeroExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Uint8Clamped:
-        atomicExchange8ZeroExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Int16:
-        atomicExchange16SignExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Uint16:
-        atomicExchange16ZeroExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Int32:
-        atomicExchange32(mem, value, output.gpr());
-        break;
-      case Scalar::Uint32:
-        // At the moment, the code in MCallOptimize.cpp requires the output
-        // type to be double for uint32 arrays.  See bug 1077305.
-        MOZ_ASSERT(output.isFloat());
-        atomicExchange32(mem, value, temp);
-        convertUInt32ToDouble(temp, output.fpu());
-        break;
-      default:
-        MOZ_CRASH("Invalid typed array type");
-    }
-}
-
-template void
-MacroAssembler::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const Address& mem,
-                                              Register value, Register temp, AnyRegister output);
-template void
-MacroAssembler::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const BaseIndex& mem,
-                                              Register value, Register temp, AnyRegister output);
-
 template <typename T>
 void
 MacroAssembler::loadUnboxedProperty(T address, JSValueType type, TypedOrValueRegister output)
@@ -2192,7 +2103,6 @@ MacroAssembler::linkProfilerCallSites(JitCode* code)
 {
     for (size_t i = 0; i < profilerCallSites_.length(); i++) {
         CodeOffsetLabel offset = profilerCallSites_[i];
-        offset.fixup(this);
         CodeLocationLabel location(code, offset);
         PatchDataWithValueCheck(location, ImmPtr(location.raw()), ImmPtr((void*)-1));
     }
@@ -2628,7 +2538,6 @@ MacroAssembler::linkSelfReference(JitCode* code)
     // the JitCode onto the stack in order to GC it correctly.  exitCodePatch should
     // be unset if the code never needed to push its JitCode*.
     if (hasSelfReference()) {
-        selfReferencePatch_.fixup(this);
         PatchDataWithValueCheck(CodeLocationLabel(code, selfReferencePatch_),
                                 ImmPtr(code),
                                 ImmPtr((void*)-1));

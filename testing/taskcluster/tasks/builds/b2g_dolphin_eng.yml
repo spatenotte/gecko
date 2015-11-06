@@ -1,5 +1,8 @@
 $inherits:
   from: 'tasks/builds/b2g_dolphin_base.yml'
+  variables:
+    build_name: 'dolphin-eng'
+    build_type: 'opt'
 task:
   scopes:
     - 'docker-worker:cache:build-dolphin-eng'
@@ -20,4 +23,3 @@ task:
     env:
       TARGET: 'dolphin'
       VARIANT: eng
-      TOOLTOOL_MANIFEST: 'b2g/config/dolphin/releng-dolphin.tt'

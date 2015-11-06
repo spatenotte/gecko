@@ -32,9 +32,9 @@
 #include "nsISupportsPriority.h"
 #include "nsStandardURL.h"
 #include "nsURLHelper.h"
-#include "prprf.h"
 #include "prnetdb.h"
 #include "sslt.h"
+#include "mozilla/Snprintf.h"
 
 #ifdef DEBUG
 // defined by the socket transport service while active
@@ -225,11 +225,10 @@ Http2Session::LogIO(Http2Session *self, Http2Stream *stream,
         LOG5(("%s", linebuf));
       }
       line = linebuf;
-      PR_snprintf(line, 128, "%08X: ", index);
+      snprintf(line, 128, "%08X: ", index);
       line += 10;
     }
-    PR_snprintf(line, 128 - (line - linebuf), "%02X ",
-                (reinterpret_cast<const uint8_t *>(data))[index]);
+    snprintf(line, 128 - (line - linebuf), "%02X ", (reinterpret_cast<const uint8_t *>(data))[index]);
     line += 3;
   }
   if (index) {
@@ -3193,7 +3192,8 @@ Http2Session::OnWriteSegment(char *buf,
   }
 
   if (mDownstreamState == NOT_USING_NETWORK ||
-      mDownstreamState == BUFFERING_FRAME_HEADER) {
+      mDownstreamState == BUFFERING_FRAME_HEADER ||
+      mDownstreamState == DISCARDING_DATA_FRAME_PADDING) {
     return NS_BASE_STREAM_WOULD_BLOCK;
   }
 
@@ -3275,6 +3275,7 @@ Http2Session::OnWriteSegment(char *buf,
     return NS_OK;
   }
 
+  MOZ_ASSERT(false);
   return NS_ERROR_UNEXPECTED;
 }
 

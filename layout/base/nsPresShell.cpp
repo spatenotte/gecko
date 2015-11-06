@@ -168,6 +168,7 @@
 #include "mozilla/Telemetry.h"
 #include "nsCanvasFrame.h"
 #include "nsIImageLoadingContent.h"
+#include "nsImageFrame.h"
 #include "nsIScreen.h"
 #include "nsIScreenManager.h"
 #include "nsPlaceholderFrame.h"
@@ -788,8 +789,6 @@ PresShell::PresShell()
 
   mScrollPositionClampingScrollPortSizeSet = false;
 
-  mMaxLineBoxWidth = 0;
-
   static bool addedSynthMouseMove = false;
   if (!addedSynthMouseMove) {
     Preferences::AddBoolVarCache(&sSynthMouseMove,
@@ -803,7 +802,6 @@ PresShell::PresShell()
     addedPointerEventEnabled = true;
   }
 
-  mPaintingIsFrozen = false;
   mHasCSSBackgroundColor = true;
   mIsLastChromeOnlyEscapeKeyConsumed = false;
   mHasReceivedPaintMessage = false;
@@ -826,13 +824,6 @@ PresShell::~PresShell()
   NS_ASSERTION(mFirstCallbackEventRequest == nullptr &&
                mLastCallbackEventRequest == nullptr,
                "post-reflow queues not empty.  This means we're leaking");
-
-  // Verify that if painting was frozen, but we're being removed from the tree,
-  // that we now re-enable painting on our refresh driver, since it may need to
-  // be re-used by another presentation.
-  if (mPaintingIsFrozen) {
-    mPresContext->RefreshDriver()->Thaw();
-  }
 
 #ifdef DEBUG
   MOZ_ASSERT(mPresArenaAllocCount == 0,
@@ -1005,7 +996,7 @@ LogTextPerfStats(gfxTextPerfMetrics* aTextPerf,
                  const gfxTextPerfMetrics::TextCounts& aCounts,
                  float aTime, TextPerfLogType aLogType, const char* aURL)
 {
-  PRLogModuleInfo* tpLog = gfxPlatform::GetLog(eGfxLog_textperf);
+  LogModule* tpLog = gfxPlatform::GetLog(eGfxLog_textperf);
 
   // ignore XUL contexts unless at debug level
   mozilla::LogLevel logLevel = LogLevel::Warning;
@@ -1868,7 +1859,7 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
         DoReflow(rootFrame, true);
       }
 
-      DidDoReflow(true, false);
+      DidDoReflow(true);
     }
   }
 
@@ -4576,8 +4567,8 @@ PresShell::StyleSheetApplicableStateChanged(nsIDocument *aDocument,
 void
 PresShell::StyleRuleChanged(nsIDocument *aDocument,
                             nsIStyleSheet* aStyleSheet,
-                            nsIStyleRule* aOldStyleRule,
-                            nsIStyleRule* aNewStyleRule)
+                            mozilla::css::Rule* aOldStyleRule,
+                            mozilla::css::Rule* aNewStyleRule)
 {
   RecordStyleSheetChange(aStyleSheet);
 }
@@ -4585,7 +4576,7 @@ PresShell::StyleRuleChanged(nsIDocument *aDocument,
 void
 PresShell::StyleRuleAdded(nsIDocument *aDocument,
                           nsIStyleSheet* aStyleSheet,
-                          nsIStyleRule* aStyleRule)
+                          mozilla::css::Rule* aStyleRule)
 {
   RecordStyleSheetChange(aStyleSheet);
 }
@@ -4593,7 +4584,7 @@ PresShell::StyleRuleAdded(nsIDocument *aDocument,
 void
 PresShell::StyleRuleRemoved(nsIDocument *aDocument,
                             nsIStyleSheet* aStyleSheet,
-                            nsIStyleRule* aStyleRule)
+                            mozilla::css::Rule* aStyleRule)
 {
   RecordStyleSheetChange(aStyleSheet);
 }
@@ -6590,22 +6581,6 @@ PresShell::RecordMouseLocation(WidgetGUIEvent* aEvent)
   }
 }
 
-static PLDHashOperator
-FindAnyTarget(const uint32_t& aKey, RefPtr<dom::Touch>& aData,
-              void* aAnyTarget)
-{
-  if (aData) {
-    dom::EventTarget* target = aData->GetTarget();
-    if (target) {
-      nsCOMPtr<nsIContent>* content =
-        static_cast<nsCOMPtr<nsIContent>*>(aAnyTarget);
-      *content = do_QueryInterface(target);
-      return PL_DHASH_STOP;
-    }
-  }
-  return PL_DHASH_NEXT;
-}
-
 nsIFrame* GetNearestFrameContainingPresShell(nsIPresShell* aPresShell)
 {
   nsView* view = aPresShell->GetViewManager()->GetRootView();
@@ -7313,9 +7288,18 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         // the capture list
         nsCOMPtr<nsIContent> anyTarget;
         if (TouchManager::gCaptureTouchList->Count() > 0 && touchEvent->touches.Length() > 1) {
-          TouchManager::gCaptureTouchList->Enumerate(&FindAnyTarget, &anyTarget);
-        } else {
-          TouchManager::gPreventMouseEvents = false;
+          for (auto iter = TouchManager::gCaptureTouchList->Iter();
+               !iter.Done();
+               iter.Next()) {
+            RefPtr<dom::Touch>& touch = iter.Data();
+            if (touch) {
+              dom::EventTarget* target = touch->GetTarget();
+              if (target) {
+                anyTarget = do_QueryInterface(target);
+                break;
+              }
+            }
+          }
         }
 
         for (int32_t i = touchEvent->touches.Length(); i; ) {
@@ -8135,14 +8119,7 @@ PresShell::DispatchTouchEventToDOM(WidgetEvent* aEvent,
     }
   }
 
-  // if preventDefault was called on any of the events dispatched
-  // and this is touchstart, or the first touchmove, widget should consume
-  // other events that would be associated with this touch session
   if (preventDefault && canPrevent) {
-    TouchManager::gPreventMouseEvents = true;
-  }
-
-  if (TouchManager::gPreventMouseEvents) {
     *aStatus = nsEventStatus_eConsumeNoDefault;
   } else {
     *aStatus = nsEventStatus_eIgnore;
@@ -8862,7 +8839,7 @@ PresShell::WillDoReflow()
 }
 
 void
-PresShell::DidDoReflow(bool aInterruptible, bool aWasInterrupted)
+PresShell::DidDoReflow(bool aInterruptible)
 {
   mFrameConstructor->EndUpdate();
 
@@ -8883,10 +8860,6 @@ PresShell::DidDoReflow(bool aInterruptible, bool aWasInterrupted)
   }
 
   mPresContext->NotifyMissingFonts();
-
-  if (!aWasInterrupted) {
-    ClearReflowOnZoomPending();
-  }
 }
 
 DOMHighResTimeStamp
@@ -9237,7 +9210,7 @@ PresShell::ProcessReflowCommands(bool aInterruptible)
 
     // Exiting the scriptblocker might have killed us
     if (!mIsDestroying) {
-      DidDoReflow(aInterruptible, interrupted);
+      DidDoReflow(aInterruptible);
     }
 
     // DidDoReflow might have killed us
@@ -10701,7 +10674,23 @@ nsresult
 PresShell::UpdateImageLockingState()
 {
   // We're locked if we're both thawed and active.
-  return mDocument->SetImageLockingState(!mFrozen && mIsActive);
+  bool locked = !mFrozen && mIsActive;
+
+  nsresult rv = mDocument->SetImageLockingState(locked);
+
+  if (locked) {
+    // Request decodes for visible images; we want to start decoding as
+    // quickly as possible when we get foregrounded to minimize flashing.
+    for (auto iter = mVisibleImages.Iter(); !iter.Done(); iter.Next()) {
+      nsCOMPtr<nsIContent> content = do_QueryInterface(iter.Get()->GetKey());
+      nsImageFrame* imageFrame = do_QueryFrame(content->GetPrimaryFrame());
+      if (imageFrame) {
+        imageFrame->MaybeDecodeForPredictedSize();
+      }
+    }
+  }
+
+  return rv;
 }
 
 PresShell*
@@ -10879,39 +10868,6 @@ nsIPresShell::FontSizeInflationEnabled()
   }
 
   return mFontSizeInflationEnabled;
-}
-
-void
-nsIPresShell::SetMaxLineBoxWidth(nscoord aMaxLineBoxWidth)
-{
-  NS_ASSERTION(aMaxLineBoxWidth >= 0, "attempting to set max line box width to a negative value");
-
-  if (mMaxLineBoxWidth != aMaxLineBoxWidth) {
-    mMaxLineBoxWidth = aMaxLineBoxWidth;
-    mReflowOnZoomPending = true;
-    FrameNeedsReflow(GetRootFrame(), nsIPresShell::eResize,
-                     NS_FRAME_HAS_DIRTY_CHILDREN);
-  }
-}
-
-void
-PresShell::PausePainting()
-{
-  if (GetPresContext()->RefreshDriver()->PresContext() != GetPresContext())
-    return;
-
-  mPaintingIsFrozen = true;
-  GetPresContext()->RefreshDriver()->Freeze();
-}
-
-void
-PresShell::ResumePainting()
-{
-  if (GetPresContext()->RefreshDriver()->PresContext() != GetPresContext())
-    return;
-
-  mPaintingIsFrozen = false;
-  GetPresContext()->RefreshDriver()->Thaw();
 }
 
 void

@@ -194,6 +194,8 @@ public:
                                  nsTArray<PluginTag>* aPlugins,
                                  uint32_t* aNewPluginEpoch) override;
 
+    virtual bool RecvUngrabPointer(const uint32_t& aTime) override;
+
     NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(ContentParent, nsIObserver)
 
     NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -325,8 +327,6 @@ public:
 
     virtual void OnChannelError() override;
 
-    virtual void OnBeginSyncTransaction() override;
-
     virtual PCrashReporterParent*
     AllocPCrashReporterParent(const NativeThreadId& tid,
                               const uint32_t& processType) override;
@@ -433,6 +433,21 @@ public:
 
     void SetNuwaParent(NuwaParent* aNuwaParent) { mNuwaParent = aNuwaParent; }
     void ForkNewProcess(bool aBlocking);
+
+    virtual bool RecvCreateWindow(PBrowserParent* aThisTabParent,
+                                  PBrowserParent* aOpener,
+                                  const uint32_t& aChromeFlags,
+                                  const bool& aCalledFromJS,
+                                  const bool& aPositionSpecified,
+                                  const bool& aSizeSpecified,
+                                  const nsCString& aURI,
+                                  const nsString& aName,
+                                  const nsCString& aFeatures,
+                                  const nsCString& aBaseURI,
+                                  nsresult* aResult,
+                                  bool* aWindowIsNew,
+                                  InfallibleTArray<FrameScriptInfo>* aFrameScripts,
+                                  nsCString* aURLToLoad) override;
 
 protected:
     void OnChannelConnected(int32_t pid) override;

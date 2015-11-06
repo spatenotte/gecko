@@ -36,7 +36,7 @@ flags:
     xpcshell: /xpcshell.*/
     robocop: /robocop.*/
     mochitest-dt: /mochitest-devtools-chrome.*/
-    mochitest-gl: /mochitest-gl.*/
+    mochitest-gl: /mochitest-webgl.*/
     mochitest-bc: /mochitest-browser-chrome.*/
     mochitest-browser: /mochitest-browser-chrome.*/
     reftest: /(plain-)?reftest.*/
@@ -61,6 +61,7 @@ flags:
     - flame-kk       # b2g flame kitkat
     - flame-kk-eng   # b2g flame eng build
     - flame-kk-spark-eng
+    - flame-kk-ota
     - nexus-4
     - nexus-4-eng
     - nexus-4-kk
@@ -106,6 +107,7 @@ flags:
     - mochitest
     - mochitest-media
     - mochitest-oop
+    - mochitest-webgl
     - mozmill
     - reftest
     - reftest-ipc

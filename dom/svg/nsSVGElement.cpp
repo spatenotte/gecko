@@ -903,8 +903,9 @@ nsSVGElement::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
     UpdateContentStyleRule();
 
   if (mContentStyleRule) {
-    mContentStyleRule->RuleMatched();
-    aRuleWalker->Forward(mContentStyleRule);
+    css::Declaration* declaration = mContentStyleRule->GetDeclaration();
+    declaration->SetImmutable();
+    aRuleWalker->Forward(declaration);
   }
 
   return NS_OK;
@@ -927,8 +928,9 @@ nsSVGElement::WalkAnimatedContentStyleRules(nsRuleWalker* aRuleWalker)
       animContentStyleRule = GetAnimatedContentStyleRule();
     }
     if (animContentStyleRule) {
-      animContentStyleRule->RuleMatched();
-      aRuleWalker->Forward(animContentStyleRule);
+      css::Declaration* declaration = animContentStyleRule->GetDeclaration();
+      declaration->SetImmutable();
+      aRuleWalker->Forward(declaration);
     }
   }
 }
@@ -1356,7 +1358,7 @@ nsSVGElement::UpdateAnimatedContentStyleRule()
                   SMIL_MAPPED_ATTR_STYLERULE_ATOM,
                   animContentStyleRule.get(),
                   ReleaseStyleRule);
-    unused << animContentStyleRule.forget();
+    Unused << animContentStyleRule.forget();
     MOZ_ASSERT(rv == NS_OK,
                "SetProperty failed (or overwrote something)");
   }

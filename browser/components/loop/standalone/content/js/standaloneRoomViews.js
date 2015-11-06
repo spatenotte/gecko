@@ -80,7 +80,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
         mozL10n.get("rooms_room_joined_own_conversation_label") :
         mozL10n.get("rooms_room_join_label");
 
-      var buttonClasses = React.addons.classSet({
+      var buttonClasses = classNames({
         btn: true,
         "btn-info": true,
         disabled: this.state.roomState === ROOM_STATES.JOINED
@@ -102,6 +102,9 @@ loop.standaloneRoomViews = (function(mozL10n) {
     },
 
     render: function() {
+      var roomName = this.state.roomName ||
+                     this.state.roomContextUrls[0].description ||
+                     this.state.roomContextUrls[0].location;
       // The extra scroller div here is for providing a scroll view for shorter
       // screens, as the common.css specifies overflow:hidden for the body which
       // we need in some places.
@@ -110,7 +113,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
           React.createElement("div", {className: "handle-user-agent-view"}, 
             React.createElement("div", {className: "info-panel"}, 
               React.createElement("p", {className: "loop-logo-text", title: mozL10n.get("clientShortname2")}), 
-              React.createElement("p", {className: "roomName"}, this.state.roomName), 
+              React.createElement("p", {className: "roomName"}, roomName), 
               React.createElement("p", {className: "loop-logo"}), 
               
                 this.state.failureReason ?
@@ -119,7 +122,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
               
             ), 
             React.createElement(ToSView, {dispatcher: this.props.dispatcher}), 
-            React.createElement("p", {className: "mozilla-logo"})
+            React.createElement("img", {className: "mozilla-logo", src: "img/mozilla-logo.svg#logo"})
           )
         )
       );
@@ -322,7 +325,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
           var isChrome = utils.isChrome(navigator.userAgent);
           var isFirefox = utils.isFirefox(navigator.userAgent);
           var isOpera = utils.isOpera(navigator.userAgent);
-          var promptMediaMessageClasses = React.addons.classSet({
+          var promptMediaMessageClasses = classNames({
             "prompt-media-message": true,
             "chrome": isChrome,
             "firefox": isFirefox,
@@ -444,16 +447,15 @@ loop.standaloneRoomViews = (function(mozL10n) {
     componentWillUpdate: function(nextProps, nextState) {
       if (this.state.roomState !== ROOM_STATES.READY &&
           nextState.roomState === ROOM_STATES.READY) {
-        var roomName = nextState.roomName || this.state.roomName;
+        var roomName = nextState.roomName ||
+                       this.state.roomName ||
+                       this.state.roomContextUrls[0].description ||
+                       this.state.roomContextUrls[0].location;
 
-        if (roomName) {
-          this.setTitle(mozL10n.get("standalone_title_with_room_name", {
-            roomName: roomName,
-            clientShortname: mozL10n.get("clientShortname2")
-          }));
-        } else {
-          this.setTitle(mozL10n.get("clientShortname2"));
-        }
+        this.setTitle(mozL10n.get("standalone_title_with_room_name", {
+          roomName: roomName,
+          clientShortname: mozL10n.get("clientShortname2")
+        }));
       }
 
       if (this.state.roomState !== ROOM_STATES.MEDIA_WAIT &&
@@ -617,7 +619,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
             renderRemoteVideo: this.shouldRenderRemoteVideo(), 
             screenShareMediaElement: this.state.screenShareMediaElement, 
             screenSharePosterUrl: this.props.screenSharePosterUrl, 
-            showContextRoomName: true, 
+            showInitialContext: true, 
             useDesktopPaths: false}, 
             React.createElement(StandaloneOverlayWrapper, {dispatcher: this.props.dispatcher}), 
             React.createElement(StandaloneRoomInfoArea, {activeRoomStore: this.props.activeRoomStore, 
@@ -652,7 +654,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
         React.createElement("div", {className: "standalone-overlay-wrapper"}, 
           React.createElement("div", {className: "hello-logo"}), 
           React.createElement(GeneralSupportURL, {dispatcher: this.props.dispatcher}), 
-          React.createElement("div", {className: "standalone-moz-logo"})
+          React.createElement("img", {className: "standalone-moz-logo", src: "img/mozilla-logo.svg#logo-white"})
         )
       );
     }

@@ -163,7 +163,6 @@ RasterImage::Init(const char* aMimeType,
 }
 
 //******************************************************************************
-// [notxpcom] void requestRefresh ([const] in TimeStamp aTime);
 NS_IMETHODIMP_(void)
 RasterImage::RequestRefresh(const TimeStamp& aTime)
 {
@@ -320,6 +319,9 @@ RasterImage::LookupFrame(uint32_t aFrameNum,
 
   IntSize requestedSize = CanDownscaleDuringDecode(aSize, aFlags)
                         ? aSize : mSize;
+  if (requestedSize.IsEmpty()) {
+    return DrawableFrameRef();  // Can't decode to a surface of zero size.
+  }
 
   LookupResult result = LookupFrameInternal(aFrameNum, requestedSize, aFlags);
 
@@ -543,8 +545,6 @@ RasterImage::CopyFrame(uint32_t aWhichFrame, uint32_t aFlags)
 }
 
 //******************************************************************************
-/* [noscript] SourceSurface getFrame(in uint32_t aWhichFrame,
- *                                   in uint32_t aFlags); */
 NS_IMETHODIMP_(already_AddRefed<SourceSurface>)
 RasterImage::GetFrame(uint32_t aWhichFrame,
                       uint32_t aFlags)
@@ -972,7 +972,6 @@ RasterImage::ResetAnimation()
 }
 
 //******************************************************************************
-// [notxpcom] void setAnimationStartTime ([const] in TimeStamp aTime);
 NS_IMETHODIMP_(void)
 RasterImage::SetAnimationStartTime(const TimeStamp& aTime)
 {
@@ -1167,18 +1166,18 @@ RasterImage::CanDiscard() {
          !mAnim;                 // Can never discard animated images
 }
 
-//******************************************************************************
-
-NS_IMETHODIMP
-RasterImage::RequestDecode()
-{
-  return RequestDecodeForSize(mSize, DECODE_FLAGS_DEFAULT);
-}
-
-
 NS_IMETHODIMP
 RasterImage::StartDecoding()
 {
+  if (mError) {
+    return NS_ERROR_FAILURE;
+  }
+
+  if (!mHasSize) {
+    mWantFullDecode = true;
+    return NS_OK;
+  }
+
   return RequestDecodeForSize(mSize, FLAG_SYNC_DECODE_IF_FAST);
 }
 
@@ -1192,7 +1191,6 @@ RasterImage::RequestDecodeForSize(const IntSize& aSize, uint32_t aFlags)
   }
 
   if (!mHasSize) {
-    mWantFullDecode = true;
     return NS_OK;
   }
 
@@ -1478,15 +1476,6 @@ RasterImage::DrawInternal(DrawableFrameRef&& aFrameRef,
 }
 
 //******************************************************************************
-/* [noscript] void draw(in gfxContext aContext,
- *                      in Filter aFilter,
- *                      [const] in gfxMatrix aUserSpaceToImageSpace,
- *                      [const] in gfxRect aFill,
- *                      [const] in IntRect aSubimage,
- *                      [const] in IntSize aViewportSize,
- *                      [const] in SVGImageContext aSVGContext,
- *                      in uint32_t aWhichFrame,
- *                      in uint32_t aFlags); */
 NS_IMETHODIMP_(DrawResult)
 RasterImage::Draw(gfxContext* aContext,
                   const IntSize& aSize,
@@ -1801,7 +1790,7 @@ RasterImage::FinalizeDecoder(Decoder* aDecoder)
   // If we were a metadata decode and a full decode was requested, do it.
   if (done && wasMetadata && mWantFullDecode) {
     mWantFullDecode = false;
-    RequestDecode();
+    RequestDecodeForSize(mSize, DECODE_FLAGS_DEFAULT);
   }
 }
 

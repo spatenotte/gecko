@@ -524,7 +524,7 @@ js::Invoke(JSContext* cx, const Value& thisv, const Value& fval, unsigned argc, 
 
     if (args.thisv().isObject()) {
         /*
-         * We must call the thisObject hook in case we are not called from the
+         * We must call the thisValue hook in case we are not called from the
          * interpreter, where a prior bytecode has computed an appropriate
          * |this| already.  But don't do that if fval is a DOM function.
          */
@@ -1799,6 +1799,7 @@ CASE(EnableInterruptsPseudoOpcode)
 CASE(JSOP_NOP)
 CASE(JSOP_UNUSED14)
 CASE(JSOP_BACKPATCH)
+CASE(JSOP_UNUSED145)
 CASE(JSOP_UNUSED171)
 CASE(JSOP_UNUSED172)
 CASE(JSOP_UNUSED173)
@@ -2023,7 +2024,7 @@ END_CASE(JSOP_AND)
 
 #define FETCH_ELEMENT_ID(n, id)                                               \
     JS_BEGIN_MACRO                                                            \
-        if (!ValueToId<CanGC>(cx, REGS.stackHandleAt(n), &(id))) \
+        if (!ToPropertyKey(cx, REGS.stackHandleAt(n), &(id)))                 \
             goto error;                                                       \
     JS_END_MACRO
 
@@ -2138,16 +2139,6 @@ CASE(JSOP_PICK)
     REGS.sp[-1] = lval;
 }
 END_CASE(JSOP_PICK)
-
-CASE(JSOP_BINDINTRINSIC)
-{
-    NativeObject* holder = GlobalObject::getIntrinsicsHolder(cx, cx->global());
-    if (!holder)
-        goto error;
-
-    PUSH_OBJECT(*holder);
-}
-END_CASE(JSOP_BINDINTRINSIC)
 
 CASE(JSOP_BINDGNAME)
 CASE(JSOP_BINDNAME)
@@ -2477,7 +2468,7 @@ CASE(JSOP_STRICTDELELEM)
 
     ObjectOpResult result;
     ReservedRooted<jsid> id(&rootId0);
-    if (!ValueToId<CanGC>(cx, propval, &id))
+    if (!ToPropertyKey(cx, propval, &id))
         goto error;
     if (!DeleteProperty(cx, obj, id, result))
         goto error;
@@ -2572,9 +2563,6 @@ CASE(JSOP_SETINTRINSIC)
 
     if (!SetIntrinsicOperation(cx, script, REGS.pc, value))
         goto error;
-
-    REGS.sp[-2] = REGS.sp[-1];
-    REGS.sp--;
 }
 END_CASE(JSOP_SETINTRINSIC)
 
@@ -4277,7 +4265,7 @@ js::DeleteElementJit(JSContext* cx, HandleValue val, HandleValue index, bool* bp
         return false;
 
     RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, index, &id))
+    if (!ToPropertyKey(cx, index, &id))
         return false;
     ObjectOpResult result;
     if (!DeleteProperty(cx, obj, id, result))
@@ -4313,7 +4301,7 @@ js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleV
                      bool strict)
 {
     RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, index, &id))
+    if (!ToPropertyKey(cx, index, &id))
         return false;
     RootedValue receiver(cx, ObjectValue(*obj));
     return SetObjectElementOperation(cx, obj, receiver, id, value, strict);
@@ -4325,7 +4313,7 @@ js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleV
 {
     MOZ_ASSERT(pc);
     RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, index, &id))
+    if (!ToPropertyKey(cx, index, &id))
         return false;
     RootedValue receiver(cx, ObjectValue(*obj));
     return SetObjectElementOperation(cx, obj, receiver, id, value, strict, script, pc);
@@ -4498,7 +4486,7 @@ js::InitGetterSetterOperation(JSContext* cx, jsbytecode* pc, HandleObject obj, H
                               HandleObject val)
 {
     RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, idval, &id))
+    if (!ToPropertyKey(cx, idval, &id))
         return false;
 
     return InitGetterSetterOperation(cx, pc, obj, id, val);
@@ -4518,6 +4506,31 @@ js::SpreadCallOperation(JSContext* cx, HandleScript script, jsbytecode* pc, Hand
                              constructing ? JSMSG_TOO_MANY_CON_SPREADARGS
                                           : JSMSG_TOO_MANY_FUN_SPREADARGS);
         return false;
+    }
+
+    // Do our own checks for the callee being a function, as Invoke uses the
+    // expression decompiler to decompile the callee stack operand based on
+    // the number of arguments. Spread operations have the callee at sp - 3
+    // when not constructing, and sp - 4 when constructing.
+    if (callee.isPrimitive()) {
+        return ReportIsNotFunction(cx, callee, 2 + constructing,
+                                   constructing ? CONSTRUCT : NO_CONSTRUCT);
+    }
+
+    const Class* clasp = callee.toObject().getClass();
+    if (MOZ_UNLIKELY(clasp != &JSFunction::class_)) {
+#if JS_HAS_NO_SUCH_METHOD
+        if (MOZ_UNLIKELY(clasp != &js_NoSuchMethodClass)) {
+#endif
+
+            if (!callee.toObject().callHook()) {
+                return ReportIsNotFunction(cx, callee, 2 + constructing,
+                                           constructing ? CONSTRUCT : NO_CONSTRUCT);
+            }
+
+#if JS_HAS_NO_SUCH_METHOD
+        }
+#endif
     }
 
 #ifdef DEBUG

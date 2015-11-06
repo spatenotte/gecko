@@ -315,12 +315,15 @@ MediaEngineRemoteVideoSource::DeliverFrame(unsigned char* buffer,
   data.mPicSize = IntSize(mWidth, mHeight);
   data.mStereoMode = StereoMode::MONO;
 
-  videoImage->SetData(data);
+  if (!videoImage->SetData(data)) {
+    MOZ_ASSERT(false);
+    return 0;
+  }
 
 #ifdef DEBUG
   static uint32_t frame_num = 0;
-  LOGFRAME(("frame %d (%dx%d); timestamp %u, ntp_time %lu, render_time %lu", frame_num++,
-            mWidth, mHeight, time_stamp, ntp_time, render_time));
+  LOGFRAME(("frame %d (%dx%d); timestamp %u, ntp_time %" PRIu64 ", render_time %" PRIu64,
+            frame_num++, mWidth, mHeight, time_stamp, ntp_time, render_time));
 #endif
 
   // we don't touch anything in 'this' until here (except for snapshot,

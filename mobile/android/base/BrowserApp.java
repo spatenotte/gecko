@@ -15,15 +15,20 @@ import org.mozilla.gecko.Tabs.TabEvents;
 import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.animation.TransitionsTracker;
 import org.mozilla.gecko.animation.ViewHelper;
+import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.SuggestedSites;
+import org.mozilla.gecko.db.TabsAccessor;
 import org.mozilla.gecko.distribution.Distribution;
 import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.favicons.LoadFaviconTask;
 import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.decoders.IconDirectoryEntry;
 import org.mozilla.gecko.firstrun.FirstrunPane;
+import org.mozilla.gecko.fxa.FirefoxAccounts;
+import org.mozilla.gecko.fxa.FxAccountConstants;
+import org.mozilla.gecko.fxa.activities.FxAccountWebFlowActivity;
 import org.mozilla.gecko.gfx.DynamicToolbarAnimator;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
 import org.mozilla.gecko.gfx.LayerView;
@@ -82,6 +87,7 @@ import org.mozilla.gecko.widget.ButtonToast;
 import org.mozilla.gecko.widget.ButtonToast.ToastListener;
 import org.mozilla.gecko.widget.GeckoActionProvider;
 
+import android.accounts.Account;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ContentResolver;
@@ -104,6 +110,8 @@ import android.nfc.NfcEvent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.StrictMode;
+import android.support.annotation.NonNull;
+import android.support.annotation.WorkerThread;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.view.MenuItemCompat;
@@ -1357,28 +1365,6 @@ public class BrowserApp extends GeckoApp
         });
     }
 
-    private void shareCurrentUrl() {
-        Tab tab = Tabs.getInstance().getSelectedTab();
-        if (tab == null) {
-            return;
-        }
-
-        String url = tab.getURL();
-        if (url == null) {
-            return;
-        }
-
-        if (AboutPages.isAboutReader(url)) {
-            url = ReaderModeUtils.getUrlFromAboutReader(url);
-        }
-
-        GeckoAppShell.openUriExternal(url, "text/plain", "", "",
-                                      Intent.ACTION_SEND, tab.getDisplayTitle(), false);
-
-        // Context: Sharing via chrome list (no explicit session is active)
-        Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.LIST);
-    }
-
     private void setToolbarMargin(int margin) {
         ((RelativeLayout.LayoutParams) mGeckoLayout.getLayoutParams()).topMargin = margin;
         mGeckoLayout.requestLayout();
@@ -1990,7 +1976,6 @@ public class BrowserApp extends GeckoApp
         if (!areTabsShown()) {
             mTabsPanel.setVisibility(View.INVISIBLE);
             mTabsPanel.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-            mBrowserToolbar.setContextMenuEnabled(true);
         } else {
             // Cancel editing mode to return to page content when the TabsPanel closes. We cancel
             // it here because there are graphical glitches if it's canceled while it's visible.
@@ -3230,22 +3215,32 @@ public class BrowserApp extends GeckoApp
         if (itemId == R.id.send_to_device) {
             tab = Tabs.getInstance().getSelectedTab();
             if (tab != null) {
-                String url = tab.getURL();
-                if (url != null) {
-                    if (AboutPages.isAboutReader(url)) {
-                        url = ReaderModeUtils.getUrlFromAboutReader(url);
+                final Tab selectedTab = tab;
+                ThreadUtils.postToBackgroundThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        handleSendToDevice(selectedTab);
                     }
-                    Intent sendToDeviceIntent = GeckoAppShell.getShareIntent(getContext(), url,
-                            "text/plain", tab.getDisplayTitle());
-                    sendToDeviceIntent.setClass(getContext(), ShareDialog.class);
-                    startActivity(sendToDeviceIntent);
-                }
+                });
             }
             return true;
         }
 
         if (itemId == R.id.share) {
-            shareCurrentUrl();
+            tab = Tabs.getInstance().getSelectedTab();
+            if (tab != null) {
+                String url = tab.getURL();
+                if (url != null) {
+                    if (AboutPages.isAboutReader(url)) {
+                        url = ReaderModeUtils.getUrlFromAboutReader(url);
+                    }
+
+                    // Context: Sharing via chrome list (no explicit session is active)
+                    Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.LIST, "menu");
+
+                    GeckoAppShell.openUriExternal(url, "text/plain", "", "", Intent.ACTION_SEND, tab.getDisplayTitle(), false);
+                }
+            }
             return true;
         }
 
@@ -3367,6 +3362,46 @@ public class BrowserApp extends GeckoApp
         }
 
         return super.onOptionsItemSelected(item);
+    }
+
+    /**
+     * Handles a press to the send to device button in the browser menu. The
+     * expected states when the user presses the button are:
+     *   * Not signed in: open to FxA sign-up
+     *   * Signed in but no other devices: display toast with a message
+     * explaining they should connect another device to use this feature
+     *   * Signed in but >= 1 other device: display device list
+     */
+    @WorkerThread
+    private void handleSendToDevice(@NonNull final Tab selectedTab) {
+        final Account account = FirefoxAccounts.getFirefoxAccount(this);
+        if (account == null) {
+            // TODO (bug 1217164): Go back to previous tab on back press
+            final Intent intent = new Intent(FxAccountConstants.ACTION_FXA_GET_STARTED);
+            intent.putExtra(FxAccountWebFlowActivity.EXTRA_ENDPOINT, FxAccountConstants.ENDPOINT_PREFERENCES);
+            startActivity(intent);
+            return;
+        }
+
+        final BrowserDB browserDB = GeckoProfile.get(this).getDB();
+        final TabsAccessor tabsAccessor = browserDB.getTabsAccessor();
+        final int remoteClientCount = tabsAccessor.getRemoteClientCount(this);
+        if (remoteClientCount == 0) {
+            final Toast toast = Toast.makeText(this, R.string.menu_no_synced_devices, Toast.LENGTH_LONG);
+            toast.show();
+
+        } else {
+            String url = selectedTab.getURL();
+            if (url != null) {
+                if (AboutPages.isAboutReader(url)) {
+                    url = ReaderModeUtils.getUrlFromAboutReader(url);
+                }
+                final Intent sendToDeviceIntent = GeckoAppShell.getShareIntent(getContext(), url,
+                        "text/plain", selectedTab.getDisplayTitle());
+                sendToDeviceIntent.setClass(getContext(), ShareDialog.class);
+                startActivity(sendToDeviceIntent);
+            }
+        }
     }
 
     @Override
@@ -3533,6 +3568,7 @@ public class BrowserApp extends GeckoApp
                 // We only want to show the prompt if the browser has been opened from an external url
                 if (TabQueueHelper.TAB_QUEUE_ENABLED && mInitialized
                                                      && Intent.ACTION_VIEW.equals(intent.getAction())
+                                                     && !intent.getBooleanExtra(BrowserContract.SKIP_TAB_QUEUE_FLAG, false)
                                                      && TabQueueHelper.shouldShowTabQueuePrompt(BrowserApp.this)) {
                     Intent promptIntent = new Intent(BrowserApp.this, TabQueuePrompt.class);
                     startActivityForResult(promptIntent, ACTIVITY_REQUEST_TAB_QUEUE);

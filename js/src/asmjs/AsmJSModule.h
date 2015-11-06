@@ -112,6 +112,10 @@ struct MOZ_STACK_CLASS AsmJSFunctionLabels
     jit::Label  endAfterOOL;
     mozilla::Maybe<jit::Label> overflowThunk;
     jit::Label& overflowExit;
+
+  private:
+    AsmJSFunctionLabels(const AsmJSFunctionLabels&) = delete;
+    AsmJSFunctionLabels& operator=(const AsmJSFunctionLabels&) = delete;
 };
 
 // Represents the type and value of an asm.js numeric literal.
@@ -402,10 +406,6 @@ class AsmJSModule
             MOZ_ASSERT(!jitCodeOffset_);
             jitCodeOffset_ = off;
         }
-        void updateOffsets(jit::MacroAssembler& masm) {
-            interpCodeOffset_ = masm.actualOffset(interpCodeOffset_);
-            jitCodeOffset_ = masm.actualOffset(jitCodeOffset_);
-        }
 
         size_t serializedSize() const;
         uint8_t* serialize(uint8_t* cursor) const;
@@ -520,10 +520,6 @@ class AsmJSModule
             MOZ_ASSERT(pod.codeOffset_ == UINT32_MAX);
             pod.codeOffset_ = off;
         }
-        void updateCodeOffset(jit::MacroAssembler& masm) {
-            MOZ_ASSERT(!isChangeHeap());
-            pod.codeOffset_ = masm.actualOffset(pod.codeOffset_);
-        }
 
         unsigned numArgs() const {
             MOZ_ASSERT(!isChangeHeap());
@@ -578,7 +574,6 @@ class AsmJSModule
         CodeRange(Kind kind, uint32_t begin, uint32_t end);
         CodeRange(Kind kind, uint32_t begin, uint32_t profilingReturn, uint32_t end);
         CodeRange(AsmJSExit::BuiltinKind builtin, uint32_t begin, uint32_t pret, uint32_t end);
-        void updateOffsets(jit::MacroAssembler& masm);
 
         Kind kind() const { return Kind(u.kind_); }
         bool isFunction() const { return kind() == Function; }
@@ -640,6 +635,10 @@ class AsmJSModule
         PropertyName* name_;
 
       public:
+        FunctionCodeRange()
+          : CodeRange(), name_(nullptr)
+        {}
+
         FunctionCodeRange(PropertyName* name, uint32_t lineNumber, const AsmJSFunctionLabels& l)
           : CodeRange(UINT32_MAX, lineNumber, l), name_(name)
         {}
@@ -755,7 +754,7 @@ class AsmJSModule
 
         explicit RelativeLink(Kind kind)
         {
-#if defined(JS_CODEGEN_MIPS32)
+#if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
             kind_ = kind;
 #elif defined(JS_CODEGEN_ARM)
             // On ARM, CodeLabels are only used to label raw pointers, so in
@@ -766,14 +765,14 @@ class AsmJSModule
         }
 
         bool isRawPointerPatch() {
-#if defined(JS_CODEGEN_MIPS32)
+#if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
             return kind_ == RawPointer;
 #else
             return true;
 #endif
         }
 
-#ifdef JS_CODEGEN_MIPS32
+#if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
         Kind kind_;
 #endif
         uint32_t patchAtOffset;
@@ -1168,14 +1167,14 @@ class AsmJSModule
     bool addCodeRange(CodeRange::Kind kind, uint32_t begin, uint32_t pret, uint32_t end) {
         return codeRanges_.append(CodeRange(kind, begin, pret, end));
     }
-    bool addFunctionCodeRange(PropertyName* name, FunctionCodeRange&& codeRange)
+    bool addFunctionCodeRange(PropertyName* name, FunctionCodeRange codeRange)
     {
         MOZ_ASSERT(!isFinished());
         MOZ_ASSERT(name->isTenured());
         if (names_.length() >= UINT32_MAX)
             return false;
         codeRange.initNameIndex(names_.length());
-        return names_.append(name) && codeRanges_.append(Move(codeRange));
+        return names_.append(name) && codeRanges_.append(codeRange);
     }
     bool addBuiltinThunkCodeRange(AsmJSExit::BuiltinKind builtin, uint32_t begin,
                                   uint32_t profilingReturn, uint32_t end)

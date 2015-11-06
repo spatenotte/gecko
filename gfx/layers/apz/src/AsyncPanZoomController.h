@@ -647,9 +647,10 @@ protected:
   // Common processing at the end of a touch block.
   void OnTouchEndOrCancel();
 
-  // This is called by OverscrollAnimation to notify us when the overscroll
-  // animation is ending.
-  void OverscrollAnimationEnding();
+  // This is called to request that the main thread snap the scroll position
+  // to a nearby snap position if appropriate. The current scroll position is
+  // used as the final destination.
+  void RequestSnap();
 
   uint64_t mLayersId;
   RefPtr<CompositorParent> mCompositorParent;
@@ -833,9 +834,9 @@ public:
   bool ArePointerEventsConsumable(TouchBlockState* aBlock, uint32_t aTouchPoints);
 
   /**
-   * Clear internal state relating to input handling.
+   * Clear internal state relating to touch input handling.
    */
-  void ResetInputState();
+  void ResetTouchInputState();
 
 private:
   void CancelAnimationAndGestureState();

@@ -19,34 +19,47 @@ let breakdownModel = exports.breakdown = PropTypes.shape({
 /**
  * Snapshot model.
  */
+let stateKeys = Object.keys(states).map(state => states[state]);
 let snapshotModel = exports.snapshot = PropTypes.shape({
   // Unique ID for a snapshot
   id: PropTypes.number.isRequired,
   // Whether or not this snapshot is currently selected.
   selected: PropTypes.bool.isRequired,
-  // fs path to where the snapshot is stored; used to
-  // identify the snapshot for HeapAnalysesClient.
+  // Filesystem path to where the snapshot is stored; used to identify the
+  // snapshot for HeapAnalysesClient.
   path: PropTypes.string,
-  // Data of a census breakdown
+  // The current census report data.
   census: PropTypes.object,
   // The breakdown used to generate the current census
   breakdown: breakdownModel,
-  // State the snapshot is in
+  // Whether the currently cached census tree is inverted or not.
+  inverted: PropTypes.bool,
+  // If present, the currently cached census's filter string used for pruning
+  // the tree items.
+  filter: PropTypes.string,
+  // If an error was thrown while processing this snapshot, the `Error` instance is attached here.
+  error: PropTypes.object,
+  // The creation time of the snapshot; required after the snapshot has been read.
+  creationTime: PropTypes.number,
+  // The current state the snapshot is in.
   // @see ./constants.js
-  state: function (props, propName) {
-    let stateNames = Object.keys(states);
-    let current = props.state;
+  state: function (snapshot, propName) {
+    let current = snapshot.state;
     let shouldHavePath = [states.SAVED, states.READ, states.SAVING_CENSUS, states.SAVED_CENSUS];
+    let shouldHaveCreationTime = [states.READ, states.SAVING_CENSUS, states.SAVED_CENSUS];
     let shouldHaveCensus = [states.SAVED_CENSUS];
 
-    if (!stateNames.contains(current)) {
-      throw new Error(`Snapshot state must be one of ${stateNames}.`);
+    if (!stateKeys.includes(current)) {
+      throw new Error(`Snapshot state must be one of ${stateKeys}.`);
     }
-    if (shouldHavePath.contains(current) && !path) {
+    if (shouldHavePath.includes(current) && !snapshot.path) {
       throw new Error(`Snapshots in state ${current} must have a snapshot path.`);
     }
-    if (shouldHaveCensus.contains(current) && (!props.census || !props.breakdown)) {
+    if (shouldHaveCensus.includes(current) && (!snapshot.census || !snapshot.breakdown)) {
       throw new Error(`Snapshots in state ${current} must have a census and breakdown.`);
+    }
+    if (shouldHaveCreationTime.includes(current) && !snapshot.creationTime) {
+      throw new Error(`Snapshots in state ${current} must have a creation time.`);
     }
   },
 });
@@ -63,7 +76,7 @@ let appModel = exports.app = {
   // {MemoryFront} Used to communicate with platform
   front: PropTypes.instanceOf(MemoryFront),
   // Allocations recording related data.
-  allocations: allocationsModel,
+  allocations: allocationsModel.isRequired,
   // {HeapAnalysesClient} Used to interface with snapshots
   heapWorker: PropTypes.instanceOf(HeapAnalysesClient),
   // The breakdown object DSL describing how we want
@@ -72,4 +85,8 @@ let appModel = exports.app = {
   breakdown: breakdownModel.isRequired,
   // List of reference to all snapshots taken
   snapshots: PropTypes.arrayOf(snapshotModel).isRequired,
+  // True iff we want the tree displayed inverted.
+  inverted: PropTypes.bool.isRequired,
+  // If present, a filter string for pruning the tree items.
+  filter: PropTypes.string,
 };

@@ -2532,19 +2532,19 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
     // load: offset to the load instruction obtained by movePatchablePtr().
     void writeDataRelocation(ImmGCPtr ptr, BufferOffset load) {
         if (ptr.value)
-            tmpDataRelocations_.append(load);
+            dataRelocations_.writeUnsigned(load.getOffset());
     }
     void writeDataRelocation(const Value& val, BufferOffset load) {
         if (val.isMarkable()) {
             gc::Cell* cell = reinterpret_cast<gc::Cell*>(val.toGCThing());
             if (cell && gc::IsInsideNursery(cell))
                 embedsNurseryPointers_ = true;
-            tmpDataRelocations_.append(load);
+            dataRelocations_.writeUnsigned(load.getOffset());
         }
     }
 
     void writePrebarrierOffset(CodeOffsetLabel label) {
-        tmpPreBarriers_.append(BufferOffset(label.offset()));
+        preBarriers_.writeUnsigned(label.offset());
     }
 
     void computeEffectiveAddress(const Address& address, Register dest) {
@@ -2862,6 +2862,14 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
     void atomicXor32(const S& value, const T& mem) {
         atomicEffectOp(4, AtomicFetchXorOp, value, mem);
     }
+
+    template<typename T>
+    void compareExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem, Register oldval, Register newval,
+                                        Register temp, AnyRegister output);
+
+    template<typename T>
+    void atomicExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem, Register value,
+                                       Register temp, AnyRegister output);
 
     // Emit a BLR or NOP instruction. ToggleCall can be used to patch
     // this instruction.

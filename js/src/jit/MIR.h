@@ -688,7 +688,7 @@ class MDefinition : public MNode
         uses_.remove(use);
     }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     // Number of uses of this instruction. This function is only available
     // in DEBUG mode since it requires traversing the list. Most users should
     // use hasUses() or hasOneUse() instead.
@@ -6717,7 +6717,7 @@ class MStringSplit
     }
 };
 
-// Returns an object to use as |this| value. See also ComputeThis and
+// Returns the value to use as |this| value. See also ComputeThis and
 // BoxNonStrictThis in Interpreter.h.
 class MComputeThis
   : public MUnaryInstruction,
@@ -6726,7 +6726,7 @@ class MComputeThis
     explicit MComputeThis(MDefinition* def)
       : MUnaryInstruction(def)
     {
-        setResultType(MIRType_Object);
+        setResultType(MIRType_Value);
     }
 
   public:
@@ -6740,8 +6740,7 @@ class MComputeThis
         return true;
     }
 
-    // Note: don't override getAliasSet: the thisObject hook can be
-    // effectful.
+    // Note: don't override getAliasSet: the thisValue hook can be effectful.
 };
 
 // Load an arrow function's |this| value.
@@ -13708,17 +13707,17 @@ class MAsmJSCall final
       private:
         Which which_;
         union {
-            Label* internal_;
+            AsmJSInternalCallee internal_;
             MDefinition* dynamic_;
             AsmJSImmKind builtin_;
         } u;
       public:
         Callee() {}
-        explicit Callee(Label* callee) : which_(Internal) { u.internal_ = callee; }
+        explicit Callee(AsmJSInternalCallee callee) : which_(Internal) { u.internal_ = callee; }
         explicit Callee(MDefinition* callee) : which_(Dynamic) { u.dynamic_ = callee; }
         explicit Callee(AsmJSImmKind callee) : which_(Builtin) { u.builtin_ = callee; }
         Which which() const { return which_; }
-        Label* internal() const { MOZ_ASSERT(which_ == Internal); return u.internal_; }
+        AsmJSInternalCallee internal() const { MOZ_ASSERT(which_ == Internal); return u.internal_; }
         MDefinition* dynamic() const { MOZ_ASSERT(which_ == Dynamic); return u.dynamic_; }
         AsmJSImmKind builtin() const { MOZ_ASSERT(which_ == Builtin); return u.builtin_; }
     };

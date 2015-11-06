@@ -350,7 +350,10 @@ case "$target" in
         # that behavior) that it's better to turn it off.
         # _CRT_SECURE_NO_WARNINGS disables warnings about using MSVC-specific
         # secure CRT functions.
-        CXXFLAGS="$CXXFLAGS -wd4345 -wd4351 -wd4800 -D_CRT_SECURE_NO_WARNINGS"
+        # MSVC warning C4819 warns some UTF-8 characters (e.g. copyright sign)
+        # on non-Western system locales even if it is in a comment.
+        CFLAGS="$CFLAGS -wd4819"
+        CXXFLAGS="$CXXFLAGS -wd4345 -wd4351 -wd4800 -wd4819 -D_CRT_SECURE_NO_WARNINGS"
         AC_LANG_SAVE
         AC_LANG_C
         AC_TRY_COMPILE([#include <stdio.h>],
@@ -3194,6 +3197,20 @@ MOZ_ARG_ENABLE_BOOL(vtune,
 [  --enable-vtune          Enable vtune profiling. Implies --enable-profiling.],
     MOZ_VTUNE=1,
     MOZ_VTUNE= )
+
+dnl ========================================================
+dnl JitSpew.  Enabled by default in debug builds.
+dnl ========================================================
+MOZ_ARG_ENABLE_BOOL(jitspew,
+[  --enable-jitspew        Enable the Jit spew and IONFLAGS.],
+    JS_JITSPEW=1,
+    JS_JITSPEW= )
+
+if test -n "$JS_JITSPEW" -o -n "$MOZ_DEBUG"; then
+    AC_DEFINE(JS_JITSPEW)
+fi
+
+AC_SUBST(JS_JITSPEW)
 
 dnl ========================================================
 dnl Debug (see Bug 939505)

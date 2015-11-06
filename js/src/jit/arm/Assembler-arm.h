@@ -647,9 +647,13 @@ class Imm8 : public Operand2
 
   public:
     static datastore::Imm8mData EncodeImm(uint32_t imm) {
+        // RotateLeft below may not be called with a shift of zero.
+        if (imm <= 0xFF)
+            return datastore::Imm8mData(imm, 0);
+
         // An encodable integer has a maximum of 8 contiguous set bits,
         // with an optional wrapped left rotation to even bit positions.
-        for (int rot = 0; rot < 16; rot++) {
+        for (int rot = 1; rot < 16; rot++) {
             uint32_t rotimm = mozilla::RotateLeft(imm, rot*2);
             if (rotimm <= 0xFF)
                 return datastore::Imm8mData(rotimm, rot);
@@ -1251,10 +1255,8 @@ class Assembler : public AssemblerShared
 
   public:
     void resetCounter();
-    uint32_t actualOffset(uint32_t) const;
     uint32_t actualIndex(uint32_t) const;
     static uint8_t* PatchableJumpAddress(JitCode* code, uint32_t index);
-    BufferOffset actualOffset(BufferOffset) const;
     static uint32_t NopFill;
     static uint32_t GetNopFill();
     static uint32_t AsmPoolMaxOffset;
@@ -1275,9 +1277,6 @@ class Assembler : public AssemblerShared
     // TODO: this should actually be a pool-like object. It is currently a big
     // hack, and probably shouldn't exist.
     js::Vector<RelativePatch, 8, SystemAllocPolicy> jumps_;
-    js::Vector<BufferOffset, 0, SystemAllocPolicy> tmpJumpRelocations_;
-    js::Vector<BufferOffset, 0, SystemAllocPolicy> tmpDataRelocations_;
-    js::Vector<BufferOffset, 0, SystemAllocPolicy> tmpPreBarriers_;
 
     CompactBufferWriter jumpRelocations_;
     CompactBufferWriter dataRelocations_;
@@ -1342,7 +1341,7 @@ class Assembler : public AssemblerShared
     // MacroAssemblers hold onto gcthings, so they are traced by the GC.
     void trace(JSTracer* trc);
     void writeRelocation(BufferOffset src) {
-        tmpJumpRelocations_.append(src);
+        jumpRelocations_.writeUnsigned(src.getOffset());
     }
 
     // As opposed to x86/x64 version, the data relocation has to be executed
@@ -1352,11 +1351,11 @@ class Assembler : public AssemblerShared
             if (gc::IsInsideNursery(ptr.value))
                 embedsNurseryPointers_ = true;
             if (ptr.value)
-                tmpDataRelocations_.append(nextOffset());
+                dataRelocations_.writeUnsigned(nextOffset().getOffset());
         }
     }
     void writePrebarrierOffset(CodeOffsetLabel label) {
-        tmpPreBarriers_.append(BufferOffset(label.offset()));
+        preBarriers_.writeUnsigned(label.offset());
     }
 
     enum RelocBranchStyle {
@@ -1699,7 +1698,7 @@ class Assembler : public AssemblerShared
 
     // See Bind
     size_t labelOffsetToPatchOffset(size_t offset) {
-        return actualOffset(offset);
+        return offset;
     }
 
     void as_bkpt();

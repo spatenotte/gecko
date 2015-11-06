@@ -114,6 +114,7 @@ EXPORTS.js += [
     '../public/HashTable.h',
     '../public/HeapAPI.h',
     '../public/Id.h',
+    '../public/Initialization.h',
     '../public/LegacyIntTypes.h',
     '../public/MemoryMetrics.h',
     '../public/Principals.h',
@@ -362,6 +363,7 @@ SOURCES += [
     'jsatom.cpp',
     'jsmath.cpp',
     'jsutil.cpp',
+    'vm/Initialization.cpp',
 ]
 
 if CONFIG['JS_POSIX_NSPR']:
@@ -487,6 +489,7 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
         'jit/mips-shared/BaselineIC-mips-shared.cpp',
         'jit/mips-shared/CodeGenerator-mips-shared.cpp',
         'jit/mips-shared/Lowering-mips-shared.cpp',
+        'jit/mips-shared/MacroAssembler-mips-shared.cpp',
         'jit/mips-shared/MoveEmitter-mips-shared.cpp',
     ]
     if CONFIG['JS_CODEGEN_MIPS32']:
@@ -514,7 +517,9 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
             'jit/mips64/Bailouts-mips64.cpp',
             'jit/mips64/BaselineCompiler-mips64.cpp',
             'jit/mips64/BaselineIC-mips64.cpp',
+            'jit/mips64/CodeGenerator-mips64.cpp',
             'jit/mips64/Lowering-mips64.cpp',
+            'jit/mips64/MoveEmitter-mips64.cpp',
             'jit/mips64/SharedIC-mips64.cpp',
             'jit/mips64/Trampoline-mips64.cpp',
         ]
@@ -536,8 +541,8 @@ if CONFIG['JS_HAS_CTYPES']:
         'ctypes/Library.cpp',
     ]
     if not CONFIG['MOZ_NATIVE_FFI']:
-        GENERATED_INCLUDES += [
-            'ctypes/libffi/include',
+        LOCAL_INCLUDES += [
+            '!ctypes/libffi/include',
         ]
 
 if CONFIG['MOZ_VTUNE']:

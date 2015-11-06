@@ -287,7 +287,7 @@ CollectInterpreterStackScripts(JSContext* cx, const Debugger::ExecutionObservabl
     return true;
 }
 
-#ifdef DEBUG
+#ifdef JS_JITSPEW
 static const char*
 ICEntryKindToString(ICEntry::Kind kind)
 {
@@ -312,7 +312,7 @@ ICEntryKindToString(ICEntry::Kind kind)
         MOZ_CRASH("bad ICEntry kind");
     }
 }
-#endif // DEBUG
+#endif // JS_JITSPEW
 
 static void
 SpewPatchBaselineFrame(uint8_t* oldReturnAddress, uint8_t* newReturnAddress,
@@ -1168,7 +1168,6 @@ JitRuntime::generateBaselineDebugModeOSRHandler(JSContext* cx, uint32_t* noFrame
     if (!code)
         return nullptr;
 
-    noFrameRegPopOffset.fixup(&masm);
     *noFrameRegPopOffsetOut = noFrameRegPopOffset.offset();
 
 #ifdef JS_ION_PERF

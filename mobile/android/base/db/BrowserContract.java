@@ -300,15 +300,12 @@ public class BrowserContract {
         public static final String POSITION = "position";
     }
 
-    public static final class Clients {
+    public static final class Clients implements CommonColumns {
         private Clients() {}
         public static final Uri CONTENT_RECENCY_URI = Uri.withAppendedPath(TABS_AUTHORITY_URI, "clients_recency");
         public static final Uri CONTENT_URI = Uri.withAppendedPath(TABS_AUTHORITY_URI, "clients");
         public static final String CONTENT_TYPE = "vnd.android.cursor.dir/client";
         public static final String CONTENT_ITEM_TYPE = "vnd.android.cursor.item/client";
-
-        // Implicit rowid in SQL table.
-        public static final String ROWID = "rowid";
 
         // Client-provided name string. Could conceivably be null.
         public static final String NAME = "name";
@@ -487,4 +484,11 @@ public class BrowserContract {
 
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "suggestedsites");
     }
+
+    // We refer to the service by name to decouple services from the rest of the code base.
+    public static final String TAB_RECEIVED_SERVICE_CLASS_NAME = "org.mozilla.gecko.tabqueue.TabReceivedService";
+
+    public static final String SKIP_TAB_QUEUE_FLAG = "skip_tab_queue";
+
+    public static final String EXTRA_CLIENT_GUID = "org.mozilla.gecko.extra.CLIENT_ID";
 }

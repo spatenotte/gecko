@@ -376,7 +376,13 @@ TrackBuffersManager::CompleteResetParserState()
     // to discard now.
     track->mQueuedSamples.Clear();
   }
-  // 6. Remove all bytes from the input buffer.
+
+  // 6. If the mode attribute equals "sequence", then set the group start timestamp to the group end timestamp
+  if (mSourceBufferAttributes->GetAppendMode() == SourceBufferAppendMode::Sequence) {
+    mGroupStartTimestamp = Some(mGroupEndTimestamp);
+  }
+
+  // 7. Remove all bytes from the input buffer.
   mIncomingBuffers.Clear();
   mInputBuffer = nullptr;
   if (mCurrentInputBuffer) {
@@ -401,7 +407,7 @@ TrackBuffersManager::CompleteResetParserState()
   }
   RecreateParser(true);
 
-  // 7. Set append state to WAITING_FOR_SEGMENT.
+  // 8. Set append state to WAITING_FOR_SEGMENT.
   SetAppendState(AppendState::WAITING_FOR_SEGMENT);
 
   // Reject our promise immediately.
@@ -574,8 +580,8 @@ TrackBuffersManager::UpdateBufferedRanges()
 {
   MonitorAutoLock mon(mMonitor);
 
-  mVideoBufferedRanges = mVideoTracks.mBufferedRanges;
-  mAudioBufferedRanges = mAudioTracks.mBufferedRanges;
+  mVideoBufferedRanges = mVideoTracks.mSanitizedBufferedRanges;
+  mAudioBufferedRanges = mAudioTracks.mSanitizedBufferedRanges;
 
 #if DEBUG
   if (HasVideo()) {
@@ -1682,12 +1688,13 @@ TrackBuffersManager::InsertFrames(TrackBuffer& aSamples,
   trackBuffer.mNextInsertionIndex.ref() += aSamples.Length();
 
   // Update our buffered range with new sample interval.
+  trackBuffer.mBufferedRanges += aIntervals;
   // We allow a fuzz factor in our interval of half a frame length,
   // as fuzz is +/- value, giving an effective leeway of a full frame
   // length.
   TimeIntervals range(aIntervals);
   range.SetFuzz(trackBuffer.mLongestFrameDuration.ref() / 2);
-  trackBuffer.mBufferedRanges += range;
+  trackBuffer.mSanitizedBufferedRanges += range;
 }
 
 void
@@ -1778,8 +1785,11 @@ TrackBuffersManager::RemoveFrames(const TimeIntervals& aIntervals,
   }
 
   // Update our buffered range to exclude the range just removed.
-  removedIntervals.SetFuzz(TimeUnit::FromMicroseconds(maxSampleDuration/2));
   aTrackData.mBufferedRanges -= removedIntervals;
+
+  // Recalculate sanitized buffered ranges.
+  aTrackData.mSanitizedBufferedRanges = aTrackData.mBufferedRanges;
+  aTrackData.mSanitizedBufferedRanges.SetFuzz(TimeUnit::FromMicroseconds(maxSampleDuration/2));
 
   data.RemoveElementsAt(firstRemovedIndex.ref(),
                         lastRemovedIndex - firstRemovedIndex.ref() + 1);

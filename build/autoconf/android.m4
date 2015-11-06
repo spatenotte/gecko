@@ -188,8 +188,8 @@ case "$target" in
 esac
 
 ])
-    
-AC_DEFUN([MOZ_ANDROID_STLPORT],
+
+AC_DEFUN([MOZ_ANDROID_CPU_ARCH],
 [
 
 if test "$OS_TARGET" = "Android" -a -z "$gonkdir"; then
@@ -209,7 +209,13 @@ if test "$OS_TARGET" = "Android" -a -z "$gonkdir"; then
     esac
 
     AC_SUBST(ANDROID_CPU_ARCH)
+fi
+])
 
+AC_DEFUN([MOZ_ANDROID_STLPORT],
+[
+
+if test "$OS_TARGET" = "Android" -a -z "$gonkdir"; then
     cpu_arch_dir="$ANDROID_CPU_ARCH"
     if test "$MOZ_THUMB2" = 1; then
         cpu_arch_dir="$cpu_arch_dir/thumb"
@@ -333,6 +339,19 @@ if test -n "$MOZ_NATIVE_DEVICES" ; then
     MOZ_ANDROID_AAR(play-services-basement, 8.1.0, google, com/google/android/gms)
     MOZ_ANDROID_AAR(play-services-cast, 8.1.0, google, com/google/android/gms)
     MOZ_ANDROID_AAR(mediarouter-v7, 23.0.1, android, com/android/support, REQUIRED_INTERNAL_IMPL)
+fi
+
+])
+
+AC_DEFUN([MOZ_ANDROID_GOOGLE_CLOUD_MESSAGING],
+[
+
+if test -n "$MOZ_ANDROID_GCM" ; then
+    AC_SUBST(MOZ_ANDROID_GCM)
+
+    MOZ_ANDROID_AAR(play-services-base, 8.1.0, google, com/google/android/gms)
+    MOZ_ANDROID_AAR(play-services-basement, 8.1.0, google, com/google/android/gms)
+    MOZ_ANDROID_AAR(play-services-gcm, 8.1.0, google, com/google/android/gms)
 fi
 
 ])

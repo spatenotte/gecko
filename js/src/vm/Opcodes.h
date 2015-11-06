@@ -1474,24 +1474,14 @@
      */ \
     macro(JSOP_GETINTRINSIC,  143, "getintrinsic",  NULL, 5,  0,  1, JOF_ATOM|JOF_NAME|JOF_TYPESET) \
     /*
-     * Pops the top two values on the stack as 'val' and 'scope', sets intrinsic
-     * as 'val', and pushes 'val' onto the stack.
-     *
-     * 'scope' is not used.
+     * Stores the top stack value in the specified intrinsic.
      *   Category: Variables and Scopes
      *   Type: Intrinsics
      *   Operands: uint32_t nameIndex
-     *   Stack: scope, val => val
+     *   Stack: val => val
      */ \
-    macro(JSOP_SETINTRINSIC,  144, "setintrinsic",  NULL, 5,  2,  1, JOF_ATOM|JOF_NAME|JOF_SET|JOF_DETECTING) \
-    /*
-     * Pushes 'intrinsicHolder' onto the stack.
-     *   Category: Variables and Scopes
-     *   Type: Intrinsics
-     *   Operands: uint32_t nameIndex
-     *   Stack: => intrinsicHolder
-     */ \
-    macro(JSOP_BINDINTRINSIC, 145, "bindintrinsic", NULL, 5,  0,  1, JOF_ATOM|JOF_NAME|JOF_SET) \
+    macro(JSOP_SETINTRINSIC,  144, "setintrinsic",  NULL, 5,  1,  1, JOF_ATOM|JOF_NAME|JOF_SET|JOF_DETECTING) \
+    macro(JSOP_UNUSED145,     145, "unused145",     NULL, 1,  0,  0, JOF_BYTE) \
     /*
      * Initialize a non-configurable, non-writable, non-enumerable data-property on an object.
      *
@@ -2033,12 +2023,15 @@
     macro(JSOP_REST,          224, "rest",         NULL,  1,  0,  1,  JOF_BYTE|JOF_TYPESET) \
     \
     /*
-     * Pops the top of stack value, converts it into a jsid (int or string), and
-     * pushes it onto the stack.
+     * First, throw a TypeError if baseValue is null or undefined. Then,
+     * replace the top-of-stack value propertyNameValue with
+     * ToPropertyKey(propertyNameValue). This opcode implements ES6 12.3.2.1
+     * steps 7-10.  It is also used to implement computed property names; in
+     * that case, baseValue is always an object, so the first step is a no-op.
      *   Category: Literals
      *   Type: Object
      *   Operands:
-     *   Stack: obj, id => obj, (jsid of id)
+     *   Stack: baseValue, propertyNameValue => baseValue, propertyKey
      */ \
     macro(JSOP_TOID,          225, "toid",         NULL,  1,  1,  1,  JOF_BYTE) \
     \

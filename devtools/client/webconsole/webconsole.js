@@ -30,7 +30,7 @@ loader.lazyImporter(this, "VariablesViewController", "resource://devtools/client
 loader.lazyImporter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
 loader.lazyImporter(this, "gDevTools", "resource://devtools/client/framework/gDevTools.jsm");
 
-const STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
+const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
 var l10n = new WebConsoleUtils.l10n(STRINGS_URI);
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -5033,13 +5033,17 @@ WebConsoleConnectionProxy.prototype = {
 
     let client = this.client = this.target.client;
 
-    client.addListener("logMessage", this._onLogMessage);
-    client.addListener("pageError", this._onPageError);
-    client.addListener("consoleAPICall", this._onConsoleAPICall);
-    client.addListener("fileActivity", this._onFileActivity);
-    client.addListener("reflowActivity", this._onReflowActivity);
-    client.addListener("serverLogCall", this._onServerLogCall);
-    client.addListener("lastPrivateContextExited", this._onLastPrivateContextExited);
+    if (this.target.isWorkerTarget) {
+      // XXXworkers: Not Console API yet inside of workers (Bug 1209353).
+    } else {
+      client.addListener("logMessage", this._onLogMessage);
+      client.addListener("pageError", this._onPageError);
+      client.addListener("consoleAPICall", this._onConsoleAPICall);
+      client.addListener("fileActivity", this._onFileActivity);
+      client.addListener("reflowActivity", this._onReflowActivity);
+      client.addListener("serverLogCall", this._onServerLogCall);
+      client.addListener("lastPrivateContextExited", this._onLastPrivateContextExited);
+    }
     this.target.on("will-navigate", this._onTabNavigated);
     this.target.on("navigate", this._onTabNavigated);
 

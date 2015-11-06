@@ -124,6 +124,7 @@
     macro(int8, int8, "int8") \
     macro(int16, int16, "int16") \
     macro(int32, int32, "int32") \
+    macro(isEntryPoint, isEntryPoint, "isEntryPoint") \
     macro(isExtensible, isExtensible, "isExtensible") \
     macro(iteratorIntrinsic, iteratorIntrinsic, "__iterator__") \
     macro(join, join, "join") \
@@ -157,6 +158,7 @@
     macro(NFKC, NFKC, "NFKC") \
     macro(NFKD, NFKD, "NFKD") \
     macro(nonincrementalReason, nonincrementalReason, "nonincrementalReason") \
+    macro(noFilename, noFilename, "noFilename") \
     macro(noStack, noStack, "noStack") \
     macro(noSuchMethod, noSuchMethod, "__noSuchMethod__") \
     macro(NumberFormat, NumberFormat, "NumberFormat") \

@@ -197,7 +197,7 @@ class ICFallbackStub;
     IC_SHARED_STUB_KIND_LIST(FORWARD_DECLARE_STUBS)
 #undef FORWARD_DECLARE_STUBS
 
-#ifdef DEBUG
+#ifdef JS_JITSPEW
 void FallbackICSpew(JSContext* cx, ICFallbackStub* stub, const char* fmt, ...);
 void TypeFallbackICSpew(JSContext* cx, ICTypeMonitor_Fallback* stub, const char* fmt, ...);
 #else
@@ -283,13 +283,6 @@ class ICEntry
 
     void setReturnOffset(CodeOffsetLabel offset) {
         MOZ_ASSERT(offset.offset() <= (size_t) UINT32_MAX);
-        returnOffset_ = (uint32_t) offset.offset();
-    }
-
-    void fixupReturnOffset(MacroAssembler& masm) {
-        CodeOffsetLabel offset = returnOffset();
-        offset.fixup(&masm);
-        MOZ_ASSERT(offset.offset() <= UINT32_MAX);
         returnOffset_ = (uint32_t) offset.offset();
     }
 

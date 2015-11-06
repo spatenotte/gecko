@@ -618,6 +618,7 @@ static nsExtraMimeTypeEntry extraMimeEntries [] =
   // app on Firefox OS depends on the "3gp" extension mapping to the
   // "video/3gpp" MIME type.
   { AUDIO_3GPP, "3gpp,3gp", "3GPP Audio" },
+  { AUDIO_3GPP2, "3g2", "3GPP2 Audio" },
 #endif
   { AUDIO_MIDI, "mid", "Standard MIDI Audio" }
 };
@@ -2552,17 +2553,15 @@ bool nsExternalAppHandler::GetNeverAskFlagFromPref(const char * prefName, const 
 
 nsresult nsExternalAppHandler::MaybeCloseWindow()
 {
-  nsCOMPtr<nsIDOMWindow> window = do_GetInterface(mContentContext);
+  nsCOMPtr<nsPIDOMWindow> window = do_GetInterface(mContentContext);
   NS_ENSURE_STATE(window);
 
   if (mShouldCloseWindow) {
     // Reset the window context to the opener window so that the dependent
     // dialogs have a parent
-    nsCOMPtr<nsIDOMWindow> opener;
-    window->GetOpener(getter_AddRefs(opener));
+    nsCOMPtr<nsPIDOMWindow> opener = window->GetOpener();
 
-    bool isClosed;
-    if (opener && NS_SUCCEEDED(opener->GetClosed(&isClosed)) && !isClosed) {
+    if (opener && !opener->Closed()) {
       mContentContext = do_GetInterface(opener);
 
       // Now close the old window.  Do it on a timer so that we don't run
@@ -2586,7 +2585,8 @@ nsExternalAppHandler::Notify(nsITimer* timer)
 {
   NS_ASSERTION(mWindowToClose, "No window to close after timer fired");
 
-  mWindowToClose->Close();
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(mWindowToClose);
+  window->Close();
   mWindowToClose = nullptr;
   mTimer = nullptr;
 

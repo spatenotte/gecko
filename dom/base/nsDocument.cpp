@@ -70,7 +70,8 @@
 #include "mozilla/dom/TreeWalker.h"
 
 #include "nsIServiceManager.h"
-#include "nsIServiceWorkerManager.h"
+#include "mozilla/dom/workers/ServiceWorkerManager.h"
+#include "imgLoader.h"
 
 #include "nsCanvasFrame.h"
 #include "nsContentCID.h"
@@ -331,13 +332,6 @@ nsIdentifierMapEntry::RemoveContentChangeCallback(nsIDocument::IDTargetObserver 
   }
 }
 
-// XXX Workaround for bug 980560 to maintain the existing broken semantics
-template<>
-struct nsIStyleRule::COMTypeInfo<css::Rule, void> {
-  static const nsIID kIID;
-};
-const nsIID nsIStyleRule::COMTypeInfo<css::Rule, void>::kIID = NS_ISTYLE_RULE_IID;
-
 namespace mozilla {
 namespace dom {
 
@@ -392,30 +386,14 @@ CandidatesTraverse(CustomElementHashKey* aKey,
   return PL_DHASH_NEXT;
 }
 
-struct CustomDefinitionTraceArgs
-{
-  const TraceCallbacks& callbacks;
-  void* closure;
-};
-
-static PLDHashOperator
-CustomDefinitionTrace(CustomElementHashKey *aKey,
-                      CustomElementDefinition *aData,
-                      void *aArg)
-{
-  CustomDefinitionTraceArgs* traceArgs = static_cast<CustomDefinitionTraceArgs*>(aArg);
-  MOZ_ASSERT(aData, "Definition must not be null");
-  traceArgs->callbacks.Trace(&aData->mPrototype, "mCustomDefinitions prototype",
-                             traceArgs->closure);
-  return PL_DHASH_NEXT;
-}
-
 NS_IMPL_CYCLE_COLLECTION_CLASS(Registry)
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(Registry)
-  CustomDefinitionTraceArgs customDefinitionArgs = { aCallbacks, aClosure };
-  tmp->mCustomDefinitions.EnumerateRead(CustomDefinitionTrace,
-                                        &customDefinitionArgs);
+  for (auto iter = tmp->mCustomDefinitions.Iter(); !iter.Done(); iter.Next()) {
+    aCallbacks.Trace(&iter.UserData()->mPrototype,
+                     "mCustomDefinitions prototype",
+                     aClosure);
+  }
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Registry)
@@ -947,57 +925,16 @@ nsExternalResourceMap::RequestResource(nsIURI* aURI,
   return nullptr;
 }
 
-struct
-nsExternalResourceEnumArgs
-{
-  nsIDocument::nsSubDocEnumFunc callback;
-  void *data;
-};
-
-static PLDHashOperator
-ExternalResourceEnumerator(nsIURI* aKey,
-                           nsExternalResourceMap::ExternalResource* aData,
-                           void* aClosure)
-{
-  nsExternalResourceEnumArgs* args =
-    static_cast<nsExternalResourceEnumArgs*>(aClosure);
-  bool next =
-    aData->mDocument ? args->callback(aData->mDocument, args->data) : true;
-  return next ? PL_DHASH_NEXT : PL_DHASH_STOP;
-}
-
 void
 nsExternalResourceMap::EnumerateResources(nsIDocument::nsSubDocEnumFunc aCallback,
                                           void* aData)
 {
-  nsExternalResourceEnumArgs args = { aCallback, aData };
-  mMap.EnumerateRead(ExternalResourceEnumerator, &args);
-}
-
-static PLDHashOperator
-ExternalResourceTraverser(nsIURI* aKey,
-                          nsExternalResourceMap::ExternalResource* aData,
-                          void* aClosure)
-{
-  nsCycleCollectionTraversalCallback *cb =
-    static_cast<nsCycleCollectionTraversalCallback*>(aClosure);
-
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*cb,
-                                     "mExternalResourceMap.mMap entry"
-                                     "->mDocument");
-  cb->NoteXPCOMChild(aData->mDocument);
-
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*cb,
-                                     "mExternalResourceMap.mMap entry"
-                                     "->mViewer");
-  cb->NoteXPCOMChild(aData->mViewer);
-
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*cb,
-                                     "mExternalResourceMap.mMap entry"
-                                     "->mLoadGroup");
-  cb->NoteXPCOMChild(aData->mLoadGroup);
-
-  return PL_DHASH_NEXT;
+  for (auto iter = mMap.Iter(); !iter.Done(); iter.Next()) {
+    nsExternalResourceMap::ExternalResource* resource = iter.UserData();
+    if (resource->mDocument && !aCallback(resource->mDocument, aData)) {
+      break;
+    }
+  }
 }
 
 void
@@ -1005,7 +942,24 @@ nsExternalResourceMap::Traverse(nsCycleCollectionTraversalCallback* aCallback) c
 {
   // mPendingLoads will get cleared out as the requests complete, so
   // no need to worry about those here.
-  mMap.EnumerateRead(ExternalResourceTraverser, aCallback);
+  for (auto iter = mMap.ConstIter(); !iter.Done(); iter.Next()) {
+    nsExternalResourceMap::ExternalResource* resource = iter.UserData();
+
+    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback,
+                                       "mExternalResourceMap.mMap entry"
+                                       "->mDocument");
+    aCallback->NoteXPCOMChild(resource->mDocument);
+
+    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback,
+                                       "mExternalResourceMap.mMap entry"
+                                       "->mViewer");
+    aCallback->NoteXPCOMChild(resource->mViewer);
+
+    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback,
+                                       "mExternalResourceMap.mMap entry"
+                                       "->mLoadGroup");
+    aCallback->NoteXPCOMChild(resource->mLoadGroup);
+  }
 }
 
 static PLDHashOperator
@@ -2117,19 +2071,11 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   tmp->mInUnlinkOrDeletion = false;
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-static bool sPrefsInitialized = false;
-static uint32_t sOnloadDecodeLimit = 0;
-
 nsresult
 nsDocument::Init()
 {
   if (mCSSLoader || mStyleImageLoader || mNodeInfoManager || mScriptLoader) {
     return NS_ERROR_ALREADY_INITIALIZED;
-  }
-
-  if (!sPrefsInitialized) {
-    sPrefsInitialized = true;
-    Preferences::AddUintVarCache(&sOnloadDecodeLimit, "image.onload.decode.limit", 0);
   }
 
   // Force initialization.
@@ -2505,11 +2451,6 @@ nsDocument::FillStyleSet(nsStyleSet* aStyleSet)
   NS_PRECONDITION(aStyleSet, "Must have a style set");
   NS_PRECONDITION(aStyleSet->SheetCount(SheetType::Doc) == 0,
                   "Style set already has document sheets?");
-
-  // We could consider moving this to nsStyleSet::Init, to match its
-  // handling of the eAnimationSheet and eTransitionSheet levels.
-  aStyleSet->DirtyRuleProcessors(SheetType::PresHint);
-  aStyleSet->DirtyRuleProcessors(SheetType::StyleAttr);
 
   int32_t i;
   for (i = mStyleSheets.Count() - 1; i >= 0; --i) {
@@ -3275,12 +3216,11 @@ nsIDocument::HasFocus(ErrorResult& rv) const
     return false;
   }
 
-  // Are we an ancestor of the focused DOMWindow?
-  nsCOMPtr<nsIDOMDocument> domDocument;
-  focusedWindow->GetDocument(getter_AddRefs(domDocument));
-  nsCOMPtr<nsIDocument> document = do_QueryInterface(domDocument);
+  nsCOMPtr<nsPIDOMWindow> piWindow = do_QueryInterface(focusedWindow);
+  MOZ_ASSERT(piWindow);
 
-  for (nsIDocument* currentDoc = document; currentDoc;
+  // Are we an ancestor of the focused DOMWindow?
+  for (nsIDocument* currentDoc = piWindow->GetDoc(); currentDoc;
        currentDoc = currentDoc->GetParentDocument()) {
     if (currentDoc == this) {
       // Yes, we are an ancestor
@@ -5110,6 +5050,14 @@ nsDocument::DispatchContentLoadedEvents()
                                        NS_LITERAL_STRING("DOMContentLoaded"),
                                        true, false);
 
+  RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
+  nsIDocShell* docShell = this->GetDocShell();
+
+  if (timelines && timelines->HasConsumer(docShell)) {
+    timelines->AddMarkerForDocShell(
+      docShell, "document::DOMContentLoaded", MarkerTracingType::TIMESTAMP);
+  }
+
   if (mTiming) {
     mTiming->NotifyDOMContentLoadedEnd(nsIDocument::GetDocumentURI());
   }
@@ -5241,51 +5189,51 @@ nsDocument::DocumentStatesChanged(EventStates aStateMask)
 
 void
 nsDocument::StyleRuleChanged(nsIStyleSheet* aSheet,
-                             nsIStyleRule* aOldStyleRule,
-                             nsIStyleRule* aNewStyleRule)
+                             css::Rule* aOldStyleRule,
+                             css::Rule* aNewStyleRule)
 {
   NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleChanged,
                                (this, aSheet,
                                 aOldStyleRule, aNewStyleRule));
 
   if (StyleSheetChangeEventsEnabled()) {
-    nsCOMPtr<css::Rule> rule = do_QueryInterface(aNewStyleRule);
     DO_STYLESHEET_NOTIFICATION(StyleRuleChangeEvent,
                                "StyleRuleChanged",
                                mRule,
-                               rule ? rule->GetDOMRule() : nullptr);
+                               aNewStyleRule ? aNewStyleRule->GetDOMRule()
+                                             : nullptr);
   }
 }
 
 void
 nsDocument::StyleRuleAdded(nsIStyleSheet* aSheet,
-                           nsIStyleRule* aStyleRule)
+                           css::Rule* aStyleRule)
 {
   NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleAdded,
                                (this, aSheet, aStyleRule));
 
   if (StyleSheetChangeEventsEnabled()) {
-    nsCOMPtr<css::Rule> rule = do_QueryInterface(aStyleRule);
     DO_STYLESHEET_NOTIFICATION(StyleRuleChangeEvent,
                                "StyleRuleAdded",
                                mRule,
-                               rule ? rule->GetDOMRule() : nullptr);
+                               aStyleRule ? aStyleRule->GetDOMRule()
+                                          : nullptr);
   }
 }
 
 void
 nsDocument::StyleRuleRemoved(nsIStyleSheet* aSheet,
-                             nsIStyleRule* aStyleRule)
+                             css::Rule* aStyleRule)
 {
   NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleRemoved,
                                (this, aSheet, aStyleRule));
 
   if (StyleSheetChangeEventsEnabled()) {
-    nsCOMPtr<css::Rule> rule = do_QueryInterface(aStyleRule);
     DO_STYLESHEET_NOTIFICATION(StyleRuleChangeEvent,
                                "StyleRuleRemoved",
                                mRule,
-                               rule ? rule->GetDOMRule() : nullptr);
+                               aStyleRule ? aStyleRule->GetDOMRule()
+                                          : nullptr);
   }
 }
 
@@ -7002,9 +6950,11 @@ nsIDocument::GetLocation() const
     return nullptr;
   }
 
-  nsCOMPtr<nsIDOMLocation> loc;
-  w->GetLocation(getter_AddRefs(loc));
-  return loc.forget().downcast<nsLocation>();
+  nsGlobalWindow* window = static_cast<nsGlobalWindow*>(w.get());
+  ErrorResult dummy;
+  RefPtr<nsLocation> loc = window->GetLocation(dummy);
+  dummy.SuppressException();
+  return loc.forget();
 }
 
 Element*
@@ -7597,7 +7547,6 @@ nsIDocument::GetDocumentURIObject() const
 }
 
 
-// readonly attribute DOMString compatMode;
 // Returns "BackCompat" if we are in quirks mode, "CSS1Compat" if we are
 // in almost standards or full standards mode. See bug 105640.  This was
 // implemented to match MSIE's compatMode property.
@@ -7625,42 +7574,36 @@ nsIDocument::GetCompatMode(nsString& aCompatMode) const
   }
 }
 
-static void BlastSubtreeToPieces(nsINode *aNode);
-
-PLDHashOperator
-BlastFunc(nsAttrHashKey::KeyType aKey, Attr *aData, void* aUserArg)
-{
-  nsCOMPtr<nsIAttribute> *attr =
-    static_cast<nsCOMPtr<nsIAttribute>*>(aUserArg);
-
-  *attr = aData;
-
-  NS_ASSERTION(attr->get(),
-               "non-nsIAttribute somehow made it into the hashmap?!");
-
-  return PL_DHASH_STOP;
-}
-
-static void
-BlastSubtreeToPieces(nsINode *aNode)
+void
+nsDOMAttributeMap::BlastSubtreeToPieces(nsINode *aNode)
 {
   if (aNode->IsElement()) {
     Element *element = aNode->AsElement();
     const nsDOMAttributeMap *map = element->GetAttributeMap();
     if (map) {
       nsCOMPtr<nsIAttribute> attr;
-      while (map->Enumerate(BlastFunc, &attr) > 0) {
+
+      // This non-standard style of iteration is presumably used because some
+      // of the code in the loop body can trigger element removal, which
+      // invalidates the iterator.
+      while (true) {
+        auto iter = map->mAttributeCache.ConstIter();
+        if (iter.Done()) {
+          break;
+        }
+        nsCOMPtr<nsIAttribute> attr = iter.UserData();
+        NS_ASSERTION(attr.get(),
+                     "non-nsIAttribute somehow made it into the hashmap?!");
+
         BlastSubtreeToPieces(attr);
 
-#ifdef DEBUG
-        nsresult rv =
-#endif
+        DebugOnly<nsresult> rv =
           element->UnsetAttr(attr->NodeInfo()->NamespaceID(),
                              attr->NodeInfo()->NameAtom(),
                              false);
 
         // XXX Should we abort here?
-        NS_ASSERTION(NS_SUCCEEDED(rv), "Uhoh, UnsetAttr shouldn't fail!");
+        NS_ASSERTION(NS_SUCCEEDED(rv), "Uh-oh, UnsetAttr shouldn't fail!");
       }
     }
   }
@@ -7827,7 +7770,7 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
   if (rv.Failed()) {
     // Disconnect all nodes from their parents, since some have the old document
     // as their ownerDocument and some have this as their ownerDocument.
-    BlastSubtreeToPieces(adoptedNode);
+    nsDOMAttributeMap::BlastSubtreeToPieces(adoptedNode);
 
     if (!sameDocument && oldDocument) {
       uint32_t count = nodesWithProperties.Count();
@@ -7856,7 +7799,7 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
 
     if (rv.Failed()) {
       // Disconnect all nodes from their parents.
-      BlastSubtreeToPieces(adoptedNode);
+      nsDOMAttributeMap::BlastSubtreeToPieces(adoptedNode);
 
       return nullptr;
     }
@@ -8899,11 +8842,6 @@ nsDocument::Destroy()
 
   mRegistry = nullptr;
 
-  nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
-  if (swm) {
-    swm->MaybeStopControlling(this);
-  }
-
   // XXX We really should let cycle collection do this, but that currently still
   //     leaks (see https://bugzilla.mozilla.org/show_bug.cgi?id=406684).
   ReleaseWrapper(static_cast<nsINode*>(this));
@@ -8914,6 +8852,19 @@ nsDocument::RemovedFromDocShell()
 {
   if (mRemovedFromDocShell)
     return;
+
+  using mozilla::dom::workers::ServiceWorkerManager;
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  if (swm) {
+    ErrorResult error;
+    if (swm->IsControlled(this, error)) {
+      imgLoader* loader = nsContentUtils::GetImgLoaderForDocument(this);
+      if (loader) {
+        loader->ClearCacheForControlledDocument(this);
+      }
+    }
+    swm->MaybeStopControlling(this);
+  }
 
   mRemovedFromDocShell = true;
   EnumerateActivityObservers(NotifyActivityChanged, nullptr);
@@ -10520,12 +10471,8 @@ nsDocument::AddImage(imgIRequest* aImage)
 
   // If this is the first insertion and we're locking images, lock this image
   // too.
-  if (oldCount == 0) {
-    if (mLockingImages)
-      rv = aImage->LockImage();
-    if (NS_SUCCEEDED(rv) && (!sOnloadDecodeLimit ||
-                             mImageTracker.Count() < sOnloadDecodeLimit))
-      rv = aImage->StartDecoding();
+  if (oldCount == 0 && mLockingImages) {
+    rv = aImage->LockImage();
   }
 
   // If this is the first insertion and we're animating images, request
@@ -10656,7 +10603,6 @@ PLDHashOperator LockEnumerator(imgIRequest* aKey,
                                void*    userArg)
 {
   aKey->LockImage();
-  aKey->RequestDecode();
   return PL_DHASH_NEXT;
 }
 
@@ -11789,9 +11735,7 @@ ShouldApplyFullscreenDirectly(nsIDocument* aDoc,
   } else {
     // If we are in the chrome process, and the window has not been in
     // fullscreen, we certainly need to make that fullscreen first.
-    bool fullscreen;
-    NS_WARN_IF(NS_FAILED(aRootWin->GetFullScreen(&fullscreen)));
-    if (!fullscreen) {
+    if (!aRootWin->GetFullScreen()) {
       return false;
     }
     // The iterator not being at end indicates there is still some
@@ -12493,18 +12437,15 @@ nsDocument::ShouldLockPointer(Element* aElement, Element* aCurrentLock,
     return false;
   }
 
-  nsCOMPtr<nsIDOMWindow> top;
-  ownerWindow->GetScriptableTop(getter_AddRefs(top));
-  nsCOMPtr<nsPIDOMWindow> piTop = do_QueryInterface(top);
-  if (!piTop || !piTop->GetExtantDoc() ||
-      piTop->GetExtantDoc()->Hidden()) {
+  nsCOMPtr<nsPIDOMWindow> top = ownerWindow->GetScriptableTop();
+  if (!top || !top->GetExtantDoc() || top->GetExtantDoc()->Hidden()) {
     NS_WARNING("ShouldLockPointer(): Top document isn't visible.");
     return false;
   }
 
   if (!aNoFocusCheck) {
     mozilla::ErrorResult rv;
-    if (!piTop->GetExtantDoc()->HasFocus(rv)) {
+    if (!top->GetExtantDoc()->HasFocus(rv)) {
       NS_WARNING("ShouldLockPointer(): Top document isn't focused.");
       return false;
     }
@@ -13286,10 +13227,7 @@ nsAutoSyncOperation::nsAutoSyncOperation(nsIDocument* aDoc)
   if (aDoc) {
     nsPIDOMWindow* win = aDoc->GetWindow();
     if (win) {
-      nsCOMPtr<nsIDOMWindow> topWindow;
-      win->GetTop(getter_AddRefs(topWindow));
-      nsCOMPtr<nsPIDOMWindow> top = do_QueryInterface(topWindow);
-      if (top) {
+      if (nsCOMPtr<nsPIDOMWindow> top = win->GetTop()) {
         nsCOMPtr<nsIDocument> doc = top->GetExtantDoc();
         MarkDocumentTreeToBeInSyncOperation(doc, &mDocuments);
       }

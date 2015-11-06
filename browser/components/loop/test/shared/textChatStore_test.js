@@ -96,6 +96,7 @@ describe("loop.store.TextChatStore", function() {
     });
 
     it("should dispatch a LoopChatMessageAppended event", function() {
+      store.setStoreState({ textChatEnabled: true });
       store.receivedTextChatMessage({
         contentType: CHAT_CONTENT_TYPES.TEXT,
         message: "Hello!"
@@ -141,6 +142,7 @@ describe("loop.store.TextChatStore", function() {
     });
 
     it("should dipatch a LoopChatMessageAppended event", function() {
+      store.setStoreState({ textChatEnabled: true });
       store.sendTextChatMessage({
         contentType: CHAT_CONTENT_TYPES.TEXT,
         message: "Hello!"

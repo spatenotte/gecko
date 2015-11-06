@@ -371,8 +371,10 @@ TiltUtils.DOM = {
     aContentWindow)
   {
     return {
-      width: aContentWindow.innerWidth + aContentWindow.scrollMaxX,
-      height: aContentWindow.innerHeight + aContentWindow.scrollMaxY
+      width: aContentWindow.innerWidth +
+        aContentWindow.scrollMaxX - aContentWindow.scrollMinX,
+      height: aContentWindow.innerHeight +
+        aContentWindow.scrollMaxY - aContentWindow.scrollMinY
     };
   },
 
@@ -608,5 +610,5 @@ TiltUtils.bindObjectFunc(TiltUtils.DOM);
 // set the necessary string bundle
 XPCOMUtils.defineLazyGetter(TiltUtils.L10n, "stringBundle", function() {
   return Services.strings.createBundle(
-    "chrome://browser/locale/devtools/tilt.properties");
+    "chrome://devtools/locale/tilt.properties");
 });

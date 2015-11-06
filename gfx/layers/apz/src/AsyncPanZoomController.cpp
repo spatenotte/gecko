@@ -663,7 +663,14 @@ public:
     bool continueX = mApzc.mX.SampleOverscrollAnimation(aDelta);
     bool continueY = mApzc.mY.SampleOverscrollAnimation(aDelta);
     if (!continueX && !continueY) {
-      mApzc.OverscrollAnimationEnding();
+      // If we got into overscroll from a fling, that fling did not request a
+      // fling snap to avoid a resulting scrollTo from cancelling the overscroll
+      // animation too early. We do still want to request a fling snap, though,
+      // in case the end of the axis at which we're overscrolled is not a valid
+      // snap point, so we request one now. If there are no snap points, this will
+      // do nothing. If there are snap points, we'll get a scrollTo that snaps us
+      // back to the nearest valid snap point.
+      mApzc.RequestSnap();
       return false;
     }
     return true;
@@ -882,7 +889,7 @@ AsyncPanZoomController::Destroy()
 {
   APZThreadUtils::AssertOnCompositorThread();
 
-  CancelAnimation();
+  CancelAnimation(CancelAnimationFlags::RequestSnap);
 
   { // scope the lock
     MonitorAutoLock lock(mRefPtrMonitor);
@@ -895,7 +902,7 @@ AsyncPanZoomController::Destroy()
   PCompositorParent* compositor = GetSharedFrameMetricsCompositor();
   // Only send the release message if the SharedFrameMetrics has been created.
   if (compositor && mSharedFrameMetricsBuffer) {
-    unused << compositor->SendReleaseSharedCompositorFrameMetrics(mFrameMetrics.GetScrollId(), mAPZCId);
+    Unused << compositor->SendReleaseSharedCompositorFrameMetrics(mFrameMetrics.GetScrollId(), mAPZCId);
   }
 
   { // scope the lock
@@ -992,12 +999,17 @@ static float GetAxisScale(AsyncDragMetrics::DragDirection aDir, T aValue) {
 nsEventStatus AsyncPanZoomController::HandleDragEvent(const MouseInput& aEvent,
                                                       const AsyncDragMetrics& aDragMetrics)
 {
+  if (!GetApzcTreeManager()) {
+    return nsEventStatus_eConsumeNoDefault;
+  }
+
   RefPtr<HitTestingTreeNode> node =
     GetApzcTreeManager()->FindScrollNode(aDragMetrics);
   if (!node) {
     return nsEventStatus_eConsumeNoDefault;
   }
 
+  ReentrantMonitorAutoEnter lock(mMonitor);
   CSSPoint scrollFramePoint = aEvent.mLocalOrigin / GetFrameMetrics().GetZoom();
   // The scrollbar can be transformed with the frame but the pres shell
   // resolution is only applied to the scroll frame.
@@ -1092,13 +1104,13 @@ nsEventStatus AsyncPanZoomController::HandleInputEvent(const InputData& aEvent,
     break;
   }
   case MOUSE_INPUT: {
-    ScrollWheelInput scrollInput = aEvent.AsScrollWheelInput();
-    if (!scrollInput.TransformToLocal(aTransformToApzc)) { 
+    MouseInput mouseInput = aEvent.AsMouseInput();
+    if (!mouseInput.TransformToLocal(aTransformToApzc)) {
       return rv;
     }
 
     // TODO Need to implement blocks to properly handle this.
-    //rv = HandleDragEvent(scrollInput, dragMetrics);
+    //rv = HandleDragEvent(mouseInput, dragMetrics);
     break;
   }
   case SCROLLWHEEL_INPUT: {
@@ -1504,6 +1516,10 @@ nsEventStatus AsyncPanZoomController::OnScaleEnd(const PinchGestureInput& aEvent
     } else {
       ClearOverscroll();
     }
+    // Along with clearing the overscroll, we also want to snap to the nearest
+    // snap point as appropriate, so ask the main thread (which knows about such
+    // things) to handle it.
+    RequestSnap();
 
     ScheduleComposite();
     RequestContentRepaint();
@@ -2490,6 +2506,11 @@ void AsyncPanZoomController::CancelAnimation(CancelAnimationFlags aFlags) {
     ClearOverscroll();
     repaint = true;
   }
+  // Similar to relieving overscroll, we also need to snap to any snap points
+  // if appropriate, so ask the main thread to do that.
+  if (aFlags & CancelAnimationFlags::RequestSnap) {
+    RequestSnap();
+  }
   if (repaint) {
     RequestContentRepaint();
     ScheduleComposite();
@@ -2670,6 +2691,12 @@ bool AsyncPanZoomController::SnapBackIfOverscrolled() {
     StartOverscrollAnimation(ParentLayerPoint(0, 0));
     return true;
   }
+  // If we don't kick off an overscroll animation, we still need to ask the
+  // main thread to snap to any nearby snap points, assuming we haven't already
+  // done so when we started this fling
+  if (mState != FLING) {
+    RequestSnap();
+  }
   return false;
 }
 
@@ -2717,8 +2744,11 @@ void AsyncPanZoomController::RequestContentRepaint(FrameMetrics& aFrameMetrics, 
       fabsf(mLastPaintRequestMetrics.GetScrollOffset().y -
             aFrameMetrics.GetScrollOffset().y) < EPSILON &&
       aFrameMetrics.GetZoom() == mLastPaintRequestMetrics.GetZoom() &&
-      fabsf(aFrameMetrics.GetViewport().width - mLastPaintRequestMetrics.GetViewport().width) < EPSILON &&
-      fabsf(aFrameMetrics.GetViewport().height - mLastPaintRequestMetrics.GetViewport().height) < EPSILON) {
+      fabsf(aFrameMetrics.GetViewport().width -
+            mLastPaintRequestMetrics.GetViewport().width) < EPSILON &&
+      fabsf(aFrameMetrics.GetViewport().height -
+            mLastPaintRequestMetrics.GetViewport().height) < EPSILON &&
+      aFrameMetrics.GetScrollGeneration() == mLastPaintRequestMetrics.GetScrollGeneration()) {
     return;
   }
 
@@ -3166,8 +3196,14 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
       Stringify(mFrameMetrics.GetScrollOffset()).c_str(),
       Stringify(aLayerMetrics.GetSmoothScrollOffset()).c_str());
 
-    mFrameMetrics.CopySmoothScrollInfoFrom(aLayerMetrics);
     CancelAnimation();
+
+    // It's important to not send repaint requests between this
+    // CopySmoothScrollInfo call and the sending of the scroll update
+    // acknowledgement below, otherwise that repaint request will get rejected
+    // on the main thread but mLastPaintRequestMetrics will have the new scroll
+    // generation; this would leave the main thread out of date.
+    mFrameMetrics.CopySmoothScrollInfoFrom(aLayerMetrics);
     mLastDispatchedPaintMetrics = aLayerMetrics;
     StartSmoothScroll(ScrollSource::DOM);
 
@@ -3327,11 +3363,8 @@ AsyncPanZoomController::CurrentPanGestureBlock()
 }
 
 void
-AsyncPanZoomController::ResetInputState()
+AsyncPanZoomController::ResetTouchInputState()
 {
-  // This may be called during non-touch input blocks as well. We send
-  // a fake cancel touch event here but on the assumption that none of the
-  // code in GEL assumes a CurrentTouchBlock()
   MultiTouchInput cancel(MultiTouchInput::MULTITOUCH_CANCEL, 0, TimeStamp::Now(), 0);
   RefPtr<GestureEventListener> listener = GetGestureEventListener();
   if (listener) {
@@ -3345,7 +3378,7 @@ AsyncPanZoomController::CancelAnimationAndGestureState()
 {
   mX.CancelGesture();
   mY.CancelGesture();
-  CancelAnimation();
+  CancelAnimation(CancelAnimationFlags::RequestSnap);
 }
 
 bool
@@ -3531,15 +3564,10 @@ void AsyncPanZoomController::ShareCompositorFrameMetrics() {
   }
 }
 
-void AsyncPanZoomController::OverscrollAnimationEnding() {
-  // If we got into overscroll from a fling, that fling did not request a
-  // fling snap to avoid a resulting scrollTo from cancelling the overscroll
-  // animation too early. We do still want to request a fling snap, though,
-  // in case the end of the axis at which we're overscrolled is not a valid
-  // snap point, so we request one now. If there are no snap points, this will
-  // do nothing. If there are snap points, we'll get a scrollTo that snaps us
-  // back to the nearest valid snap point.
+void AsyncPanZoomController::RequestSnap() {
   if (RefPtr<GeckoContentController> controller = GetGeckoContentController()) {
+    APZC_LOG("%p requesting snap near %s\n", this,
+        Stringify(mFrameMetrics.GetScrollOffset()).c_str());
     controller->RequestFlingSnap(mFrameMetrics.GetScrollId(),
                                  mFrameMetrics.GetScrollOffset());
   }

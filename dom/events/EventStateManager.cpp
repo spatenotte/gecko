@@ -517,7 +517,6 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     }
     ++gMouseOrKeyboardEventCounter;
 
-
     nsCOMPtr<nsINode> node = do_QueryInterface(aTargetContent);
     if (node &&
         (aEvent->mMessage == eKeyUp || aEvent->mMessage == eMouseUp ||
@@ -599,6 +598,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
         StopTrackingDragGesture();
         sNormalLMouseEventInProcess = false;
         // then fall through...
+        MOZ_FALLTHROUGH;
       case WidgetMouseEvent::eRightButton:
       case WidgetMouseEvent::eMiddleButton:
         SetClickCount(aPresContext, mouseEvent, aStatus);
@@ -652,6 +652,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       aEvent->mMessage = eVoidEvent;
       break;
     }
+    MOZ_FALLTHROUGH;
   case eMouseMove:
   case ePointerDown:
   case ePointerMove: {
@@ -712,6 +713,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       }
     }
     // then fall through...
+    MOZ_FALLTHROUGH;
   case eBeforeKeyDown:
   case eKeyDown:
   case eAfterKeyDown:
@@ -1199,7 +1201,7 @@ EventStateManager::IsRemoteTarget(nsIContent* target) {
   return false;
 }
 
-bool
+static bool
 CrossProcessSafeEvent(const WidgetEvent& aEvent)
 {
   switch (aEvent.mClass) {
@@ -1235,7 +1237,7 @@ CrossProcessSafeEvent(const WidgetEvent& aEvent)
     case eDrop:
       return true;
     default:
-      break;
+      return false;
     }
   default:
     return false;
@@ -1371,7 +1373,6 @@ EventStateManager::CreateClickHoldTimer(nsPresContext* inPresContext,
   }
 } // CreateClickHoldTimer
 
-
 //
 // KillClickHoldTimer
 //
@@ -1385,7 +1386,6 @@ EventStateManager::KillClickHoldTimer()
     mClickHoldTimer = nullptr;
   }
 }
-
 
 //
 // sClickHoldCallback
@@ -1403,7 +1403,6 @@ EventStateManager::sClickHoldCallback(nsITimer* aTimer, void* aESM)
   // NOTE: |aTimer| and |self->mAutoHideTimer| are invalid after calling ClosePopup();
 
 } // sAutoHideCallback
-
 
 //
 // FireContextClick
@@ -1528,7 +1527,6 @@ EventStateManager::FireContextClick()
   KillClickHoldTimer();
 
 } // FireContextClick
-
 
 //
 // BeginTrackingDragGesture
@@ -2559,6 +2557,8 @@ EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
     case WidgetWheelEvent::SCROLL_DEFAULT:
       if (isDeltaModePixel) {
         mode = nsIScrollableFrame::NORMAL;
+      } else if (aEvent->mFlags.mHandledByAPZ) {
+        mode = nsIScrollableFrame::SMOOTH_MSD;
       } else {
         mode = nsIScrollableFrame::SMOOTH;
       }
@@ -3023,17 +3023,17 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         EnsureDocument(mPresContext);
         nsIFocusManager* fm = nsFocusManager::GetFocusManager();
         if (mDocument && fm) {
-          nsCOMPtr<nsIDOMWindow> currentWindow;
-          fm->GetFocusedWindow(getter_AddRefs(currentWindow));
+          nsCOMPtr<nsIDOMWindow> window;
+          fm->GetFocusedWindow(getter_AddRefs(window));
+          nsCOMPtr<nsPIDOMWindow> currentWindow = do_QueryInterface(window);
           if (currentWindow && mDocument->GetWindow() &&
               currentWindow != mDocument->GetWindow() &&
               !nsContentUtils::IsChromeDoc(mDocument)) {
-            nsCOMPtr<nsIDOMWindow> currentTop;
-            nsCOMPtr<nsIDOMWindow> newTop;
-            currentWindow->GetTop(getter_AddRefs(currentTop));
-            mDocument->GetWindow()->GetTop(getter_AddRefs(newTop));
-            nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(currentWindow);
-            nsCOMPtr<nsIDocument> currentDoc = win->GetExtantDoc();
+            nsCOMPtr<nsPIDOMWindow> currentTop;
+            nsCOMPtr<nsPIDOMWindow> newTop;
+            currentTop = currentWindow->GetTop();
+            newTop = mDocument->GetWindow()->GetTop();
+            nsCOMPtr<nsIDocument> currentDoc = currentWindow->GetExtantDoc();
             if (nsContentUtils::IsChromeDoc(currentDoc) ||
                 (currentTop && newTop && currentTop != newTop)) {
               fm->SetFocusedWindow(mDocument->GetWindow());
@@ -3048,8 +3048,9 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
     if(WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent()) {
       GenerateMouseEnterExit(mouseEvent);
     }
-    // This break was commented specially
-    // break;
+    // After firing the pointercancel event, a user agent must also fire a
+    // pointerout event followed by a pointerleave event.
+    MOZ_FALLTHROUGH;
   }
   case ePointerUp: {
     WidgetPointerEvent* pointerEvent = aEvent->AsPointerEvent();
@@ -3120,6 +3121,14 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       if (pluginFrame) {
         MOZ_ASSERT(pluginFrame->WantsToHandleWheelEventAsDefaultAction());
         action = WheelPrefs::ACTION_SEND_TO_PLUGIN;
+      } else if (nsLayoutUtils::IsScrollFrameWithSnapping(frameToScroll)) {
+        // If the target has scroll-snapping points then we want to handle
+        // the wheel event on the main thread even if we have APZ enabled. Do
+        // so and let the APZ know that it should ignore this event.
+        if (wheelEvent->mFlags.mHandledByAPZ) {
+          wheelEvent->mFlags.mDefaultPrevented = true;
+        }
+        action = WheelPrefs::GetInstance()->ComputeActionFor(wheelEvent);
       } else if (wheelEvent->mFlags.mHandledByAPZ) {
         action = WheelPrefs::ACTION_NONE;
       } else {
@@ -4112,19 +4121,20 @@ GetWindowInnerRectCenter(nsPIDOMWindow* aWindow,
 {
   NS_ENSURE_TRUE(aWindow && aWidget && aContext, LayoutDeviceIntPoint(0, 0));
 
-  float cssInnerX = 0.0;
-  aWindow->GetMozInnerScreenX(&cssInnerX);
+  nsGlobalWindow* window = nsGlobalWindow::Cast(aWindow);
+
+  float cssInnerX = window->GetMozInnerScreenXOuter();
   int32_t innerX = int32_t(NS_round(cssInnerX));
 
-  float cssInnerY = 0.0;
-  aWindow->GetMozInnerScreenY(&cssInnerY);
+  float cssInnerY = window->GetMozInnerScreenYOuter();
   int32_t innerY = int32_t(NS_round(cssInnerY));
- 
-  int32_t innerWidth = 0;
-  aWindow->GetInnerWidth(&innerWidth);
 
-  int32_t innerHeight = 0;
-  aWindow->GetInnerHeight(&innerHeight);
+  ErrorResult dummy;
+  int32_t innerWidth = window->GetInnerWidthOuter(dummy);
+  dummy.SuppressException();
+
+  int32_t innerHeight = window->GetInnerHeightOuter(dummy);
+  dummy.SuppressException();
 
   nsIntRect screen;
   aWidget->GetScreenBounds(screen);
@@ -4202,8 +4212,8 @@ EventStateManager::GenerateMouseEnterExit(WidgetMouseEvent* aMouseEvent)
 
       // Update the last known refPoint with the current refPoint.
       sLastRefPoint = aMouseEvent->refPoint;
-
     }
+    MOZ_FALLTHROUGH;
   case ePointerMove:
   case ePointerDown:
     {
@@ -5861,4 +5871,3 @@ AutoHandlingUserInputStatePusher::~AutoHandlingUserInputStatePusher()
 }
 
 } // namespace mozilla
-

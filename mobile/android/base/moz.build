@@ -19,11 +19,19 @@ constants_jar.sources = [
     'annotation/RobocopTarget.java',
     'annotation/WebRTCJNITarget.java',
     'annotation/WrapForJNI.java',
+    'db/BrowserContract.java',
+    'LocaleManager.java',
+    'Locales.java',
     'SysInfo.java',
 ]
 constants_jar.generated_sources = [
     'preprocessed/org/mozilla/gecko/AdjustConstants.java',
     'preprocessed/org/mozilla/gecko/AppConstants.java',
+]
+constants_jar.extra_jars = [
+    CONFIG['ANDROID_SUPPORT_ANNOTATIONS_JAR_LIB'],
+    CONFIG['ANDROID_SUPPORT_V4_AAR_LIB'],
+    CONFIG['ANDROID_SUPPORT_V4_AAR_INTERNAL_LIB'],
 ]
 
 if CONFIG['MOZ_INSTALL_TRACKING']:
@@ -131,6 +139,21 @@ stjar = add_java_jar('sync-thirdparty')
 stjar.sources += [ thirdparty_source_dir + f for f in sync_thirdparty_java_files ]
 stjar.javac_flags = ['-Xlint:none']
 
+services_jar = add_java_jar('services')
+services_jar.sources += sync_java_files
+services_jar.extra_jars = [
+    CONFIG['ANDROID_SUPPORT_ANNOTATIONS_JAR_LIB'],
+    CONFIG['ANDROID_SUPPORT_V4_AAR_LIB'],
+    CONFIG['ANDROID_SUPPORT_V4_AAR_INTERNAL_LIB'],
+    'constants.jar',
+    'gecko-R.jar',
+    'gecko-mozglue.jar',
+    'gecko-thirdparty.jar',
+    'gecko-util.jar',
+    'sync-thirdparty.jar',
+]
+services_jar.javac_flags += ['-Xlint:all,-deprecation']
+
 if CONFIG['MOZ_WEBRTC']:
     video_root = TOPSRCDIR + '/media/webrtc/trunk/webrtc/modules/video_capture/android/java/src/org/webrtc/videoengine/'
     video_render_root = TOPSRCDIR + '/media/webrtc/trunk/webrtc/modules/video_render/android/java/src/org/webrtc/videoengine/'
@@ -188,7 +211,6 @@ gbjar.sources += [
     'db/AbstractPerProfileDatabaseProvider.java',
     'db/AbstractTransactionalProvider.java',
     'db/BaseTable.java',
-    'db/BrowserContract.java',
     'db/BrowserDatabaseHelper.java',
     'db/BrowserDB.java',
     'db/BrowserProvider.java',
@@ -389,9 +411,6 @@ gbjar.sources += [
     'IntentHelper.java',
     'javaaddons/JavaAddonManager.java',
     'javaaddons/JavaAddonManagerV1.java',
-    'LayoutInterceptor.java',
-    'LocaleManager.java',
-    'Locales.java',
     'lwt/LightweightTheme.java',
     'lwt/LightweightThemeDrawable.java',
     'mdns/MulticastDNSManager.java',
@@ -402,8 +421,8 @@ gbjar.sources += [
     'menu/GeckoMenuItem.java',
     'menu/GeckoSubMenu.java',
     'menu/MenuItemActionBar.java',
-    'menu/MenuItemActionView.java',
     'menu/MenuItemDefault.java',
+    'menu/MenuItemSwitcherLayout.java',
     'menu/MenuPanel.java',
     'menu/MenuPopup.java',
     'MotionEventInterceptor.java',
@@ -473,12 +492,12 @@ gbjar.sources += [
     'sqlite/SQLiteBridgeException.java',
     'SuggestClient.java',
     'SurfaceBits.java',
-    'sync/TabReceivedBroadcastReceiver.java',
     'Tab.java',
     'tabqueue/TabQueueDispatcher.java',
     'tabqueue/TabQueueHelper.java',
     'tabqueue/TabQueuePrompt.java',
     'tabqueue/TabQueueService.java',
+    'tabqueue/TabReceivedService.java',
     'Tabs.java',
     'tabs/PrivateTabsPanel.java',
     'tabs/TabCurve.java',
@@ -644,7 +663,6 @@ if max_sdk_version >= 11:
 if CONFIG['MOZ_ANDROID_READING_LIST_SERVICE']:
     gbjar.sources += reading_list_service_java_files
 
-gbjar.sources += sync_java_files
 gbjar.extra_jars += [
     OBJDIR + '/../javaaddons/javaaddons-1.0.jar',
     'gecko-R.jar',
@@ -652,6 +670,7 @@ gbjar.extra_jars += [
     'gecko-thirdparty.jar',
     'gecko-util.jar',
     'sync-thirdparty.jar',
+    'services.jar',
 ]
 
 moz_native_devices_jars = [
@@ -690,6 +709,28 @@ if CONFIG['MOZ_NATIVE_DEVICES']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.cast']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_CAST_AAR_RES']]
         resjar.generated_sources += ['com/google/android/gms/cast/R.java']
+
+if CONFIG['MOZ_ANDROID_GCM']:
+    gbjar.extra_jars += [
+        CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR_LIB'],
+        CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB'],
+        CONFIG['ANDROID_PLAY_SERVICES_GCM_AAR_LIB'],
+    ]
+
+    if CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR']:
+        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms']
+        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR_RES']]
+        resjar.generated_sources += ['com/google/android/gms/R.java']
+
+    if CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR']:
+        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms']
+        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_RES']]
+        resjar.generated_sources += ['com/google/android/gms/R.java']
+
+    if CONFIG['ANDROID_PLAY_SERVICES_GCM_AAR']:
+        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.gcm']
+        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_GCM_AAR_RES']]
+        resjar.generated_sources += ['com/google/android/gms/gcm/R.java']
 
 gbjar.extra_jars += [CONFIG['ANDROID_APPCOMPAT_V7_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_DESIGN_AAR_LIB']]
@@ -836,11 +877,12 @@ ANDROID_ASSETS_DIRS += [
 for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT', 'MOZ_DEBUG',
             'MOZ_ANDROID_SEARCH_ACTIVITY', 'MOZ_NATIVE_DEVICES', 'MOZ_ANDROID_MLS_STUMBLER',
             'MOZ_ANDROID_SHARE_OVERLAY', 'MOZ_ANDROID_DOWNLOADS_INTEGRATION', 'MOZ_INSTALL_TRACKING',
+            'MOZ_ANDROID_GCM',
             'MOZ_ANDROID_TAB_QUEUE', 'MOZ_ANDROID_FIREFOX_ACCOUNT_PROFILES'):
     if CONFIG[var]:
         DEFINES[var] = 1
 
-for var in ('MOZ_UPDATER', 'MOZ_PKG_SPECIAL'):
+for var in ('MOZ_UPDATER', 'MOZ_PKG_SPECIAL', 'MOZ_ANDROID_GCM_SENDERID'):
     if CONFIG[var]:
         DEFINES[var] = CONFIG[var]
 

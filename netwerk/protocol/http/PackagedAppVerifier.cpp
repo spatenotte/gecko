@@ -18,6 +18,7 @@
 #include "nsIInputStream.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIURL.h"
+#include "mozilla/BasePrincipal.h"
 
 static const short kResourceHashType = nsICryptoHash::SHA256;
 
@@ -74,15 +75,18 @@ NS_IMETHODIMP PackagedAppVerifier::Init(nsIPackagedAppVerifierListener* aListene
 
   mListener = aListener;
   mState = STATE_UNKNOWN;
-  mPackageOrigin = aPackageOrigin;
   mSignature = aSignature;
   mIsPackageSigned = false;
   mPackageCacheEntry = aPackageCacheEntry;
   mIsFirstResource = true;
   mManifest = EmptyCString();
 
+  OriginAttributes().PopulateFromOrigin(aPackageOrigin, mPackageOrigin);
   mBypassVerification = (mPackageOrigin ==
       Preferences::GetCString("network.http.signed-packages.trusted-origin"));
+
+  LOG(("mBypassVerification = %d\n", mBypassVerification));
+  LOG(("mPackageOrigin = %s\n", mPackageOrigin.get()));
 
   nsresult rv;
   mPackagedAppUtils = do_CreateInstance(NS_PACKAGEDAPPUTILS_CONTRACTID, &rv);
@@ -355,6 +359,16 @@ PackagedAppVerifier::OnManifestVerified(bool aSuccess)
   if (!aSuccess && mBypassVerification) {
     aSuccess = true;
     LOG(("Developer mode! Treat junk signature valid."));
+  }
+
+  if (aSuccess && !mSignature.IsEmpty()) {
+    // Get the package location from the manifest
+    nsAutoCString packageOrigin;
+    mPackagedAppUtils->GetPackageOrigin(packageOrigin);
+    if (packageOrigin != mPackageOrigin) {
+      aSuccess = false;
+      LOG(("moz-package-location doesn't match:\nFrom: %s\nManifest: %s\n", mPackageOrigin.get(), packageOrigin.get()));
+    }
   }
 
   // Only when the manifest verified and package has signature would we
