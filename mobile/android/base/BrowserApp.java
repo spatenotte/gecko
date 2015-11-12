@@ -553,6 +553,12 @@ public class BrowserApp extends GeckoApp
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        if (!isSupportedSDK()) {
+            // This build does not support the Android version of the device; Exit early.
+            super.onCreate(savedInstanceState);
+            return;
+        }
+
         final Intent intent = getIntent();
 
         // Note that we're calling GeckoProfile.get *before GeckoApp.onCreate*.
@@ -1217,6 +1223,12 @@ public class BrowserApp extends GeckoApp
 
     @Override
     public void onDestroy() {
+        if (!isSupportedSDK()) {
+            // This build does not support the Android version of the device; Exit early.
+            super.onDestroy();
+            return;
+        }
+
         mDynamicToolbar.destroy();
 
         if (mBrowserToolbar != null)
@@ -2407,7 +2419,7 @@ public class BrowserApp extends GeckoApp
             mFirstrunPane.registerOnFinishListener(new FirstrunPane.OnFinishListener() {
                 @Override
                 public void onFinish() {
-                    BrowserApp.this.mFirstrunPane = null;
+                    enterEditingMode();
                 }
             });
         }

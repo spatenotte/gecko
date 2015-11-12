@@ -612,8 +612,6 @@ public:
 
     PRTime GetWatchdogTimestamp(WatchdogTimestampCategory aCategory);
 
-    nsTArray<nsXPCWrappedJS*>& WrappedJSToReleaseArray() { return mWrappedJSToReleaseArray; }
-
 private:
     XPCJSRuntime() = delete;
     explicit XPCJSRuntime(nsXPConnect* aXPConnect);
@@ -639,7 +637,6 @@ private:
     XPCWrappedNativeProtoMap* mDyingWrappedNativeProtoMap;
     XPCWrappedNativeProtoMap* mDetachedWrappedNativeProtoMap;
     bool mGCIsRunning;
-    nsTArray<nsXPCWrappedJS*> mWrappedJSToReleaseArray;
     nsTArray<nsISupports*> mNativesToReleaseArray;
     bool mDoingFinalization;
     XPCRootSetElem* mVariantRoots;
@@ -948,9 +945,6 @@ XPC_WN_CallMethod(JSContext* cx, unsigned argc, JS::Value* vp);
 extern bool
 XPC_WN_GetterSetter(JSContext* cx, unsigned argc, JS::Value* vp);
 
-extern bool
-XPC_WN_JSOp_ThisValue(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValue vp);
-
 // Macros to initialize Object or Function like XPC_WN classes
 #define XPC_WN_WithCall_ObjectOps                                             \
     {                                                                         \
@@ -964,7 +958,6 @@ XPC_WN_JSOp_ThisValue(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValu
         nullptr, nullptr, /* watch/unwatch */                                 \
         nullptr, /* getElements */                                            \
         nullptr, /* enumerate */                                              \
-        XPC_WN_JSOp_ThisValue,                                               \
     }
 
 #define XPC_WN_NoCall_ObjectOps                                               \
@@ -979,7 +972,6 @@ XPC_WN_JSOp_ThisValue(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValu
         nullptr, nullptr, /* watch/unwatch */                                 \
         nullptr, /* getElements */                                            \
         nullptr, /* enumerate */                                              \
-        XPC_WN_JSOp_ThisValue,                                               \
     }
 
 // Maybe this macro should check for class->enumerate ==

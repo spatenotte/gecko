@@ -9,6 +9,7 @@
 #include "media/stagefright/MetaData.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/Telemetry.h"
 #include "mp4_demuxer/MoofParser.h"
 #include "mp4_demuxer/MP4Metadata.h"
 
@@ -101,7 +102,9 @@ MP4Metadata::MP4Metadata(Stream* aSource)
     mPrivate->mMetadataExtractor->flags() & MediaExtractor::CAN_SEEK;
   sp<MetaData> metaData = mPrivate->mMetadataExtractor->getMetaData();
 
-  UpdateCrypto(metaData.get());
+  if (metaData.get()) {
+    UpdateCrypto(metaData.get());
+  }
 }
 
 MP4Metadata::~MP4Metadata()
@@ -142,7 +145,9 @@ MP4Metadata::GetNumberTracks(mozilla::TrackInfo::TrackType aType) const
 {
 #ifdef MOZ_RUST_MP4PARSE
   // Try in rust first.
-  try_rust(mSource);
+  bool rust_mp4parse_success = try_rust(mSource);
+  Telemetry::Accumulate(Telemetry::MEDIA_RUST_MP4PARSE_SUCCESS,
+                        rust_mp4parse_success);
 #endif
   size_t tracks = mPrivate->mMetadataExtractor->countTracks();
   uint32_t total = 0;
@@ -314,6 +319,9 @@ MP4Metadata::GetTrackNumber(mozilla::TrackID aTrackID)
   size_t numTracks = mPrivate->mMetadataExtractor->countTracks();
   for (size_t i = 0; i < numTracks; i++) {
     sp<MetaData> metaData = mPrivate->mMetadataExtractor->getTrackMetaData(i);
+    if (!metaData.get()) {
+      continue;
+    }
     int32_t value;
     if (metaData->findInt32(kKeyTrackID, &value) && value == aTrackID) {
       return i;

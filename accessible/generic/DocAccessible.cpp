@@ -1039,13 +1039,18 @@ DocAccessible::ARIAAttributeChanged(Accessible* aAccessible, nsIAtom* aAttribute
     return;
   }
 
-  // Fire value change event whenever aria-valuetext is changed, or
-  // when aria-valuenow is changed and aria-valuetext is empty
-  if (aAttribute == nsGkAtoms::aria_valuetext ||
-      (aAttribute == nsGkAtoms::aria_valuenow &&
-       (!elm->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_valuetext) ||
-        elm->AttrValueIs(kNameSpaceID_None, nsGkAtoms::aria_valuetext,
-                         nsGkAtoms::_empty, eCaseMatters)))) {
+  // Fire text value change event whenever aria-valuetext is changed.
+  if (aAttribute == nsGkAtoms::aria_valuetext) {
+    FireDelayedEvent(nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE, aAccessible);
+    return;
+  }
+
+  // Fire numeric value change event when aria-valuenow is changed and
+  // aria-valuetext is empty
+  if (aAttribute == nsGkAtoms::aria_valuenow &&
+      (!elm->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_valuetext) ||
+       elm->AttrValueIs(kNameSpaceID_None, nsGkAtoms::aria_valuetext,
+                        nsGkAtoms::_empty, eCaseMatters))) {
     FireDelayedEvent(nsIAccessibleEvent::EVENT_VALUE_CHANGE, aAccessible);
     return;
   }
@@ -2072,7 +2077,10 @@ DocAccessible::SeizeChild(Accessible* aNewParent, Accessible* aChild,
                           int32_t aIdxInParent)
 {
   Accessible* oldParent = aChild->Parent();
-  NS_PRECONDITION(oldParent, "No parent?");
+  if (!oldParent) {
+    NS_ERROR("No parent? The tree is broken!");
+    return false;
+  }
 
   int32_t oldIdxInParent = aChild->IndexInParent();
 
@@ -2160,6 +2168,10 @@ DocAccessible::PutChildrenBack(nsTArray<RefPtr<Accessible> >* aChildren,
     // If the child is in the tree then remove it from the owner.
     if (child->IsInDocument()) {
       Accessible* owner = child->Parent();
+      if (!owner) {
+        NS_ERROR("Cannot put the child back. No parent, a broken tree.");
+        continue;
+      }
       RefPtr<AccReorderEvent> reorderEvent = new AccReorderEvent(owner);
       RefPtr<AccMutationEvent> hideEvent =
         new AccHideEvent(child, child->GetContent(), false);

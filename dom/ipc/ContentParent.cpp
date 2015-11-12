@@ -2245,10 +2245,7 @@ ContentParent::NotifyTabDestroyed(const TabId& aTabId,
 
     // Need to close undeleted ContentPermissionRequestParents before tab is closed.
     for (auto& permissionRequestParent : parentArray) {
-        nsTArray<PermissionChoice> emptyChoices;
-        Unused << PContentPermissionRequestParent::Send__delete__(permissionRequestParent,
-                                                                  false,
-                                                                  emptyChoices);
+        Unused << PContentPermissionRequestParent::Send__delete__(permissionRequestParent);
     }
 
     // There can be more than one PBrowser for a given app process
@@ -5728,6 +5725,18 @@ ContentParent::RecvGetDeviceStorageLocation(const nsString& aType,
   mozilla::AndroidBridge::GetExternalPublicDirectory(aType, *aPath);
   return true;
 #else
+  return false;
+#endif
+}
+
+bool
+ContentParent::RecvGetAndroidSystemInfo(AndroidSystemInfo* aInfo)
+{
+#ifdef MOZ_WIDGET_ANDROID
+  nsSystemInfo::GetAndroidSystemInfo(aInfo);
+  return true;
+#else
+  MOZ_CRASH("wrong platform!");
   return false;
 #endif
 }

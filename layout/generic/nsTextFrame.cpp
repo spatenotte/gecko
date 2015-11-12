@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -626,7 +627,7 @@ struct FlowLengthProperty {
 };
 
 int32_t nsTextFrame::GetInFlowContentLength() {
-  if (!PresContext()->BidiEnabled()) {
+  if (!(mState & NS_FRAME_IS_BIDI)) {
     return mContent->TextLength() - mContentOffset;
   }
 
@@ -638,7 +639,7 @@ int32_t nsTextFrame::GetInFlowContentLength() {
    * mContentOffset but this frame is empty, logically it might be before the
    * start of the cached flow.
    */
-  if (flowLength &&
+  if (flowLength && 
       (flowLength->mStartOffset < mContentOffset ||
        (flowLength->mStartOffset == mContentOffset && GetContentEnd() > mContentOffset)) &&
       flowLength->mEndFlowOffset > mContentOffset) {
@@ -1579,15 +1580,6 @@ void BuildTextRunsScanner::AccumulateRunInfo(nsTextFrame* aFrame)
   }
 }
 
-static nscoord StyleToCoord(const nsStyleCoord& aCoord)
-{
-  if (eStyleUnit_Coord == aCoord.GetUnit()) {
-    return aCoord.GetCoordValue();
-  } else {
-    return 0;
-  }
-}
-
 static bool
 HasTerminalNewline(const nsTextFrame* aFrame)
 {
@@ -1595,6 +1587,29 @@ HasTerminalNewline(const nsTextFrame* aFrame)
     return false;
   const nsTextFragment* frag = aFrame->GetContent()->GetText();
   return frag->CharAt(aFrame->GetContentEnd() - 1) == '\n';
+}
+
+static gfxFont::Metrics
+GetFirstFontMetrics(gfxFontGroup* aFontGroup, bool aVerticalMetrics)
+{
+  if (!aFontGroup)
+    return gfxFont::Metrics();
+  gfxFont* font = aFontGroup->GetFirstValidFont();
+  return font->GetMetrics(aVerticalMetrics ? gfxFont::eVertical
+                                           : gfxFont::eHorizontal);
+}
+
+static gfxFloat
+GetSpaceWidthAppUnits(gfxTextRun* aTextRun)
+{
+  // Round the space width when converting to appunits the same way textruns
+  // do.
+  gfxFloat spaceWidthAppUnits =
+    NS_round(GetFirstFontMetrics(aTextRun->GetFontGroup(),
+                                 aTextRun->UseCenterBaseline()).spaceWidth *
+             aTextRun->GetAppUnitsPerDevUnit());
+
+  return spaceWidthAppUnits;
 }
 
 static nscoord
@@ -1606,11 +1621,18 @@ LetterSpacing(nsIFrame* aFrame, const nsStyleText* aStyleText = nullptr)
   if (!aStyleText) {
     aStyleText = aFrame->StyleText();
   }
-  return StyleToCoord(aStyleText->mLetterSpacing);
+
+  const nsStyleCoord& coord = aStyleText->mLetterSpacing;
+  if (eStyleUnit_Coord == coord.GetUnit()) {
+    return coord.GetCoordValue();
+  }
+  return 0;
 }
 
+// This function converts non-coord values (e.g. percentages) to nscoord.
 static nscoord
-WordSpacing(nsIFrame* aFrame, const nsStyleText* aStyleText = nullptr)
+WordSpacing(nsIFrame* aFrame, gfxTextRun* aTextRun,
+            const nsStyleText* aStyleText = nullptr)
 {
   if (aFrame->IsSVGText()) {
     return 0;
@@ -1618,7 +1640,39 @@ WordSpacing(nsIFrame* aFrame, const nsStyleText* aStyleText = nullptr)
   if (!aStyleText) {
     aStyleText = aFrame->StyleText();
   }
-  return StyleToCoord(aStyleText->mWordSpacing);
+
+  const nsStyleCoord& coord = aStyleText->mWordSpacing;
+  if (coord.IsCoordPercentCalcUnit()) {
+    nscoord pctBasis = coord.HasPercent() ? GetSpaceWidthAppUnits(aTextRun) : 0;
+    return nsRuleNode::ComputeCoordPercentCalc(coord, pctBasis);
+  }
+  return 0;
+}
+
+// Returns gfxTextRunFactory::TEXT_ENABLE_SPACING if non-standard
+// letter-spacing or word-spacing is present.
+static uint32_t
+GetSpacingFlags(nsIFrame* aFrame, const nsStyleText* aStyleText = nullptr)
+{
+  if (aFrame->IsSVGText()) {
+    return 0;
+  }
+
+  const nsStyleText* styleText = aFrame->StyleText();
+  const nsStyleCoord& ls = styleText->mLetterSpacing;
+  const nsStyleCoord& ws = styleText->mWordSpacing;
+
+  // It's possible to have a calc() value that computes to zero but for which
+  // IsDefinitelyZero() is false, in which case we'll return
+  // TEXT_ENABLE_SPACING unnecessarily. That's ok because such cases are likely
+  // to be rare, and avoiding TEXT_ENABLE_SPACING is just an optimization.
+  bool nonStandardSpacing =
+    (eStyleUnit_Coord == ls.GetUnit() && ls.GetCoordValue() != 0) ||
+    (eStyleUnit_Coord == ws.GetUnit() && ws.GetCoordValue() != 0) ||
+    (eStyleUnit_Percent == ws.GetUnit() && ws.GetPercentValue() != 0) ||
+    (eStyleUnit_Calc == ws.GetUnit() && !ws.GetCalcValue()->IsDefinitelyZero());
+
+  return nonStandardSpacing ? gfxTextRunFactory::TEXT_ENABLE_SPACING : 0;
 }
 
 bool
@@ -1772,12 +1826,6 @@ BuildTextRunsScanner::GetNextBreakBeforeFrame(uint32_t* aIndex)
   return static_cast<nsTextFrame*>(mLineBreakBeforeFrames.ElementAt(index));
 }
 
-static uint32_t
-GetSpacingFlags(nscoord spacing)
-{
-  return spacing ? gfxTextRunFactory::TEXT_ENABLE_SPACING : 0;
-}
-
 static gfxFontGroup*
 GetFontGroupForFrame(nsIFrame* aFrame, float aFontSizeInflation,
                      nsFontMetrics** aOutFontMetrics = nullptr)
@@ -1824,16 +1872,6 @@ GetHyphenTextRun(gfxTextRun* aTextRun, gfxContext* aContext, nsTextFrame* aTextF
 
   return aTextRun->GetFontGroup()->
     MakeHyphenTextRun(ctx, aTextRun->GetAppUnitsPerDevUnit());
-}
-
-static gfxFont::Metrics
-GetFirstFontMetrics(gfxFontGroup* aFontGroup, bool aVerticalMetrics)
-{
-  if (!aFontGroup)
-    return gfxFont::Metrics();
-  gfxFont* font = aFontGroup->GetFirstValidFont();
-  return font->GetMetrics(aVerticalMetrics ? gfxFont::eVertical
-                                           : gfxFont::eHorizontal);
 }
 
 PR_STATIC_ASSERT(NS_STYLE_WHITESPACE_NORMAL == 0);
@@ -1943,8 +1981,7 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
     if (NS_STYLE_TEXT_TRANSFORM_NONE != textStyle->mTextTransform) {
       anyTextTransformStyle = true;
     }
-    textFlags |= GetSpacingFlags(LetterSpacing(f));
-    textFlags |= GetSpacingFlags(WordSpacing(f));
+    textFlags |= GetSpacingFlags(f);
     nsTextFrameUtils::CompressionMode compression =
       GetCSSWhitespaceToCompressionMode(f, textStyle);
     if ((enabledJustification || f->ShouldSuppressLineBreak()) &&
@@ -2875,7 +2912,7 @@ public:
       mFrame(aFrame), mStart(aStart), mTempIterator(aStart),
       mTabWidths(nullptr), mTabWidthsAnalyzedLimit(0),
       mLength(aLength),
-      mWordSpacing(WordSpacing(aFrame, aTextStyle)),
+      mWordSpacing(WordSpacing(aFrame, mTextRun, aTextStyle)),
       mLetterSpacing(LetterSpacing(aFrame, aTextStyle)),
       mHyphenWidth(-1),
       mOffsetFromBlockOriginForTabs(aOffsetFromBlockOriginForTabs),
@@ -2900,7 +2937,7 @@ public:
       mFrame(aFrame), mStart(aStart), mTempIterator(aStart),
       mTabWidths(nullptr), mTabWidthsAnalyzedLimit(0),
       mLength(aFrame->GetContentLength()),
-      mWordSpacing(WordSpacing(aFrame)),
+      mWordSpacing(WordSpacing(aFrame, mTextRun)),
       mLetterSpacing(LetterSpacing(aFrame)),
       mHyphenWidth(-1),
       mOffsetFromBlockOriginForTabs(0),
@@ -3225,14 +3262,8 @@ ComputeTabWidthAppUnits(nsIFrame* aFrame, gfxTextRun* aTextRun)
 {
   // Get the number of spaces from CSS -moz-tab-size
   const nsStyleText* textStyle = aFrame->StyleText();
-  
-  // Round the space width when converting to appunits the same way
-  // textruns do
-  gfxFloat spaceWidthAppUnits =
-    NS_round(GetFirstFontMetrics(aTextRun->GetFontGroup(),
-                                 aTextRun->UseCenterBaseline()).spaceWidth *
-             aTextRun->GetAppUnitsPerDevUnit());
-  return textStyle->mTabSize * spaceWidthAppUnits;
+
+  return textStyle->mTabSize * GetSpaceWidthAppUnits(aTextRun);
 }
 
 // aX and the result are in whole appunits.
@@ -5079,21 +5110,21 @@ nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
                                  : fontMetrics->MaxAscent();
 
     gfxFloat appUnitsPerDevUnit = aPresContext->AppUnitsPerDevPixel();
-    gfxFloat gfxWidth =
+    Float gfxWidth =
       (verticalRun ? aVisualOverflowRect->height
                    : aVisualOverflowRect->width) /
       appUnitsPerDevUnit;
     gfxFloat gfxAscent = gfxFloat(mAscent) / appUnitsPerDevUnit;
     gfxFloat gfxMaxAscent = maxAscent / appUnitsPerDevUnit;
-    gfxFloat gfxUnderlineSize = underlineSize / appUnitsPerDevUnit;
+    Float gfxUnderlineSize = underlineSize / appUnitsPerDevUnit;
     gfxFloat gfxUnderlineOffset = underlineOffset / appUnitsPerDevUnit;
     nsRect underlineRect =
       nsCSSRendering::GetTextDecorationRect(aPresContext,
-        gfxSize(gfxWidth, gfxUnderlineSize), gfxAscent, gfxUnderlineOffset,
+        Size(gfxWidth, gfxUnderlineSize), gfxAscent, gfxUnderlineOffset,
         NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE, decorationStyle, verticalRun);
     nsRect overlineRect =
       nsCSSRendering::GetTextDecorationRect(aPresContext,
-        gfxSize(gfxWidth, gfxUnderlineSize), gfxAscent, gfxMaxAscent,
+        Size(gfxWidth, gfxUnderlineSize), gfxAscent, gfxMaxAscent,
         NS_STYLE_TEXT_DECORATION_LINE_OVERLINE, decorationStyle, verticalRun);
 
     aVisualOverflowRect->UnionRect(*aVisualOverflowRect, underlineRect);
@@ -5144,7 +5175,7 @@ nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
 
         const nsRect decorationRect =
           nsCSSRendering::GetTextDecorationRect(aPresContext,
-            gfxSize(gfxWidth, metrics.underlineSize),
+            Size(gfxWidth, metrics.underlineSize),
             ascent, metrics.underlineOffset,
             NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE, decorationStyle,
             verticalRun) +
@@ -5176,7 +5207,7 @@ nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
 
         const nsRect decorationRect =
           nsCSSRendering::GetTextDecorationRect(aPresContext,
-            gfxSize(gfxWidth, metrics.underlineSize),
+            Size(gfxWidth, metrics.underlineSize),
             ascent, metrics.maxAscent,
             NS_STYLE_TEXT_DECORATION_LINE_OVERLINE, decorationStyle,
             verticalRun) +
@@ -5208,7 +5239,7 @@ nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
 
         const nsRect decorationRect =
           nsCSSRendering::GetTextDecorationRect(aPresContext,
-            gfxSize(gfxWidth, metrics.strikeoutSize),
+            Size(gfxWidth, metrics.strikeoutSize),
             ascent, metrics.strikeoutOffset,
             NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH, decorationStyle,
             verticalRun) +
@@ -5302,9 +5333,9 @@ nsTextFrame::PaintDecorationLine(gfxContext* const aCtx,
                                  const gfxRect& aDirtyRect,
                                  nscolor aColor,
                                  const nscolor* aOverrideColor,
-                                 const gfxPoint& aPt,
+                                 const Point& aPt,
                                  gfxFloat aICoordInFrame,
-                                 const gfxSize& aLineSize,
+                                 const Size& aLineSize,
                                  gfxFloat aAscent,
                                  gfxFloat aOffset,
                                  uint8_t aDecoration,
@@ -5317,7 +5348,7 @@ nsTextFrame::PaintDecorationLine(gfxContext* const aCtx,
   nscolor lineColor = aOverrideColor ? *aOverrideColor : aColor;
   if (aCallbacks) {
     Rect path = nsCSSRendering::DecorationLineToPath(ToRect(aDirtyRect),
-      ToPoint(aPt), ToSize(aLineSize), aAscent, aOffset, aDecoration, aStyle,
+      aPt, aLineSize, aAscent, aOffset, aDecoration, aStyle,
       aVertical, aDescentLimit);
     if (aDecorationType == eNormalDecoration) {
       aCallbacks->PaintDecorationLine(path, lineColor);
@@ -5342,7 +5373,7 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
                                       SelectionType aType,
                                       nsTextPaintStyle& aTextPaintStyle,
                                       const TextRangeStyle &aRangeStyle,
-                                      const gfxPoint& aPt,
+                                      const Point& aPt,
                                       gfxFloat aICoordInFrame,
                                       gfxFloat aWidth,
                                       gfxFloat aAscent,
@@ -5352,10 +5383,10 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
                                       gfxFloat aDecorationOffsetDir,
                                       uint8_t aDecoration)
 {
-  gfxPoint pt(aPt);
-  gfxSize size(aWidth,
-               ComputeSelectionUnderlineHeight(aTextPaintStyle.PresContext(),
-                                               aFontMetrics, aType));
+  Point pt(aPt);
+  Size size(aWidth,
+            ComputeSelectionUnderlineHeight(aTextPaintStyle.PresContext(),
+                                            aFontMetrics, aType));
   gfxFloat descentLimit =
     ComputeDescentLimitForSelectionUnderline(aTextPaintStyle.PresContext(),
                                              aFontMetrics);
@@ -5950,7 +5981,7 @@ nsTextFrame::PaintTextSelectionDecorations(gfxContext* aCtx,
   uint32_t offset, length;
   int32_t app = aTextPaintStyle.PresContext()->AppUnitsPerDevPixel();
   // XXX aTextBaselinePt is in AppUnits, shouldn't it be nsFloatPoint?
-  gfxPoint pt;
+  Point pt;
   if (verticalRun) {
     pt.x = (aTextBaselinePt.x - mAscent) / app;
   } else {
@@ -6457,12 +6488,12 @@ nsTextFrame::DrawTextRunAndDecorations(
 
     // decPt is the physical point where the decoration is to be drawn,
     // relative to the frame; one of its coordinates will be updated below.
-    gfxPoint decPt(x / app, y / app);
-    gfxFloat& bCoord = verticalRun ? decPt.x : decPt.y;
+    Point decPt(x / app, y / app);
+    Float& bCoord = verticalRun ? decPt.x : decPt.y;
 
     // decSize is a textrun-relative size, so its 'width' field is actually
     // the run-relative measure, and 'height' will be the line thickness
-    gfxSize decSize(measure / app, 0);
+    Size decSize(measure / app, 0);
     gfxFloat ascent = gfxFloat(mAscent) / app;
 
     // The starting edge of the frame in block direction
@@ -6820,9 +6851,9 @@ nsTextFrame::CombineSelectionUnderlineRect(nsPresContext* aPresContext,
       }
     }
     nsRect decorationArea;
-    gfxSize size(aPresContext->AppUnitsToGfxUnits(aRect.width),
-                 ComputeSelectionUnderlineHeight(aPresContext,
-                                                 metrics, sd->mType));
+    Size size(aPresContext->AppUnitsToGfxUnits(aRect.width),
+              ComputeSelectionUnderlineHeight(aPresContext,
+                                              metrics, sd->mType));
     relativeSize = std::max(relativeSize, 1.0f);
     size.height *= relativeSize;
     decorationArea =
