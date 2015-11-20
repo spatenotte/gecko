@@ -325,8 +325,13 @@ exports.getProperty = function getProperty(aObj, aKey) {
 exports.hasSafeGetter = function hasSafeGetter(aDesc) {
   // Scripted functions that are CCWs will not appear scripted until after
   // unwrapping.
-  let fn = aDesc.get.unwrap();
-  return fn && fn.callable && fn.class == "Function" && fn.script === undefined;
+  try {
+    let fn = aDesc.get.unwrap();
+    return fn && fn.callable && fn.class == "Function" && fn.script === undefined;
+  } catch(e) {
+    // Avoid exception 'Object in compartment marked as invisible to Debugger'
+    return false;
+  }
 };
 
 /**
@@ -459,6 +464,9 @@ exports.dbg_assert = function dbg_assert(cond, e) {
 };
 
 exports.defineLazyGetter(this, "AppConstants", () => {
+  if (isWorker) {
+    return {};
+  }
   const scope = {};
   Cu.import("resource://gre/modules/AppConstants.jsm", scope);
   return scope.AppConstants;

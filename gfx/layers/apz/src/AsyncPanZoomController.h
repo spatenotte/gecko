@@ -261,12 +261,6 @@ public:
     const ParentLayerPoint& aVelocity,
     double aEstimatedPaintDuration);
 
-  /**
-   * Send an mozbrowserasyncscroll event.
-   * *** The monitor must be held while calling this.
-   */
-  void SendAsyncScrollEvent();
-
   nsEventStatus HandleDragEvent(const MouseInput& aEvent,
                                 const AsyncDragMetrics& aDragMetrics);
 
@@ -387,6 +381,11 @@ public:
   bool CanScroll(Layer::ScrollDirection aDirection) const;
 
   void NotifyMozMouseScrollEvent(const nsString& aString) const;
+
+  // This is called to request that the main thread snap the scroll position
+  // to a nearby snap position if appropriate. The current scroll position is
+  // used as the final destination.
+  void RequestSnap();
 
 protected:
   // Protected destructor, to discourage deletion outside of Release():
@@ -618,14 +617,6 @@ protected:
   const RefPtr<InputQueue>& GetInputQueue() const;
 
   /**
-   * Timeout function for mozbrowserasyncscroll event. Because we throttle
-   * mozbrowserasyncscroll events in some conditions, this function ensures
-   * that the last mozbrowserasyncscroll event will be fired after a period of
-   * time.
-   */
-  void FireAsyncScrollOnTimeout();
-
-  /**
    * Convert ScreenPoint relative to the screen to CSSPoint relative
    * to the parent document. This excludes the transient compositor transform.
    * NOTE: This must be converted to CSSPoint relative to the child
@@ -646,11 +637,6 @@ protected:
 
   // Common processing at the end of a touch block.
   void OnTouchEndOrCancel();
-
-  // This is called to request that the main thread snap the scroll position
-  // to a nearby snap position if appropriate. The current scroll position is
-  // used as the final destination.
-  void RequestSnap();
 
   uint64_t mLayersId;
   RefPtr<CompositorParent> mCompositorParent;
@@ -732,19 +718,6 @@ private:
   // to allow panning by moving multiple fingers (thus moving the focus point).
   ParentLayerPoint mLastZoomFocus;
 
-  // The last time and offset we fire the mozbrowserasyncscroll event when
-  // compositor has sampled the content transform for this frame.
-  TimeStamp mLastAsyncScrollTime;
-  CSSPoint mLastAsyncScrollOffset;
-
-  // The current offset drawn on the screen, it may not be sent since we have
-  // throttling policy for mozbrowserasyncscroll event.
-  CSSPoint mCurrentAsyncScrollOffset;
-
-  // The delay task triggered by the throttling mozbrowserasyncscroll event
-  // ensures the last mozbrowserasyncscroll event is always been fired.
-  CancelableTask* mAsyncScrollTimeoutTask;
-
   RefPtr<AsyncPanZoomAnimation> mAnimation;
 
   friend class Axis;
@@ -778,6 +751,12 @@ protected:
                                  the finger is lifted. */
     SMOOTH_SCROLL,            /* Smooth scrolling to destination. Used by
                                  CSSOM-View smooth scroll-behavior */
+
+    PANNING_LOCKED_X_SMOOTH_SCROLL, /* Smooth scrolling animation initiated
+                                       while simultaneously panning the frame
+                                       with the X axis locked. */
+    PANNING_LOCKED_Y_SMOOTH_SCROLL, /* as above for Y axis. */
+
     WHEEL_SCROLL              /* Smooth scrolling to a destination for a wheel event. */
   };
 

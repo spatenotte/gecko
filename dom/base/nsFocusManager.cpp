@@ -190,7 +190,6 @@ nsresult
 nsFocusManager::Init()
 {
   nsFocusManager* fm = new nsFocusManager();
-  NS_ENSURE_TRUE(fm, NS_ERROR_OUT_OF_MEMORY);
   NS_ADDREF(fm);
   sInstance = fm;
 
@@ -352,7 +351,9 @@ nsFocusManager::GetRedirectedFocus(nsIContent* aContent)
 InputContextAction::Cause
 nsFocusManager::GetFocusMoveActionCause(uint32_t aFlags)
 {
-  if (aFlags & nsIFocusManager::FLAG_BYMOUSE) {
+  if (aFlags & nsIFocusManager::FLAG_BYTOUCH) {
+    return InputContextAction::CAUSE_TOUCH;
+  } else if (aFlags & nsIFocusManager::FLAG_BYMOUSE) {
     return InputContextAction::CAUSE_MOUSE;
   } else if (aFlags & nsIFocusManager::FLAG_BYKEY) {
     return InputContextAction::CAUSE_KEY;

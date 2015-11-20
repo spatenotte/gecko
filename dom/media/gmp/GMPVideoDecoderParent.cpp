@@ -21,7 +21,7 @@ namespace mozilla {
 #undef LOG
 #endif
 
-extern PRLogModuleInfo* GetGMPLog();
+extern LogModule* GetGMPLog();
 
 #define LOGV(msg) MOZ_LOG(GetGMPLog(), mozilla::LogLevel::Verbose, msg)
 #define LOGD(msg) MOZ_LOG(GetGMPLog(), mozilla::LogLevel::Debug, msg)
@@ -278,7 +278,6 @@ GMPVideoDecoderParent::ActorDestroy(ActorDestroyReason aWhy)
 
   mIsOpen = false;
   mActorDestroyed = true;
-  mVideoHost.DoneWithAPI();
 
   // Ensure if we've received a destroy while waiting for a ResetComplete
   // or DrainComplete notification, we'll unblock the caller before processing

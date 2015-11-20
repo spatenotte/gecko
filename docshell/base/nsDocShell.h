@@ -485,6 +485,8 @@ protected:
                                      uint32_t aRedirectFlags,
                                      uint32_t aStateFlags) override;
 
+  nsresult SetIsActiveInternal(bool aIsActive, bool aIsHidden);
+
   /**
    * Helper function that determines if channel is an HTTP POST.
    *
@@ -1002,6 +1004,10 @@ protected:
   nsString mPaymentRequestId;
 
   nsString GetInheritedPaymentRequestId();
+
+  // The packageId for a signed packaged iff this docShell is created
+  // for a signed package.
+  nsString mSignedPkg;
 
 private:
   nsCString mForcedCharset;

@@ -173,7 +173,7 @@ public:
       return;
     }
     if (mRenderFrame) {
-      mRenderFrame->TakeFocusForClick();
+      mRenderFrame->TakeFocusForClickFromTap();
       TabParent* browser = TabParent::GetFrom(mRenderFrame->Manager());
       browser->HandleSingleTap(aPoint, aModifiers, aGuid);
     }
@@ -200,25 +200,6 @@ public:
   }
 
   void ClearRenderFrame() { mRenderFrame = nullptr; }
-
-  virtual void SendAsyncScrollDOMEvent(bool aIsRootContent,
-                                       const CSSRect& aContentRect,
-                                       const CSSSize& aContentSize) override
-  {
-    if (MessageLoop::current() != mUILoop) {
-      mUILoop->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this,
-                          &RemoteContentController::SendAsyncScrollDOMEvent,
-                          aIsRootContent, aContentRect, aContentSize));
-      return;
-    }
-    if (mRenderFrame && aIsRootContent) {
-      TabParent* browser = TabParent::GetFrom(mRenderFrame->Manager());
-      BrowserElementParent::DispatchAsyncScrollEvent(browser, aContentRect,
-                                                     aContentSize);
-    }
-  }
 
   virtual void PostDelayedTask(Task* aTask, int aDelayMs) override
   {
@@ -567,7 +548,7 @@ RenderFrameParent::SetTargetAPZC(uint64_t aInputBlockId,
         = &APZCTreeManager::SetTargetAPZC;
     APZThreadUtils::RunOnControllerThread(NewRunnableMethod(
         GetApzcTreeManager(), setTargetApzcFunc,
-        aInputBlockId, nsTArray<ScrollableLayerGuid>(aTargets)));
+        aInputBlockId, aTargets));
   }
 }
 
@@ -578,7 +559,7 @@ RenderFrameParent::SetAllowedTouchBehavior(uint64_t aInputBlockId,
   if (GetApzcTreeManager()) {
     APZThreadUtils::RunOnControllerThread(NewRunnableMethod(
         GetApzcTreeManager(), &APZCTreeManager::SetAllowedTouchBehavior,
-        aInputBlockId, nsTArray<TouchBehaviorFlags>(aFlags)));
+        aInputBlockId, aFlags));
   }
 }
 
@@ -628,7 +609,7 @@ RenderFrameParent::GetTextureFactoryIdentifier(TextureFactoryIdentifier* aTextur
 }
 
 void
-RenderFrameParent::TakeFocusForClick()
+RenderFrameParent::TakeFocusForClickFromTap()
 {
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
   if (!fm) {
@@ -643,6 +624,7 @@ RenderFrameParent::TakeFocusForClick()
     return;
   }
   fm->SetFocus(element, nsIFocusManager::FLAG_BYMOUSE |
+                        nsIFocusManager::FLAG_BYTOUCH |
                         nsIFocusManager::FLAG_NOSCROLL);
 }
 

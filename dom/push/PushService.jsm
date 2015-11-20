@@ -27,6 +27,10 @@ const CONNECTION_PROTOCOLS = [PushServiceWebSocket, PushServiceHttp2];
 XPCOMUtils.defineLazyModuleGetter(this, "AlarmService",
                                   "resource://gre/modules/AlarmService.jsm");
 
+XPCOMUtils.defineLazyServiceGetter(this, "gContentSecurityManager",
+                                   "@mozilla.org/contentsecuritymanager;1",
+                                   "nsIContentSecurityManager");
+
 this.EXPORTED_SYMBOLS = ["PushService"];
 
 XPCOMUtils.defineLazyGetter(this, "console", () => {
@@ -41,6 +45,8 @@ const prefs = new Preferences("dom.push.");
 
 const kCHILD_PROCESS_MESSAGES = ["Push:Register", "Push:Unregister",
                                  "Push:Registration", "Push:RegisterEventNotificationListener",
+                                 "Push:NotificationForOriginShown",
+                                 "Push:NotificationForOriginClosed",
                                  "child-process-shutdown"];
 
 const PUSH_SERVICE_UNINIT = 0;
@@ -93,6 +99,11 @@ this.PushService = {
   _db: null,
   _options: null,
   _alarmID: null,
+  _visibleNotifications: new Map(),
+
+  // Callback that is called after attempting to
+  // reduce the quota for a record. Used for testing purposes.
+  _updateQuotaTestCallback: null,
 
   _childListeners: [],
 
@@ -266,47 +277,48 @@ this.PushService = {
         })
         break;
 
-      case "webapps-clear-data":
-        console.debug("webapps-clear-data");
-
-        let data = aSubject
-                     .QueryInterface(Ci.mozIApplicationClearPrivateDataParams);
-        if (!data) {
-          console.error("webapps-clear-data: Failed to get information " +
-            "about application");
-          return;
-        }
-
-        var originAttributes =
-          ChromeUtils.originAttributesToSuffix({ appId: data.appId,
-                                                 inBrowser: data.browserOnly });
-        this._db.getAllByOriginAttributes(originAttributes)
-          .then(records => Promise.all(records.map(record =>
-            this._db.delete(record.keyID).then(
-              _ => this._backgroundUnregister(record),
-              err => {
-                console.error("webapps-clear-data: Error removing record",
-                  record, err);
-
-                this._backgroundUnregister(record);
-              })
-            )
-          ));
-
+      case "clear-origin-data":
+        this._clearOriginData(data).catch(error => {
+          console.error("clearOriginData: Error clearing origin data:", error);
+        });
         break;
     }
   },
 
-  _backgroundUnregister: function(record) {
-    if (this._service.isConnected()) {
-      // courtesy, but don't establish a connection
-      // just for it
-      console.debug("backgroundUnregister: Notifying server", record);
-      return this._sendUnregister(record)
-          .catch(function(e) {
-            console.error("backgroundUnregister: Error notifying server", e);
-          });
+  _clearOriginData: function(data) {
+    console.log("clearOriginData()");
+
+    if (!data) {
+      return Promise.resolve();
     }
+
+    let pattern = JSON.parse(data);
+    return this._db.clearIf(record => {
+      if (!record.matchesOriginAttributes(pattern)) {
+        return false;
+      }
+      this._backgroundUnregister(record);
+      return true;
+    });
+  },
+
+  /**
+   * Sends an unregister request to the server in the background. If the
+   * service is not connected, this function is a no-op.
+   *
+   * @param {PushRecord} record The record to unregister.
+   */
+  _backgroundUnregister: function(record) {
+    console.debug("backgroundUnregister()");
+
+    if (!this._service.isConnected() || !record) {
+      return;
+    }
+
+    console.debug("backgroundUnregister: Notifying server", record);
+    this._sendUnregister(record).catch(e => {
+      console.error("backgroundUnregister: Error notifying server", e);
+    });
   },
 
   // utility function used to add/remove observers in startObservers() and
@@ -320,16 +332,34 @@ this.PushService = {
     }
   },
 
-  _findService: function(serverURI) {
-    var uri;
-    var service;
-    if (serverURI) {
-      for (let connProtocol of CONNECTION_PROTOCOLS) {
-        uri = connProtocol.checkServerURI(serverURI);
-        if (uri) {
-          service = connProtocol;
-          break;
-        }
+  _findService: function(serverURL) {
+    console.debug("findService()");
+
+    let uri;
+    let service;
+
+    if (!serverURL) {
+      console.warn("findService: No dom.push.serverURL found");
+      return [];
+    }
+
+    try {
+      uri = Services.io.newURI(serverURL, null, null);
+    } catch (e) {
+      console.warn("findService: Error creating valid URI from",
+        "dom.push.serverURL", serverURL);
+      return [];
+    }
+
+    if (!gContentSecurityManager.isURIPotentiallyTrustworthy(uri)) {
+      console.warn("findService: Untrusted server URI", uri.spec);
+      return [];
+    }
+
+    for (let connProtocol of CONNECTION_PROTOCOLS) {
+      if (connProtocol.validServerURI(uri)) {
+        service = connProtocol;
+        break;
       }
     }
     return [service, uri];
@@ -421,22 +451,7 @@ this.PushService = {
     if (options.serverURI) {
       // this is use for xpcshell test.
 
-      var uri;
-      var service;
-      if (!options.service) {
-        for (let connProtocol of CONNECTION_PROTOCOLS) {
-          uri = connProtocol.checkServerURI(options.serverURI);
-          if (uri) {
-            service = connProtocol;
-            break;
-          }
-        }
-      } else {
-        try {
-          uri  = Services.io.newURI(options.serverURI, null, null);
-          service = options.service;
-        } catch(e) {}
-      }
+      let [service, uri] = this._findService(options.serverURI);
       if (!service) {
         this._setState(PUSH_SERVICE_INIT);
         return;
@@ -466,7 +481,7 @@ this.PushService = {
       return;
     }
 
-    Services.obs.addObserver(this, "webapps-clear-data", false);
+    Services.obs.addObserver(this, "clear-origin-data", false);
 
     // On B2G the NetworkManager interface fires a network-active-changed
     // event.
@@ -573,7 +588,7 @@ this.PushService = {
       return Promise.resolve();
     }
 
-    return this.dropRegistrations()
+    return this.dropUnexpiredRegistrations()
        .then(_ => {
          this._db.close();
          this._db = null;
@@ -593,7 +608,7 @@ this.PushService = {
     prefs.ignore("connection.enabled", this);
 
     Services.obs.removeObserver(this, this._networkStateChangeEventName);
-    Services.obs.removeObserver(this, "webapps-clear-data");
+    Services.obs.removeObserver(this, "clear-origin-data");
     Services.obs.removeObserver(this, "idle-daily");
     Services.obs.removeObserver(this, "perm-changed");
   },
@@ -664,12 +679,35 @@ this.PushService = {
     }
   },
 
-  dropRegistrations: function() {
-    return this._notifyAllAppsRegister()
-      .then(_ => this._db.drop());
+  /**
+   * Drops all active registrations and notifies the associated service
+   * workers. This function is called when the user switches Push servers,
+   * or when the server invalidates all existing registrations.
+   *
+   * We ignore expired registrations because they're already handled in other
+   * code paths. Registrations that expired after exceeding their quotas are
+   * evicted at startup, or on the next `idle-daily` event. Registrations that
+   * expired because the user revoked the notification permission are evicted
+   * once the permission is reinstated.
+   */
+  dropUnexpiredRegistrations: function() {
+    let subscriptionChanges = [];
+    return this._db.clearIf(record => {
+      if (record.isExpired()) {
+        return false;
+      }
+      subscriptionChanges.push(record);
+      return true;
+    }).then(() => {
+      this.notifySubscriptionChanges(subscriptionChanges);
+    });
   },
 
   _notifySubscriptionChangeObservers: function(record) {
+    if (!record) {
+      return;
+    }
+
     // Notify XPCOM observers.
     Services.obs.notifyObservers(
       null,
@@ -704,29 +742,49 @@ this.PushService = {
     }
   },
 
-  // Fires a push-register system message to all applications that have
-  // registration.
-  _notifyAllAppsRegister: function() {
-    console.debug("notifyAllAppsRegister()");
-    // records are objects describing the registration as stored in IndexedDB.
-    return this._db.getAllUnexpired().then(records => {
-      records.forEach(record => {
-        this._notifySubscriptionChangeObservers(record);
-      });
-    });
-  },
-
-  dropRegistrationAndNotifyApp: function(aKeyId) {
-    return this._db.getByKeyID(aKeyId).then(record => {
-      this._notifySubscriptionChangeObservers(record);
-      return this._db.delete(aKeyId);
-    });
-  },
-
-  updateRegistrationAndNotifyApp: function(aOldKey, aRecord) {
-    return this._db.delete(aOldKey)
-      .then(_ => this._db.put(aRecord))
+  /**
+   * Drops a registration and notifies the associated service worker. If the
+   * registration does not exist, this function is a no-op.
+   *
+   * @param {String} keyID The registration ID to remove.
+   * @returns {Promise} Resolves once the worker has been notified.
+   */
+  dropRegistrationAndNotifyApp: function(aKeyID) {
+    return this._db.delete(aKeyID)
       .then(record => this._notifySubscriptionChangeObservers(record));
+  },
+
+  /**
+   * Replaces an existing registration and notifies the associated service
+   * worker.
+   *
+   * @param {String} aOldKey The registration ID to replace.
+   * @param {PushRecord} aNewRecord The new record.
+   * @returns {Promise} Resolves once the worker has been notified.
+   */
+  updateRegistrationAndNotifyApp: function(aOldKey, aNewRecord) {
+    return this.updateRecordAndNotifyApp(aOldKey, _ => aNewRecord);
+  },
+  /**
+   * Updates a registration and notifies the associated service worker.
+   *
+   * @param {String} keyID The registration ID to update.
+   * @param {Function} updateFunc Returns the updated record.
+   * @returns {Promise} Resolves with the updated record once the worker
+   *  has been notified.
+   */
+  updateRecordAndNotifyApp: function(aKeyID, aUpdateFunc) {
+    return this._db.update(aKeyID, aUpdateFunc)
+      .then(record => {
+        this._notifySubscriptionChangeObservers(record);
+        return record;
+      });
+  },
+
+  notifySubscriptionChanges: function(records) {
+    records.forEach(record => {
+      this._notifySubscriptionChangeObservers(record);
+    });
   },
 
   ensureP256dhKey: function(record) {
@@ -746,19 +804,6 @@ this.PushService = {
         return this.dropRegistrationAndNotifyApp(record.keyID).then(
           () => Promise.reject(error));
       });
-  },
-
-  updateRecordAndNotifyApp: function(aKeyID, aUpdateFunc) {
-    return this._db.update(aKeyID, aUpdateFunc)
-      .then(record => {
-        this._notifySubscriptionChangeObservers(record);
-        return record;
-      });
-  },
-
-  dropRecordAndNotifyApp: function(aRecord) {
-    return this._db.delete(aRecord.keyID)
-      .then(_ => this._notifySubscriptionChangeObservers(aRecord));
   },
 
   _recordDidNotNotify: function(reason) {
@@ -839,18 +884,75 @@ this.PushService = {
         if (shouldNotify) {
           notified = this._notifyApp(record, message);
         }
-        if (record.isExpired()) {
-          this._recordDidNotNotify(kDROP_NOTIFICATION_REASON_EXPIRED);
-          // Drop the registration in the background. If the user returns to the
-          // site, the service worker will be notified on the next `idle-daily`
-          // event.
-          this._backgroundUnregister(record);
-        }
+        // Update quota after the delay, at which point
+        // we check for visible notifications.
+        setTimeout(() => this._updateQuota(keyID),
+          prefs.get("quotaUpdateDelay"));
         return notified;
       });
     }).catch(error => {
       console.error("receivedPushMessage: Error notifying app", error);
     });
+  },
+
+  _updateQuota: function(keyID) {
+    console.debug("updateQuota()");
+
+    this._db.update(keyID, record => {
+      // Record may have expired from an earlier quota update.
+      if (record.isExpired()) {
+        console.debug(
+          "updateQuota: Trying to update quota for expired record", record);
+        return null;
+      }
+      // If there are visible notifications, don't apply the quota penalty
+      // for the message.
+      if (!this._visibleNotifications.has(record.uri.prePath)) {
+        record.reduceQuota();
+      }
+      return record;
+    }).then(record => {
+      if (record && record.isExpired()) {
+        this._recordDidNotNotify(kDROP_NOTIFICATION_REASON_EXPIRED);
+        // Drop the registration in the background. If the user returns to the
+        // site, the service worker will be notified on the next `idle-daily`
+        // event.
+        this._backgroundUnregister(record);
+      }
+      if (this._updateQuotaTestCallback) {
+        // Callback so that test may be notified when the quota update is complete.
+        this._updateQuotaTestCallback();
+      }
+    }).catch(error => {
+      console.debug("updateQuota: Error while trying to update quota", error);
+    });
+  },
+
+  _notificationForOriginShown(origin) {
+    console.debug("notificationForOriginShown()", origin);
+    let count;
+    if (this._visibleNotifications.has(origin)) {
+      count = this._visibleNotifications.get(origin);
+    } else {
+      count = 0;
+    }
+    this._visibleNotifications.set(origin, count + 1);
+  },
+
+  _notificationForOriginClosed(origin) {
+    console.debug("notificationForOriginClosed()", origin);
+    let count;
+    if (this._visibleNotifications.has(origin)) {
+      count = this._visibleNotifications.get(origin);
+    } else {
+      console.debug("notificationForOriginClosed: closing notification that has not been shown?");
+      return;
+    }
+    if (count > 1) {
+      this._visibleNotifications.set(origin, count - 1);
+    } else {
+      this._visibleNotifications.delete(origin);
+    }
   },
 
   _notifyApp: function(aPushRecord, message) {
@@ -935,7 +1037,7 @@ this.PushService = {
             err => this._onRegisterError(err))
       .then(record => {
         this._deletePendingRequest(aPageRecord);
-        return record.toRegister();
+        return record.toSubscription();
       }, err => {
         this._deletePendingRequest(aPageRecord);
         throw err;
@@ -1011,6 +1113,20 @@ this.PushService = {
           this._childListeners.splice(i, 1);
         }
       }
+      console.debug("receiveMessage: Clearing notifications from child");
+      this._visibleNotifications.clear();
+      return;
+    }
+
+    if (aMessage.name === "Push:NotificationForOriginShown") {
+      console.debug("receiveMessage: Notification shown from child");
+      this._notificationForOriginShown(aMessage.data);
+      return;
+    }
+
+    if (aMessage.name === "Push:NotificationForOriginClosed") {
+      console.debug("receiveMessage: Notification closed from child");
+      this._notificationForOriginClosed(aMessage.data);
       return;
     }
 
@@ -1076,12 +1192,12 @@ this.PushService = {
             if (isChanged) {
               // If the user revisited the site, drop the expired push
               // registration and re-register.
-              return this._db.delete(record.keyID);
+              return this.dropRegistrationAndNotifyApp(record.keyID);
             }
             throw new Error("Push subscription expired");
           }).then(_ => this._lookupOrPutPendingRequest(aPageRecord));
         }
-        return record.toRegister();
+        return record.toSubscription();
       });
   },
 
@@ -1194,12 +1310,12 @@ this.PushService = {
         if (record.isExpired()) {
           return record.quotaChanged().then(isChanged => {
             if (isChanged) {
-              return this._db.delete(record.keyID).then(_ => null);
+              return this.dropRegistrationAndNotifyApp(record.keyID).then(_ => null);
             }
             return null;
           });
         }
-        return record.toRegistration();
+        return record.toSubscription();
       });
   },
 
@@ -1212,7 +1328,7 @@ this.PushService = {
           if (isChanged) {
             // If the user revisited the site, drop the expired push
             // registration and notify the associated service worker.
-            return this.dropRecordAndNotifyApp(record);
+            return this.dropRegistrationAndNotifyApp(record.keyID);
           }
         }).catch(error => {
           console.error("dropExpiredRegistrations: Error dropping registration",
@@ -1259,69 +1375,84 @@ this.PushService = {
       // Permission set to "allow". Drop all expired registrations for this
       // site, notify the associated service workers, and reset the quota
       // for active registrations.
-      return this._updateByPrincipal(
+      return this._reduceByPrincipal(
         permission.principal,
-        record => this._permissionAllowed(record)
-      );
+        (subscriptionChanges, record, cursor) => {
+          this._permissionAllowed(subscriptionChanges, record, cursor);
+          return subscriptionChanges;
+        },
+        []
+      ).then(subscriptionChanges => {
+        this.notifySubscriptionChanges(subscriptionChanges);
+      });
     } else if (isChange || (isAllow && type == "deleted")) {
       // Permission set to "block" or "always ask," or "allow" permission
       // removed. Expire all registrations for this site.
-      return this._updateByPrincipal(
+      return this._reduceByPrincipal(
         permission.principal,
-        record => this._permissionDenied(record)
+        (memo, record, cursor) => this._permissionDenied(record, cursor)
       );
     }
 
     return Promise.resolve();
   },
 
-  _updateByPrincipal: function(principal, updateFunc) {
-    return this._db.updateByOrigin(
+  _reduceByPrincipal: function(principal, callback, initialValue) {
+    return this._db.reduceByOrigin(
       principal.URI.prePath,
       ChromeUtils.originAttributesToSuffix(principal.originAttributes),
-      updateFunc
+      callback,
+      initialValue
     );
   },
 
   /**
-   * Expires all registrations if the push permission is revoked. We only
-   * expire the registration so we can notify the service worker as soon as
-   * the permission is reinstated. If we just deleted the registration, the
-   * worker wouldn't be notified until the next visit to the site.
+   * The update function called for each registration record if the push
+   * permission is revoked. We only expire the record so we can notify the
+   * service worker as soon as the permission is reinstated. If we just
+   * deleted the record, the worker wouldn't be notified until the next visit
+   * to the site.
    *
-   * @param {Array} A list of records to expire.
-   * @returns {Promise} A promise resolved with the expired records.
+   * @param {PushRecord} record The record to expire.
+   * @param {IDBCursor} cursor The IndexedDB cursor.
    */
-  _permissionDenied: function(record) {
+  _permissionDenied: function(record, cursor) {
+    console.debug("permissionDenied()");
+
     if (!record.quotaApplies() || record.isExpired()) {
       // Ignore already-expired records.
-      return null;
+      return;
     }
     // Drop the registration in the background.
     this._backgroundUnregister(record);
     record.setQuota(0);
-    return record;
+    cursor.update(record);
   },
 
   /**
-   * Drops all expired registrations, notifies the associated service
-   * workers, and resets the quota for active registrations if the push
-   * permission is granted.
+   * The update function called for each registration record if the push
+   * permission is granted. If the record has expired, it will be dropped;
+   * otherwise, its quota will be reset to the default value.
    *
-   * @param {Array} A list of records to refresh.
-   * @returns {Promise} A promise resolved with the refreshed records.
+   * @param {Array} subscriptionChanges A list of records whose associated
+   *  service workers should be notified once the transaction has committed.
+   * @param {PushRecord} record The record to update.
+   * @param {IDBCursor} cursor The IndexedDB cursor.
    */
-  _permissionAllowed: function(record) {
+  _permissionAllowed: function(subscriptionChanges, record, cursor) {
+    console.debug("permissionAllowed()");
+
     if (!record.quotaApplies()) {
-      return null;
+      return;
     }
     if (record.isExpired()) {
       // If the registration has expired, drop and notify the worker
       // unconditionally.
-      this._notifySubscriptionChangeObservers(record);
-      return false;
+      subscriptionChanges.push(record);
+      cursor.delete();
+      return;
     }
     record.resetQuota();
-    return record;
+    cursor.update(record);
   },
 };

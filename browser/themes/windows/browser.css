@@ -656,19 +656,11 @@ menuitem.bookmark-item {
   #loop-button {
     list-style-image: url(chrome://browser/skin/loop/toolbar-lunaSilver.png)
   }
-
-  #PanelUI-menu-button.thumburger {
-    list-style-image: url("chrome://browser/skin/customizableui/thumburger-lunaSilver.png") !important;
-  }
 }
 
 @media (-moz-windows-theme: luna-silver) and (min-resolution: 1.1dppx) {
   #loop-button {
     list-style-image: url(chrome://browser/skin/loop/toolbar-lunaSilver@2x.png)
-  }
-
-  #PanelUI-menu-button.thumburger {
-    list-style-image: url("chrome://browser/skin/customizableui/thumburger-lunaSilver@2x.png") !important;
   }
 }
 
@@ -1537,7 +1529,7 @@ richlistitem[type~="action"][actiontype="searchengine"] > .ac-title-box > .ac-si
   }
 }
 
-richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-icon {
+richlistitem[type~="action"][actiontype$="tab"] > .ac-url-box > .ac-action-icon {
   list-style-image: url("chrome://browser/skin/actionicon-tab.png");
   -moz-image-region: rect(0, 16px, 11px, 0);
   padding: 0 3px;
@@ -1546,7 +1538,7 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 }
 
 @media (min-resolution: 1.1dppx) {
-  richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-icon {
+  richlistitem[type~="action"][actiontype$="tab"] > .ac-url-box > .ac-action-icon {
     list-style-image: url("chrome://browser/skin/actionicon-tab@2x.png");
     -moz-image-region: rect(0, 32px, 22px, 0);
   }
@@ -1556,12 +1548,12 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
        not all and (-moz-windows-default-theme) {
   @media not all and (-moz-os-version: windows-win7),
          not all and (-moz-windows-default-theme) {
-    richlistitem[type~="action"][actiontype="switchtab"][selected="true"] > .ac-url-box > .ac-action-icon {
+    richlistitem[type~="action"][actiontype$="tab"][selected="true"] > .ac-url-box > .ac-action-icon {
       -moz-image-region: rect(11px, 16px, 22px, 0);
     }
 
     @media (min-resolution: 1.1dppx) {
-      richlistitem[type~="action"][actiontype="switchtab"][selected="true"] > .ac-url-box > .ac-action-icon {
+      richlistitem[type~="action"][actiontype$="tab"][selected="true"] > .ac-url-box > .ac-action-icon {
         -moz-image-region: rect(22px, 32px, 44px, 0);
       }
     }
@@ -2063,30 +2055,13 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 
 .tabbrowser-arrowscrollbox > .scrollbutton-up,
 .tabbrowser-arrowscrollbox > .scrollbutton-down {
-  list-style-image: url("chrome://browser/skin/tabbrowser/tab-arrow-left.png");
+  list-style-image: url("chrome://browser/skin/tabbrowser/tab-arrow-left.svg");
   margin: 0 0 var(--tab-toolbar-navbar-overlap);
 }
 
 #TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-arrowscrollbox > .scrollbutton-up,
 #TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-arrowscrollbox > .scrollbutton-down {
-  list-style-image: url(chrome://browser/skin/tabbrowser/tab-arrow-left-inverted.png);
-}
-
-@media (min-resolution: 1.1dppx) {
-  .tabbrowser-arrowscrollbox > .scrollbutton-up,
-  .tabbrowser-arrowscrollbox > .scrollbutton-down {
-    list-style-image: url("chrome://browser/skin/tabbrowser/tab-arrow-left@2x.png");
-  }
-
-  .tabbrowser-arrowscrollbox > .scrollbutton-up > .toolbarbutton-icon,
-  .tabbrowser-arrowscrollbox > .scrollbutton-down > .toolbarbutton-icon {
-    width: 15px;
-  }
-
-  #TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-arrowscrollbox > .scrollbutton-up,
-  #TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-arrowscrollbox > .scrollbutton-down {
-    list-style-image: url(chrome://browser/skin/tabbrowser/tab-arrow-left-inverted@2x.png);
-  }
+  list-style-image: url(chrome://browser/skin/tabbrowser/tab-arrow-left-inverted.svg);
 }
 
 .tabbrowser-arrowscrollbox > .scrollbutton-up[disabled],
@@ -2116,34 +2091,20 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 .tabs-newtab-button,
 #TabsToolbar > #new-tab-button,
 #TabsToolbar > toolbarpaletteitem > #new-tab-button {
-  list-style-image: url(chrome://browser/skin/tabbrowser/newtab.png);
+  list-style-image: url(chrome://browser/skin/tabbrowser/newtab.svg);
   -moz-image-region: auto;
 }
 
 #TabsToolbar[brighttext] .tabs-newtab-button,
 #TabsToolbar[brighttext] > #new-tab-button,
 #TabsToolbar[brighttext] > toolbarpaletteitem > #new-tab-button {
-  list-style-image: url(chrome://browser/skin/tabbrowser/newtab-inverted.png);
+  list-style-image: url(chrome://browser/skin/tabbrowser/newtab-inverted.svg);
 }
 
 .tabs-newtab-button > .toolbarbutton-icon,
 #TabsToolbar > #new-tab-button > .toolbarbutton-icon,
 #TabsToolbar > toolbarpaletteitem > #new-tab-button > .toolbarbutton-icon {
   width: 16px;
-}
-
-@media (min-resolution: 1.1dppx) {
-  .tabs-newtab-button,
-  #TabsToolbar > #new-tab-button,
-  #TabsToolbar > toolbarpaletteitem > #new-tab-button {
-    list-style-image: url(chrome://browser/skin/tabbrowser/newtab@2x.png);
-  }
-
-  #TabsToolbar[brighttext] .tabs-newtab-button,
-  #TabsToolbar[brighttext] > #new-tab-button,
-  #TabsToolbar[brighttext] > toolbarpaletteitem > #new-tab-button {
-    list-style-image: url(chrome://browser/skin/tabbrowser/newtab-inverted@2x.png);
-  }
 }
 
 #TabsToolbar > #new-tab-button {

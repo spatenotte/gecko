@@ -117,6 +117,9 @@ enum BailoutKind
     // Derived constructors must return object or undefined
     Bailout_BadDerivedConstructorReturn,
 
+    // We hit this code for the first time.
+    Bailout_FirstExecution,
+
     // END Normal bailouts
 
     // Bailouts caused by invalid assumptions based on Baseline code.
@@ -218,6 +221,8 @@ BailoutKindString(BailoutKind kind)
         return "Bailout_UninitializedThis";
       case Bailout_BadDerivedConstructorReturn:
         return "Bailout_BadDerivedConstructorReturn";
+      case Bailout_FirstExecution:
+        return "Bailout_FirstExecution";
 
       // Bailouts caused by invalid assumptions.
       case Bailout_OverflowInvalidate:
@@ -639,8 +644,10 @@ ScalarTypeToLength(Scalar::Type type)
     MOZ_CRASH("unexpected SIMD kind");
 }
 
+// Get the type of the individual lanes in a SIMD type.
+// For example, Int32x4 -> Int32, FLoat32x4 -> Float32 etc.
 static inline MIRType
-SimdTypeToScalarType(MIRType type)
+SimdTypeToLaneType(MIRType type)
 {
     MOZ_ASSERT(IsSimdType(type));
     static_assert(MIRType_Last <= ELEMENT_TYPE_MASK,

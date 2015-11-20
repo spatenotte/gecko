@@ -251,18 +251,21 @@ nsCSSOffsetState::ComputeISizeValue(nscoord aContainingBlockISize,
 
 nscoord
 nsCSSOffsetState::ComputeISizeValue(nscoord aContainingBlockISize,
-                                    uint8_t aBoxSizing,
+                                    StyleBoxSizing aBoxSizing,
                                     const nsStyleCoord& aCoord)
 {
   WritingMode wm = GetWritingMode();
   nscoord inside = 0, outside = ComputedLogicalBorderPadding().IStartEnd(wm) +
                                 ComputedLogicalMargin().IStartEnd(wm);
   switch (aBoxSizing) {
-    case NS_STYLE_BOX_SIZING_BORDER:
+    case StyleBoxSizing::Border:
       inside = ComputedLogicalBorderPadding().IStartEnd(wm);
       break;
-    case NS_STYLE_BOX_SIZING_PADDING:
+    case StyleBoxSizing::Padding:
       inside = ComputedLogicalPadding().IStartEnd(wm);
+      break;
+    case StyleBoxSizing::Content:
+      // nothing
       break;
   }
   outside -= inside;
@@ -273,17 +276,20 @@ nsCSSOffsetState::ComputeISizeValue(nscoord aContainingBlockISize,
 
 nscoord
 nsCSSOffsetState::ComputeBSizeValue(nscoord aContainingBlockBSize,
-                                    uint8_t aBoxSizing,
+                                    StyleBoxSizing aBoxSizing,
                                     const nsStyleCoord& aCoord)
 {
   WritingMode wm = GetWritingMode();
   nscoord inside = 0;
   switch (aBoxSizing) {
-    case NS_STYLE_BOX_SIZING_BORDER:
+    case StyleBoxSizing::Border:
       inside = ComputedLogicalBorderPadding().BStartEnd(wm);
       break;
-    case NS_STYLE_BOX_SIZING_PADDING:
+    case StyleBoxSizing::Padding:
       inside = ComputedLogicalPadding().BStartEnd(wm);
+      break;
+    case StyleBoxSizing::Content:
+      // nothing
       break;
   }
   return nsLayoutUtils::ComputeBSizeValue(aContainingBlockBSize,
@@ -1133,11 +1139,15 @@ nsHTMLReflowState::CalculateBorderPaddingMargin(
   nscoord outside = paddingStartEnd + borderStartEnd + marginStartEnd;
   nscoord inside = 0;
   switch (mStylePosition->mBoxSizing) {
-    case NS_STYLE_BOX_SIZING_BORDER:
+    case StyleBoxSizing::Border:
       inside += borderStartEnd;
       // fall through
-    case NS_STYLE_BOX_SIZING_PADDING:
+    case StyleBoxSizing::Padding:
       inside += paddingStartEnd;
+      // fall through
+    case StyleBoxSizing::Content:
+      // nothing
+      break;
   }
   outside -= inside;
   *aInsideBoxSizing = inside;
@@ -1456,8 +1466,8 @@ nsHTMLReflowState::CalculateHypotheticalPosition
       // We need to compute it. It's important we do this, because if it's
       // percentage-based this computed value may be different from the
       // computed value calculated using the absolute containing block height.
-      boxBSize = ComputeBSizeValue(blockContentSize.BSize(wm),
-                                   insideBoxSizing, styleBSize) +
+      boxBSize = nsLayoutUtils::ComputeBSizeValue(blockContentSize.BSize(wm),
+                                                  insideBoxSizing, styleBSize) +
                  insideBoxSizing + outsideBoxSizing;
     }
 
@@ -2309,6 +2319,15 @@ nsHTMLReflowState::InitConstraints(nsPresContext*     aPresContext,
         MOZ_ASSERT(!mFlags.mIsFlexContainerMeasuringHeight,
                    "We're not in a flex container, so the flag "
                    "'mIsFlexContainerMeasuringHeight' shouldn't be set");
+
+        if (parentFrameType == nsGkAtoms::gridContainerFrame) {
+          auto justifySelf = mStylePosition->ComputedJustifySelf(mStyleDisplay,
+                               frame->StyleContext()->GetParent());
+          if (justifySelf != NS_STYLE_JUSTIFY_STRETCH) {
+            computeSizeFlags =
+              ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eShrinkWrap);
+          }
+        }
       }
 
       if (cbSize.ISize(wm) == NS_UNCONSTRAINEDSIZE) {

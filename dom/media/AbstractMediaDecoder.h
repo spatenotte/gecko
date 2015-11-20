@@ -10,6 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/StateMirroring.h"
 
+#include "MediaEventSource.h"
 #include "MediaInfo.h"
 #include "nsISupports.h"
 #include "nsDataHashtable.h"
@@ -68,6 +69,15 @@ public:
 
   virtual AbstractCanonical<media::NullableTimeUnit>* CanonicalDurationOrNull() { return nullptr; };
 
+  // Return an event that will be notified when data arrives in MediaResource.
+  // MediaDecoderReader will register with this event to receive notifications
+  // in order to udpate buffer ranges.
+  // Return null if this decoder doesn't support the event.
+  virtual MediaEventSource<void>* DataArrivedEvent()
+  {
+    return nullptr;
+  }
+
 protected:
   virtual void UpdateEstimatedMediaDuration(int64_t aDuration) {};
 public:
@@ -111,7 +121,7 @@ public:
 
   // Called by the reader's MediaResource as data arrives over the network.
   // Must be called on the main thread.
-  virtual void NotifyDataArrived(bool aThrottleUpdates) = 0;
+  virtual void NotifyDataArrived() = 0;
 
   // Set by Reader if the current audio track can be offloaded
   virtual void SetPlatformCanOffloadAudio(bool aCanOffloadAudio) {}

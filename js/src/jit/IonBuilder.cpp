@@ -161,6 +161,7 @@ IonBuilder::IonBuilder(JSContext* analysisContext, CompileCompartment* comp,
     maybeFallbackFunctionGetter_(nullptr)
 {
     script_ = info->script();
+    scriptHasIonScript_ = script_->hasIonScript();
     pc = info->startPC();
     abortReason_ = AbortReason_Disable;
 
@@ -733,12 +734,9 @@ IonBuilder::analyzeNewLoopTypes(MBasicBlock* entry, jsbytecode* start, jsbytecod
 bool
 IonBuilder::pushLoop(CFGState::State initial, jsbytecode* stopAt, MBasicBlock* entry, bool osr,
                      jsbytecode* loopHead, jsbytecode* initialPc,
-                     jsbytecode* bodyStart, jsbytecode* bodyEnd, jsbytecode* exitpc,
-                     jsbytecode* continuepc)
+                     jsbytecode* bodyStart, jsbytecode* bodyEnd,
+                     jsbytecode* exitpc, jsbytecode* continuepc)
 {
-    if (!continuepc)
-        continuepc = entry->pc();
-
     ControlFlowInfo loop(cfgStack_.length(), continuepc);
     if (!loops_.append(loop))
         return false;
@@ -1841,6 +1839,7 @@ IonBuilder::inspectOpcode(JSOp op)
         return jsop_newobject();
 
       case JSOP_INITELEM:
+      case JSOP_INITHIDDENELEM:
         return jsop_initelem();
 
       case JSOP_INITELEM_ARRAY:
@@ -1860,13 +1859,17 @@ IonBuilder::inspectOpcode(JSOp op)
       }
 
       case JSOP_INITPROP_GETTER:
-      case JSOP_INITPROP_SETTER: {
+      case JSOP_INITHIDDENPROP_GETTER:
+      case JSOP_INITPROP_SETTER:
+      case JSOP_INITHIDDENPROP_SETTER: {
         PropertyName* name = info().getAtom(pc)->asPropertyName();
         return jsop_initprop_getter_setter(name);
       }
 
       case JSOP_INITELEM_GETTER:
+      case JSOP_INITHIDDENELEM_GETTER:
       case JSOP_INITELEM_SETTER:
+      case JSOP_INITHIDDENELEM_SETTER:
         return jsop_initelem_getter_setter();
 
       case JSOP_FUNCALL:
@@ -1920,6 +1923,12 @@ IonBuilder::inspectOpcode(JSOp op)
       {
         PropertyName* name = info().getAtom(pc)->asPropertyName();
         return jsop_intrinsic(name);
+      }
+
+      case JSOP_GETIMPORT:
+      {
+        PropertyName* name = info().getAtom(pc)->asPropertyName();
+        return jsop_getimport(name);
       }
 
       case JSOP_BINDGNAME:
@@ -3133,7 +3142,7 @@ IonBuilder::doWhileLoop(JSOp op, jssrcnote* sn)
     bool osr = info().hasOsrAt(loopEntry);
 
     if (osr) {
-        MBasicBlock* preheader = newOsrPreheader(current, loopEntry);
+        MBasicBlock* preheader = newOsrPreheader(current, loopEntry, pc);
         if (!preheader)
             return ControlStatus_Error;
         current->end(MGoto::New(alloc(), preheader));
@@ -3142,7 +3151,7 @@ IonBuilder::doWhileLoop(JSOp op, jssrcnote* sn)
     }
 
     unsigned stackPhiCount = 0;
-    MBasicBlock* header = newPendingLoopHeader(current, pc, osr, canOsr, stackPhiCount);
+    MBasicBlock* header = newPendingLoopHeader(current, loopEntry, osr, canOsr, stackPhiCount);
     if (!header)
         return ControlStatus_Error;
     current->end(MGoto::New(alloc(), header));
@@ -3198,7 +3207,7 @@ IonBuilder::whileOrForInLoop(jssrcnote* sn)
     bool osr = info().hasOsrAt(loopEntry);
 
     if (osr) {
-        MBasicBlock* preheader = newOsrPreheader(current, loopEntry);
+        MBasicBlock* preheader = newOsrPreheader(current, loopEntry, pc);
         if (!preheader)
             return ControlStatus_Error;
         current->end(MGoto::New(alloc(), preheader));
@@ -3214,7 +3223,7 @@ IonBuilder::whileOrForInLoop(jssrcnote* sn)
     else
         stackPhiCount = 0;
 
-    MBasicBlock* header = newPendingLoopHeader(current, pc, osr, canOsr, stackPhiCount);
+    MBasicBlock* header = newPendingLoopHeader(current, loopEntry, osr, canOsr, stackPhiCount);
     if (!header)
         return ControlStatus_Error;
     current->end(MGoto::New(alloc(), header));
@@ -3224,10 +3233,11 @@ IonBuilder::whileOrForInLoop(jssrcnote* sn)
     jsbytecode* bodyStart = GetNextPc(loopHead);
     jsbytecode* bodyEnd = pc + GetJumpOffset(pc);
     jsbytecode* exitpc = GetNextPc(ifne);
+    jsbytecode* continuepc = pc;
     if (!analyzeNewLoopTypes(header, bodyStart, exitpc))
         return ControlStatus_Error;
     if (!pushLoop(CFGState::WHILE_LOOP_COND, ifne, header, osr,
-                  loopHead, bodyEnd, bodyStart, bodyEnd, exitpc))
+                  loopHead, bodyEnd, bodyStart, bodyEnd, exitpc, continuepc))
     {
         return ControlStatus_Error;
     }
@@ -3299,7 +3309,7 @@ IonBuilder::forLoop(JSOp op, jssrcnote* sn)
     bool canOsr = LoopEntryCanIonOsr(loopEntry);
 
     if (osr) {
-        MBasicBlock* preheader = newOsrPreheader(current, loopEntry);
+        MBasicBlock* preheader = newOsrPreheader(current, loopEntry, pc);
         if (!preheader)
             return ControlStatus_Error;
         current->end(MGoto::New(alloc(), preheader));
@@ -3308,7 +3318,7 @@ IonBuilder::forLoop(JSOp op, jssrcnote* sn)
     }
 
     unsigned stackPhiCount = 0;
-    MBasicBlock* header = newPendingLoopHeader(current, pc, osr, canOsr, stackPhiCount);
+    MBasicBlock* header = newPendingLoopHeader(current, loopEntry, osr, canOsr, stackPhiCount);
     if (!header)
         return ControlStatus_Error;
     current->end(MGoto::New(alloc(), header));
@@ -7280,6 +7290,8 @@ IonBuilder::addBlock(MBasicBlock* block, uint32_t loopDepth)
 {
     if (!block)
         return nullptr;
+    if (block->pc() && script()->hasScriptCounts())
+        block->setHitCount(script()->getHitCount(block->pc()));
     graph().addBlock(block);
     block->setLoopDepth(loopDepth);
     return block;
@@ -7316,6 +7328,7 @@ IonBuilder::newBlockAfter(MBasicBlock* at, MBasicBlock* predecessor, jsbytecode*
                                           bytecodeSite(pc), MBasicBlock::NORMAL);
     if (!block)
         return nullptr;
+    block->setHitCount(0); // osr block
     graph().insertBlockAfter(at, block);
     return block;
 }
@@ -7329,7 +7342,7 @@ IonBuilder::newBlock(MBasicBlock* predecessor, jsbytecode* pc, uint32_t loopDept
 }
 
 MBasicBlock*
-IonBuilder::newOsrPreheader(MBasicBlock* predecessor, jsbytecode* loopEntry)
+IonBuilder::newOsrPreheader(MBasicBlock* predecessor, jsbytecode* loopEntry, jsbytecode* beforeLoopEntry)
 {
     MOZ_ASSERT(LoopEntryCanIonOsr(loopEntry));
     MOZ_ASSERT(loopEntry == info().osrPc());
@@ -7341,6 +7354,10 @@ IonBuilder::newOsrPreheader(MBasicBlock* predecessor, jsbytecode* loopEntry)
     MBasicBlock* preheader = newBlock(predecessor, loopEntry);
     if (!osrBlock || !preheader)
         return nullptr;
+
+    // Give the pre-header the same hit count as the code before the loop.
+    if (script()->hasScriptCounts())
+        preheader->setHitCount(script()->getHitCount(beforeLoopEntry));
 
     MOsrEntry* entry = MOsrEntry::New(alloc());
     osrBlock->add(entry);
@@ -8022,7 +8039,7 @@ IonBuilder::getStaticName(JSObject* staticObject, PropertyName* name, bool* psuc
                            staticObject->as<ClonedBlockObject>().isGlobal();
     MOZ_ASSERT(isGlobalLexical ||
                staticObject->is<GlobalObject>() ||
-               staticObject->is<CallObject>());
+               staticObject->is<LexicalScopeBase>());
     MOZ_ASSERT(staticObject->isSingleton());
 
     *psucceeded = true;
@@ -8300,6 +8317,34 @@ IonBuilder::jsop_intrinsic(PropertyName* name)
     MOZ_ASSERT(types->hasType(TypeSet::GetValueType(vp)));
 
     pushConstant(vp);
+    return true;
+}
+
+bool
+IonBuilder::jsop_getimport(PropertyName* name)
+{
+    ModuleEnvironmentObject* env = GetModuleEnvironmentForScript(script());
+    MOZ_ASSERT(env);
+
+    Shape* shape;
+    ModuleEnvironmentObject* targetEnv;
+    MOZ_ALWAYS_TRUE(env->lookupImport(NameToId(name), &targetEnv, &shape));
+
+    PropertyName* localName = JSID_TO_STRING(shape->propid())->asAtom().asPropertyName();
+    bool emitted = false;
+    if (!getStaticName(targetEnv, localName, &emitted))
+        return false;
+
+    MOZ_ASSERT(emitted);
+
+    // In the rare case where this import hasn't been initialized already (we
+    // have an import cycle where modules reference each other's imports), emit
+    // a check.
+    if (targetEnv->getSlot(shape->slot()).isMagic(JS_UNINITIALIZED_LEXICAL)) {
+        MDefinition* checked = addLexicalCheck(current->pop());
+        current->push(checked);
+    }
+
     return true;
 }
 
@@ -9818,17 +9863,11 @@ IonBuilder::setElemTryCache(bool* emitted, MDefinition* object,
 
     bool barrier = true;
 
-    if (index->mightBeType(MIRType_Int32)) {
-        // Bail if we might have a barriered write to a dense element, as the
-        // dense element stub doesn't support this yet.
-        if (PropertyWriteNeedsTypeBarrier(alloc(), constraints(), current,
-                                          &object, nullptr, &value, /* canModify = */ true))
-        {
-            trackOptimizationOutcome(TrackedOutcome::NeedsTypeBarrier);
-            return true;
-        }
-        if (index->type() == MIRType_Int32)
-            barrier = false;
+    if (index->type() == MIRType_Int32 &&
+        !PropertyWriteNeedsTypeBarrier(alloc(), constraints(), current,
+                                       &object, nullptr, &value, /* canModify = */ true))
+    {
+        barrier = false;
     }
 
     // We can avoid worrying about holes in the IC if we know a priori we are safe
@@ -9845,7 +9884,7 @@ IonBuilder::setElemTryCache(bool* emitted, MDefinition* object,
     if (NeedsPostBarrier(info(), value))
         current->add(MPostWriteBarrier::New(alloc(), object, value));
 
-    // Emit SetElementCache.
+    // Emit SetPropertyCache.
     bool strict = JSOp(*pc) == JSOP_STRICTSETELEM;
     MSetPropertyCache* ins =
         MSetPropertyCache::New(alloc(), object, index, value, strict, barrier, guardHoles);
@@ -10877,6 +10916,11 @@ IonBuilder::jsop_getprop(PropertyName* name)
     if (!getPropTryCache(&emitted, obj, name, barrier, types) || emitted)
         return emitted;
 
+    // Try to emit a shared stub.
+    trackOptimizationAttempt(TrackedStrategy::GetProp_SharedCache);
+    if (!getPropTrySharedStub(&emitted, obj) || emitted)
+        return emitted;
+
     // Emit a call.
     MCallGetProperty* call = MCallGetProperty::New(alloc(), obj, name);
     current->add(call);
@@ -11823,6 +11867,27 @@ IonBuilder::getPropTryCache(bool* emitted, MDefinition* obj, PropertyName* name,
         return false;
 
     trackOptimizationSuccess();
+    *emitted = true;
+    return true;
+}
+
+bool
+IonBuilder::getPropTrySharedStub(bool* emitted, MDefinition* obj)
+{
+    MOZ_ASSERT(*emitted == false);
+
+    // Try to emit a shared stub cache.
+
+    if (js_JitOptions.disableSharedStubs)
+        return true;
+
+    MInstruction* stub = MUnarySharedStub::New(alloc(), obj);
+    current->add(stub);
+    current->push(stub);
+
+    if (!resumeAfter(stub))
+        return false;
+
     *emitted = true;
     return true;
 }
@@ -13839,7 +13904,9 @@ IonBuilder::getCallee()
 MDefinition*
 IonBuilder::addLexicalCheck(MDefinition* input)
 {
-    MOZ_ASSERT(JSOp(*pc) == JSOP_CHECKLEXICAL || JSOp(*pc) == JSOP_CHECKALIASEDLEXICAL);
+    MOZ_ASSERT(JSOp(*pc) == JSOP_CHECKLEXICAL ||
+               JSOp(*pc) == JSOP_CHECKALIASEDLEXICAL ||
+               JSOp(*pc) == JSOP_GETIMPORT);
 
     MInstruction* lexicalCheck;
 

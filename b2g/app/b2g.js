@@ -344,19 +344,15 @@ pref("image.mem.surfacecache.size_factor", 8);  // 1/8 of main memory
 pref("image.mem.surfacecache.discard_factor", 2);  // Discard 1/2 of the surface cache at a time.
 pref("image.mem.surfacecache.min_expiration_ms", 86400000); // 24h, we rely on the out of memory hook
 
-// XXX this isn't a good check for "are touch events supported", but
-// we don't really have a better one at the moment.
-// enable touch events interfaces
-pref("dom.w3c_touch_events.enabled", 1);
 pref("dom.w3c_touch_events.safetyX", 0); // escape borders in units of 1/240"
 pref("dom.w3c_touch_events.safetyY", 120); // escape borders in units of 1/240"
 
 #ifdef MOZ_SAFE_BROWSING
-pref("browser.safebrowsing.enabled", false);
+pref("browser.safebrowsing.enabled", true);
 // Prevent loading of pages identified as malware
-pref("browser.safebrowsing.malware.enabled", false);
-pref("browser.safebrowsing.downloads.enabled", false);
-pref("browser.safebrowsing.downloads.remote.enabled", false);
+pref("browser.safebrowsing.malware.enabled", true);
+pref("browser.safebrowsing.downloads.enabled", true);
+pref("browser.safebrowsing.downloads.remote.enabled", true);
 pref("browser.safebrowsing.downloads.remote.timeout_ms", 10000);
 pref("browser.safebrowsing.debug", false);
 
@@ -388,7 +384,7 @@ pref("urlclassifier.max-complete-age", 2700);
 
 // Tracking protection
 pref("privacy.trackingprotection.enabled", false);
-pref("privacy.trackingprotection.pbmode.enabled", false);
+pref("privacy.trackingprotection.pbmode.enabled", true);
 
 #endif
 
@@ -531,6 +527,9 @@ pref("layout.frame_rate.precise", true);
 
 // Handle hardware buttons in the b2g chrome package
 pref("b2g.keys.menu.enabled", true);
+
+// Display simulator software buttons
+pref("b2g.software-buttons", false);
 
 // Screen timeout in seconds
 pref("power.screen.timeout", 60);
@@ -1015,7 +1014,6 @@ pref("apz.allow_zooming", true);
 
 // Gaia relies heavily on scroll events for now, so lets fire them
 // more often than the default value (100).
-pref("apz.asyncscroll.throttle", 40);
 pref("apz.pan_repaint_interval", 16);
 
 // APZ physics settings, tuned by UX designers

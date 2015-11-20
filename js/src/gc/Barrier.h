@@ -482,7 +482,9 @@ class RelocatablePtr : public WriteBarrieredBase<T>
 {
   public:
     RelocatablePtr() : WriteBarrieredBase<T>(GCMethods<T>::initial()) {}
-    explicit RelocatablePtr(T v) : WriteBarrieredBase<T>(v) {
+
+    // Implicitly adding barriers is a reasonable default.
+    MOZ_IMPLICIT RelocatablePtr(const T& v) : WriteBarrieredBase<T>(v) {
         this->post(GCMethods<T>::initial(), this->value);
     }
 
@@ -560,14 +562,18 @@ class ReadBarriered : public ReadBarrieredBase<T>
   public:
     ReadBarriered() : ReadBarrieredBase<T>(GCMethods<T>::initial()) {}
 
+    // It is okay to add barriers implicitly.
     MOZ_IMPLICIT ReadBarriered(const T& v) : ReadBarrieredBase<T>(v) {
         this->post(GCMethods<T>::initial(), v);
     }
 
+    // Copy is creating a new edge, so we must read barrier the source edge.
     explicit ReadBarriered(const ReadBarriered& v) : ReadBarrieredBase<T>(v) {
         this->post(GCMethods<T>::initial(), v.get());
     }
 
+    // Move retains the lifetime status of the source edge, so does not fire
+    // the read barrier of the defunct edge.
     ReadBarriered(ReadBarriered&& v)
       : ReadBarrieredBase<T>(mozilla::Forward<ReadBarriered<T>>(v))
     {
@@ -604,6 +610,7 @@ class ReadBarriered : public ReadBarrieredBase<T>
 
     const T operator->() const { return get(); }
 
+    T* unsafeGet() { return &this->value; }
     T const* unsafeGet() const { return &this->value; }
 
     void set(const T& v)
@@ -777,26 +784,39 @@ class ImmutableTenuredPtr
     const T* address() { return &value; }
 };
 
-// Provide hash codes for Cell kinds that may be relocated and, thus, not have
-// a stable address to use as the base for a hash code. Instead of the address,
-// this hasher uses Cell::getUniqueId to provide exact matches and as a base
-// for generating hash codes.
-//
-// Note: this hasher, like PointerHasher can "hash" a nullptr. While a nullptr
-// would not likely be a useful key, there are some cases where being able to
-// hash a nullptr is useful, either on purpose or because of bugs:
-// (1) existence checks where the key may happen to be null and (2) some
-// aggregate Lookup kinds embed a JSObject* that is frequently null and do not
-// null test before dispatching to the hasher.
 template <typename T>
-struct MovableCellHasher
+struct MovableCellHasher<PreBarriered<T>>
 {
-    using Key = T;
+    using Key = PreBarriered<T>;
     using Lookup = T;
 
-    static HashNumber hash(const Lookup& l);
-    static bool match(const Key& k, const Lookup& l);
-    static void rekey(Key& k, const Key& newKey) { k = newKey; }
+    static HashNumber hash(const Lookup& l) { return MovableCellHasher<T>::hash(l); }
+    static bool match(const Key& k, const Lookup& l) { return MovableCellHasher<T>::match(k, l); }
+    static void rekey(Key& k, const Key& newKey) { k.unsafeSet(newKey); }
+};
+
+template <typename T>
+struct MovableCellHasher<RelocatablePtr<T>>
+{
+    using Key = RelocatablePtr<T>;
+    using Lookup = T;
+
+    static HashNumber hash(const Lookup& l) { return MovableCellHasher<T>::hash(l); }
+    static bool match(const Key& k, const Lookup& l) { return MovableCellHasher<T>::match(k, l); }
+    static void rekey(Key& k, const Key& newKey) { k.unsafeSet(newKey); }
+};
+
+template <typename T>
+struct MovableCellHasher<ReadBarriered<T>>
+{
+    using Key = ReadBarriered<T>;
+    using Lookup = T;
+
+    static HashNumber hash(const Lookup& l) { return MovableCellHasher<T>::hash(l); }
+    static bool match(const Key& k, const Lookup& l) {
+        return MovableCellHasher<T>::match(k.unbarrieredGet(), l);
+    }
+    static void rekey(Key& k, const Key& newKey) { k.unsafeSet(newKey); }
 };
 
 /* Useful for hashtables with a HeapPtr as key. */

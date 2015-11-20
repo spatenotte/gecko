@@ -5,6 +5,7 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.GeckoProfileDirectories.NoMozillaDirectoryException;
 import org.mozilla.gecko.db.BrowserDB;
@@ -73,6 +74,7 @@ import android.os.Process;
 import android.os.StrictMode;
 import android.provider.ContactsContract;
 import android.provider.MediaStore.Images.Media;
+import android.support.annotation.Nullable;
 import android.support.design.widget.Snackbar;
 import android.support.v4.content.ContextCompat;
 import android.text.TextUtils;
@@ -169,6 +171,8 @@ public abstract class GeckoApp
     // Delay before running one-time "cleanup" tasks that may be needed
     // after a version upgrade.
     private static final int CLEANUP_DEFERRAL_SECONDS = 15;
+
+    private static boolean sAlreadyLoaded;
 
     protected RelativeLayout mRootLayout;
     protected RelativeLayout mMainLayout;
@@ -655,10 +659,12 @@ public abstract class GeckoApp
 
             NativeJSObject action = message.optObject("action", null);
 
+            final SnackbarEventCallback snackbarCallback = new SnackbarEventCallback(callback);
+
             showSnackbar(msg,
                     duration,
                     action != null ? action.optString("label", null) : null,
-                    callback);
+                    snackbarCallback);
         } else if ("SystemUI:Visibility".equals(event)) {
             setSystemUiVisible(message.getBoolean("visible"));
 
@@ -831,15 +837,6 @@ public abstract class GeckoApp
         });
     }
 
-    public void showToast(final int resId, final int duration) {
-        ThreadUtils.postToUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Toast.makeText(GeckoApp.this, resId, duration).show();
-            }
-        });
-    }
-
     public void showNormalToast(final String message, final String duration) {
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
@@ -866,21 +863,29 @@ public abstract class GeckoApp
         return mToast;
     }
 
-    void showSnackbar(final String message, final int duration, final String action, final EventCallback callback) {
+    void showSnackbar(final String message, final int duration, @Nullable final String action,
+                      final @Nullable SnackbarCallback callback) {
         final Snackbar snackbar = Snackbar.make(mRootLayout, message, duration);
 
-        if (!TextUtils.isEmpty(action)) {
-            final SnackbarEventCallback snackbarCallback = new SnackbarEventCallback(callback);
-
-            snackbar.setAction(action, snackbarCallback);
+        if (callback != null && !TextUtils.isEmpty(action)) {
+            snackbar.setAction(action, callback);
             snackbar.setActionTextColor(ContextCompat.getColor(this, R.color.fennec_ui_orange));
-            snackbar.setCallback(snackbarCallback);
+            snackbar.setCallback(callback);
         }
 
         snackbar.show();
     }
 
-    private static class SnackbarEventCallback extends Snackbar.Callback implements View.OnClickListener {
+    /**
+     * Combined interface for handling all callbacks from a snackbar because anonymous classes can only extend one
+     * interface or class.
+     */
+    public static abstract class SnackbarCallback extends Snackbar.Callback implements View.OnClickListener {};
+
+    /**
+     * SnackbarCallback implementation for delegating snackbar events to an EventCallback.
+     */
+    private static class SnackbarEventCallback extends SnackbarCallback {
         private EventCallback callback;
 
         public SnackbarEventCallback(EventCallback callback) {
@@ -1221,7 +1226,7 @@ public abstract class GeckoApp
             enableStrictMode();
         }
 
-        if (!isSupportedSDK()) {
+        if (!isSupportedSystem()) {
             // This build does not support the Android version of the device: Show an error and finish the app.
             super.onCreate(savedInstanceState);
             showSDKVersionError();
@@ -1278,6 +1283,7 @@ public abstract class GeckoApp
         // When that's fixed, `this` can change to
         // `(GeckoApplication) getApplication()` here.
         GeckoAppShell.setContextGetter(this);
+        GeckoAppShell.setApplicationContext(getApplicationContext());
         GeckoAppShell.setGeckoInterface(this);
 
         Tabs.getInstance().attachToContext(this);
@@ -1301,7 +1307,7 @@ public abstract class GeckoApp
             return;
         }
 
-        if (GeckoThread.isLaunched()) {
+        if (sAlreadyLoaded) {
             // This happens when the GeckoApp activity is destroyed by Android
             // without killing the entire application (see Bug 769269).
             mIsRestoringActivity = true;
@@ -1310,6 +1316,7 @@ public abstract class GeckoApp
         } else {
             final String uri = getURIFromIntent(intent);
 
+            sAlreadyLoaded = true;
             GeckoThread.ensureInit(args, action,
                     /* debugging */ ACTION_DEBUG.equals(action));
 
@@ -2142,7 +2149,7 @@ public abstract class GeckoApp
 
     @Override
     public void onDestroy() {
-        if (!isSupportedSDK()) {
+        if (!isSupportedSystem()) {
             // This build does not support the Android version of the device:
             // We did not initialize anything, so skip cleaning up.
             super.onDestroy();
@@ -2251,9 +2258,30 @@ public abstract class GeckoApp
         }
     }
 
-    protected boolean isSupportedSDK() {
-        return Build.VERSION.SDK_INT >= Versions.MIN_SDK_VERSION &&
-               Build.VERSION.SDK_INT <= Versions.MAX_SDK_VERSION;
+    protected boolean isSupportedSystem() {
+        if (Build.VERSION.SDK_INT < Versions.MIN_SDK_VERSION ||
+            Build.VERSION.SDK_INT > Versions.MAX_SDK_VERSION) {
+            return false;
+        }
+
+        // See http://developer.android.com/ndk/guides/abis.html
+        boolean isSystemARM = Build.CPU_ABI != null && Build.CPU_ABI.startsWith("arm");
+        boolean isSystemX86 = Build.CPU_ABI != null && Build.CPU_ABI.startsWith("x86");
+
+        boolean isAppARM = AppConstants.ANDROID_CPU_ARCH.startsWith("arm");
+        boolean isAppX86 = AppConstants.ANDROID_CPU_ARCH.startsWith("x86");
+
+        // Only reject known incompatible ABIs. Better safe than sorry.
+        if ((isSystemX86 && isAppARM) || (isSystemARM && isAppX86)) {
+            return false;
+        }
+
+        if ((isSystemX86 && isAppX86) || (isSystemARM && isAppARM)) {
+            return true;
+        }
+
+        Log.w(LOGTAG, "Unknown app/system ABI combination: " + AppConstants.MOZ_APP_ABI + " / " + Build.CPU_ABI);
+        return true;
     }
 
     public void showSDKVersionError() {

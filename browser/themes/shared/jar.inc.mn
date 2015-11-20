@@ -9,7 +9,6 @@
 
   skin/classic/browser/aboutCertError.css                      (../shared/aboutCertError.css)
   skin/classic/browser/aboutNetError.css                       (../shared/aboutNetError.css)
-  skin/classic/browser/aboutNetError_info.svg                  (../shared/aboutNetError_info.svg)
   skin/classic/browser/aboutNetError_alert.svg                 (../shared/aboutNetError_alert.svg)
 * skin/classic/browser/aboutProviderDirectory.css              (../shared/aboutProviderDirectory.css)
 * skin/classic/browser/aboutSessionRestore.css                 (../shared/aboutSessionRestore.css)
@@ -59,6 +58,7 @@
   skin/classic/browser/heartbeat-icon.svg                      (../shared/heartbeat-icon.svg)
   skin/classic/browser/heartbeat-star-lit.svg                  (../shared/heartbeat-star-lit.svg)
   skin/classic/browser/heartbeat-star-off.svg                  (../shared/heartbeat-star-off.svg)
+  skin/classic/browser/identity-icon.svg                       (../shared/identity-block/identity-icon.svg)
   skin/classic/browser/identity-not-secure.svg                 (../shared/identity-block/identity-not-secure.svg)
   skin/classic/browser/identity-secure.svg                     (../shared/identity-block/identity-secure.svg)
   skin/classic/browser/identity-mixed-active-blocked.svg       (../shared/identity-block/identity-mixed-active-blocked.svg)

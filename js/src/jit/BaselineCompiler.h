@@ -140,6 +140,7 @@ namespace jit {
     _(JSOP_GETNAME)            \
     _(JSOP_BINDNAME)           \
     _(JSOP_DELNAME)            \
+    _(JSOP_GETIMPORT)          \
     _(JSOP_GETINTRINSIC)       \
     _(JSOP_DEFVAR)             \
     _(JSOP_DEFCONST)           \
@@ -208,7 +209,12 @@ namespace jit {
     _(JSOP_SUPERCALL)          \
     _(JSOP_SPREADSUPERCALL)    \
     _(JSOP_THROWSETCONST)      \
-    _(JSOP_THROWSETALIASEDCONST)
+    _(JSOP_THROWSETALIASEDCONST) \
+    _(JSOP_INITHIDDENPROP_GETTER) \
+    _(JSOP_INITHIDDENPROP_SETTER) \
+    _(JSOP_INITHIDDENELEM)     \
+    _(JSOP_INITHIDDENELEM_GETTER) \
+    _(JSOP_INITHIDDENELEM_SETTER)
 
 class BaselineCompiler : public BaselineCompilerSpecific
 {

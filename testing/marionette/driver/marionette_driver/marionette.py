@@ -541,7 +541,8 @@ class Marionette(object):
                  gecko_log=None, homedir=None, baseurl=None, no_window=False, logdir=None,
                  busybox=None, symbols_path=None, timeout=None, socket_timeout=360,
                  device_serial=None, adb_path=None, process_args=None,
-                 adb_host=None, adb_port=None, prefs=None, startup_timeout=None):
+                 adb_host=None, adb_port=None, prefs=None, startup_timeout=None,
+                 workspace=None):
         self.host = host
         self.port = self.local_port = port
         self.bin = bin
@@ -563,6 +564,7 @@ class Marionette(object):
         self.device_serial = device_serial
         self.adb_host = adb_host
         self.adb_port = adb_port
+        self.restart_handlers = []
 
         startup_timeout = startup_timeout or self.DEFAULT_STARTUP_TIMEOUT
 
@@ -590,9 +592,11 @@ class Marionette(object):
                     instance_class = geckoinstance.GeckoInstance
             self.instance = instance_class(host=self.host, port=self.port,
                                            bin=self.bin, profile=self.profile,
-                                           app_args=app_args, symbols_path=symbols_path,
+                                           app_args=app_args,
+                                           symbols_path=symbols_path,
                                            gecko_log=gecko_log, prefs=prefs,
-                                           addons=self.addons)
+                                           addons=self.addons,
+                                           workspace=workspace)
             self.instance.start()
             assert(self.wait_for_port(timeout=startup_timeout)), "Timed out waiting for port!"
 
@@ -1133,6 +1137,11 @@ class Marionette(object):
         assert(self.wait_for_port()), "Timed out waiting for port!"
         self.start_session(session_id=self.session_id)
         self._reset_timeouts()
+
+        # Give consumers who depended on the old session a
+        # chance to re-initialize and/or restore state.
+        for handler in self.restart_handlers:
+            handler()
 
     def absolute_url(self, relative_url):
         '''

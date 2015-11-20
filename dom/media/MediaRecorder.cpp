@@ -31,7 +31,7 @@
 #undef LOG
 #endif
 
-PRLogModuleInfo* gMediaRecorderLog;
+mozilla::LazyLogModule gMediaRecorderLog("MediaRecorder");
 #define LOG(type, msg) MOZ_LOG(gMediaRecorderLog, type, msg)
 
 namespace mozilla {
@@ -776,9 +776,7 @@ MediaRecorder::MediaRecorder(DOMMediaStream& aSourceMediaStream,
   MOZ_ASSERT(aOwnerWindow);
   MOZ_ASSERT(aOwnerWindow->IsInnerWindow());
   mDOMStream = &aSourceMediaStream;
-  if (!gMediaRecorderLog) {
-    gMediaRecorderLog = PR_NewLogModule("MediaRecorder");
-  }
+
   RegisterActivityObserver();
 }
 
@@ -809,9 +807,7 @@ MediaRecorder::MediaRecorder(AudioNode& aSrcAudioNode,
     }
   }
   mAudioNode = &aSrcAudioNode;
-  if (!gMediaRecorderLog) {
-    gMediaRecorderLog = PR_NewLogModule("MediaRecorder");
-  }
+
   RegisterActivityObserver();
 }
 
@@ -1075,13 +1071,7 @@ MediaRecorder::DispatchSimpleEvent(const nsAString & aStr)
   }
 
   RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
-  rv = event->InitEvent(aStr, false, false);
-
-  if (NS_FAILED(rv)) {
-    NS_WARNING("Failed to init the error event!!!");
-    return;
-  }
-
+  event->InitEvent(aStr, false, false);
   event->SetTrusted(true);
 
   rv = DispatchDOMEvent(nullptr, event, nullptr, nullptr);

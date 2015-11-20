@@ -580,6 +580,8 @@ def InterfacePrototypeObjectProtoGetter(descriptor):
             protoGetter = "JS_GetArrayPrototype"
         elif descriptor.interface.getExtendedAttribute("ExceptionClass"):
             protoGetter = "GetErrorPrototype"
+        elif descriptor.interface.isIteratorInterface():
+            protoGetter = "GetIteratorPrototype"
         else:
             protoGetter = "JS_GetObjectPrototype"
         protoHandleGetter = None
@@ -2256,6 +2258,22 @@ class MethodDefiner(PropertyDefiner):
                 "selfHostedName": "ArrayValues",
                 "length": 0,
                 "flags": "JSPROP_ENUMERATE",
+                "condition": MemberCondition(None, None)
+            })
+
+        # Output an @@iterator for generated iterator interfaces.  This should
+        # not be necessary, but
+        # https://bugzilla.mozilla.org/show_bug.cgi?id=1091945 means that
+        # %IteratorPrototype%[@@iterator] is a broken puppy.
+        if (not static and
+            not unforgeable and
+            descriptor.interface.isIteratorInterface()):
+            self.regular.append({
+                "name": "@@iterator",
+                "methodInfo": False,
+                "selfHostedName": "IteratorIdentity",
+                "length": 0,
+                "flags": "0",
                 "condition": MemberCondition(None, None)
             })
 
@@ -15977,7 +15995,7 @@ class CGEventMethod(CGNativeMember):
             self.args.insert(0, Argument("JSContext*", "aCx"))
         if not self.isInit:
             self.args.insert(0, Argument("const GlobalObject&", "aGlobal"))
-        self.args.append(Argument('ErrorResult&', 'aRv'))
+            self.args.append(Argument('ErrorResult&', 'aRv'))
         return constructorForNativeCaller + CGNativeMember.declare(self, cgClass)
 
     def defineInit(self, cgClass):
@@ -15999,19 +16017,13 @@ class CGEventMethod(CGNativeMember):
 
         self.body = fill(
             """
-            nsresult rv = InitEvent(${typeArg}, ${bubblesArg}, ${cancelableArg});
-            if (NS_FAILED(rv)) {
-              aRv.Throw(rv);
-              return;
-            }
+            InitEvent(${typeArg}, ${bubblesArg}, ${cancelableArg});
             ${members}
             """,
             typeArg=self.args[0].name,
             bubblesArg=self.args[1].name,
             cancelableArg=self.args[2].name,
             members=members)
-
-        self.args.append(Argument('ErrorResult&', 'aRv'))
 
         return CGNativeMember.define(self, cgClass)
 

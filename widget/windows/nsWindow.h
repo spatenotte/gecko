@@ -81,7 +81,7 @@ public:
 
   // nsWindowBase
   virtual void InitEvent(mozilla::WidgetGUIEvent& aEvent,
-                         mozilla::LayoutDeviceIntPoint* aPoint = nullptr) override;
+                         LayoutDeviceIntPoint* aPoint = nullptr) override;
   virtual bool DispatchWindowEvent(mozilla::WidgetGUIEvent* aEvent) override;
   virtual bool DispatchKeyboardEvent(mozilla::WidgetKeyboardEvent* aEvent) override;
   virtual bool DispatchWheelEvent(mozilla::WidgetWheelEvent* aEvent) override;
@@ -116,12 +116,12 @@ public:
   NS_IMETHOD              Enable(bool aState);
   virtual bool            IsEnabled() const;
   NS_IMETHOD              SetFocus(bool aRaise);
-  NS_IMETHOD              GetBoundsUntyped(nsIntRect &aRect);
-  NS_IMETHOD              GetScreenBoundsUntyped(nsIntRect &aRect);
-  NS_IMETHOD              GetRestoredBoundsUntyped(nsIntRect &aRect) override;
-  NS_IMETHOD              GetClientBoundsUntyped(nsIntRect &aRect);
-  virtual nsIntPoint      GetClientOffset();
-  void                    SetBackgroundColor(const nscolor &aColor);
+  NS_IMETHOD              GetBounds(LayoutDeviceIntRect& aRect) override;
+  NS_IMETHOD              GetScreenBounds(LayoutDeviceIntRect& aRect) override;
+  NS_IMETHOD              GetRestoredBounds(LayoutDeviceIntRect& aRect) override;
+  NS_IMETHOD              GetClientBounds(LayoutDeviceIntRect& aRect) override;
+  virtual LayoutDeviceIntPoint GetClientOffset() override;
+  void                    SetBackgroundColor(const nscolor& aColor);
   NS_IMETHOD              SetCursor(imgIContainer* aCursor,
                                     uint32_t aHotspotX, uint32_t aHotspotY);
   NS_IMETHOD              SetCursor(nsCursor aCursor);
@@ -142,8 +142,8 @@ public:
   virtual void            FreeNativeData(void * data, uint32_t aDataType);
   NS_IMETHOD              SetTitle(const nsAString& aTitle);
   NS_IMETHOD              SetIcon(const nsAString& aIconSpec);
-  virtual mozilla::LayoutDeviceIntPoint WidgetToScreenOffset();
-  virtual mozilla::LayoutDeviceIntSize ClientToWindowSize(const mozilla::LayoutDeviceIntSize& aClientSize) override;
+  virtual LayoutDeviceIntPoint WidgetToScreenOffset();
+  virtual LayoutDeviceIntSize ClientToWindowSize(const LayoutDeviceIntSize& aClientSize) override;
   NS_IMETHOD              DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
                                         nsEventStatus& aStatus);
   NS_IMETHOD              EnableDragDrop(bool aEnable);
@@ -156,7 +156,7 @@ public:
                                           LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                           bool* aAllowRetaining = nullptr);
-  NS_IMETHOD              OnDefaultButtonLoaded(const nsIntRect &aButtonRect);
+  NS_IMETHOD              OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect) override;
   NS_IMETHOD              OverrideSystemMouseScrollSpeed(double aOriginalDeltaX,
                                                          double aOriginalDeltaY,
                                                          double& aOverriddenDeltaX,
@@ -168,16 +168,16 @@ public:
                                                    const nsAString& aCharacters,
                                                    const nsAString& aUnmodifiedCharacters,
                                                    nsIObserver* aObserver) override;
-  virtual nsresult        SynthesizeNativeMouseEvent(mozilla::LayoutDeviceIntPoint aPoint,
+  virtual nsresult        SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
                                                      uint32_t aNativeMessage,
                                                      uint32_t aModifierFlags,
                                                      nsIObserver* aObserver) override;
 
-  virtual nsresult        SynthesizeNativeMouseMove(mozilla::LayoutDeviceIntPoint aPoint,
+  virtual nsresult        SynthesizeNativeMouseMove(LayoutDeviceIntPoint aPoint,
                                                     nsIObserver* aObserver) override
                           { return SynthesizeNativeMouseEvent(aPoint, MOUSEEVENTF_MOVE, 0, aObserver); }
 
-  virtual nsresult        SynthesizeNativeMouseScrollEvent(mozilla::LayoutDeviceIntPoint aPoint,
+  virtual nsresult        SynthesizeNativeMouseScrollEvent(LayoutDeviceIntPoint aPoint,
                                                            uint32_t aNativeMessage,
                                                            double aDeltaX,
                                                            double aDeltaY,
@@ -188,15 +188,14 @@ public:
   NS_IMETHOD_(void)       SetInputContext(const InputContext& aContext,
                                           const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();
-  NS_IMETHOD              GetToggledKeyState(uint32_t aKeyCode, bool* aLEDState);
 #ifdef MOZ_XUL
   virtual void            SetTransparencyMode(nsTransparencyMode aMode);
   virtual nsTransparencyMode GetTransparencyMode();
   virtual void            UpdateOpaqueRegion(const nsIntRegion& aOpaqueRegion);
 #endif // MOZ_XUL
   virtual nsIMEUpdatePreference GetIMEUpdatePreference();
-  NS_IMETHOD              GetNonClientMargins(nsIntMargin &margins);
-  NS_IMETHOD              SetNonClientMargins(nsIntMargin &margins);
+  NS_IMETHOD              GetNonClientMargins(LayoutDeviceIntMargin& aMargins) override;
+  NS_IMETHOD              SetNonClientMargins(LayoutDeviceIntMargin& aMargins) override;
   void                    SetDrawsInTitlebar(bool aState);
   already_AddRefed<mozilla::gfx::DrawTarget> StartRemoteDrawing() override;
   virtual void            EndRemoteDrawing() override;
@@ -515,11 +514,11 @@ protected:
 
   // Non-client margin settings
   // Pre-calculated outward offset applied to default frames
-  nsIntMargin           mNonClientOffset;
+  LayoutDeviceIntMargin mNonClientOffset;
   // Margins set by the owner
-  nsIntMargin           mNonClientMargins;
+  LayoutDeviceIntMargin mNonClientMargins;
   // Margins we'd like to set once chrome is reshown:
-  nsIntMargin           mFutureMarginsOnceChromeShows;
+  LayoutDeviceIntMargin mFutureMarginsOnceChromeShows;
   // Indicates we need to apply margins once toggling chrome into showing:
   bool                  mFutureMarginsToUse;
 

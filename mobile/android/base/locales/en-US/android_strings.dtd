@@ -142,12 +142,6 @@
      are found. -->
 <!ENTITY overlay_no_synced_devices "No Firefox Account connected devices found">
 
-<!-- Localization note (menu_no_synced_devices): Used in a toast when the user
-     clicks on the button to send a tab to another device and there are no
-     other devices present. This label should briefly inform the user that they
-     need another connected device in order to use the feature. -->
-<!ENTITY menu_no_synced_devices "Send this tab to another connected device">
-
 <!ENTITY pref_category_search3 "Search">
 <!ENTITY pref_category_search_summary "Customize your search providers">
 <!ENTITY pref_category_accessibility "Accessibility">
@@ -433,10 +427,6 @@ size. -->
 <!ENTITY doorhanger_login_select_toast_copy_error "Couldn\'t copy password">
 <!ENTITY doorhanger_login_select_action_text "Select another login">
 <!ENTITY doorhanger_login_select_title "Copy password from">
-
-<!ENTITY pref_titlebar_mode2 "URL bar">
-<!ENTITY pref_titlebar_mode_title "Show page title">
-<!ENTITY pref_titlebar_mode_url "Show page address">
 
 <!-- Localization note (pref_prevent_magnifying_glass): Label for setting that controls
      whether or not the magnifying glass is disabled. -->

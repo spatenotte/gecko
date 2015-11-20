@@ -232,6 +232,80 @@ template void
 MacroAssemblerX86Shared::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const BaseIndex& mem,
                                                        Register value, Register temp, AnyRegister output);
 
+MacroAssemblerX86Shared::Float<>*
+MacroAssemblerX86Shared::getFloat(float f)
+{
+    if (!floatMap_.initialized()) {
+        enoughMemory_ &= floatMap_.init();
+        if (!enoughMemory_)
+            return nullptr;
+    }
+    size_t floatIndex;
+    if (FloatMap::AddPtr p = floatMap_.lookupForAdd(f)) {
+        floatIndex = p->value();
+    } else {
+        floatIndex = floats_.length();
+        enoughMemory_ &= floats_.append(Float<>(f));
+        if (!enoughMemory_)
+            return nullptr;
+        enoughMemory_ &= floatMap_.add(p, f, floatIndex);
+        if (!enoughMemory_)
+            return nullptr;
+    }
+    Float<>& flt = floats_[floatIndex];
+    MOZ_ASSERT(!flt.uses.bound());
+    return &flt;
+}
+
+MacroAssemblerX86Shared::Double<>*
+MacroAssemblerX86Shared::getDouble(double d)
+{
+    if (!doubleMap_.initialized()) {
+        enoughMemory_ &= doubleMap_.init();
+        if (!enoughMemory_)
+            return nullptr;
+    }
+    size_t doubleIndex;
+    if (DoubleMap::AddPtr p = doubleMap_.lookupForAdd(d)) {
+        doubleIndex = p->value();
+    } else {
+        doubleIndex = doubles_.length();
+        enoughMemory_ &= doubles_.append(Double<>(d));
+        if (!enoughMemory_)
+            return nullptr;
+        enoughMemory_ &= doubleMap_.add(p, d, doubleIndex);
+        if (!enoughMemory_)
+            return nullptr;
+    }
+    Double<>& dbl = doubles_[doubleIndex];
+    MOZ_ASSERT(!dbl.uses.bound());
+    return &dbl;
+}
+
+MacroAssemblerX86Shared::SimdData<>*
+MacroAssemblerX86Shared::getSimdData(const SimdConstant& v)
+{
+    if (!simdMap_.initialized()) {
+        enoughMemory_ &= simdMap_.init();
+        if (!enoughMemory_)
+            return nullptr;
+    }
+    size_t index;
+    if (SimdMap::AddPtr p = simdMap_.lookupForAdd(v)) {
+        index = p->value();
+    } else {
+        index = simds_.length();
+        enoughMemory_ &= simds_.append(SimdData<>(v));
+        if (!enoughMemory_)
+            return nullptr;
+        enoughMemory_ &= simdMap_.add(p, v, index);
+        if (!enoughMemory_)
+            return nullptr;
+    }
+    SimdData<>& simd = simds_[index];
+    MOZ_ASSERT(!simd.uses.bound());
+    return &simd;
+}
 
 //{{{ check_macroassembler_style
 // ===============================================================
@@ -336,28 +410,28 @@ void
 MacroAssembler::Push(const Operand op)
 {
     push(op);
-    framePushed_ += sizeof(intptr_t);
+    adjustFrame(sizeof(intptr_t));
 }
 
 void
 MacroAssembler::Push(Register reg)
 {
     push(reg);
-    framePushed_ += sizeof(intptr_t);
+    adjustFrame(sizeof(intptr_t));
 }
 
 void
 MacroAssembler::Push(const Imm32 imm)
 {
     push(imm);
-    framePushed_ += sizeof(intptr_t);
+    adjustFrame(sizeof(intptr_t));
 }
 
 void
 MacroAssembler::Push(const ImmWord imm)
 {
     push(imm);
-    framePushed_ += sizeof(intptr_t);
+    adjustFrame(sizeof(intptr_t));
 }
 
 void
@@ -370,42 +444,42 @@ void
 MacroAssembler::Push(const ImmGCPtr ptr)
 {
     push(ptr);
-    framePushed_ += sizeof(intptr_t);
+    adjustFrame(sizeof(intptr_t));
 }
 
 void
 MacroAssembler::Push(FloatRegister t)
 {
     push(t);
-    framePushed_ += sizeof(double);
+    adjustFrame(sizeof(double));
 }
 
 void
 MacroAssembler::Pop(const Operand op)
 {
     pop(op);
-    framePushed_ -= sizeof(intptr_t);
+    implicitPop(sizeof(intptr_t));
 }
 
 void
 MacroAssembler::Pop(Register reg)
 {
     pop(reg);
-    framePushed_ -= sizeof(intptr_t);
+    implicitPop(sizeof(intptr_t));
 }
 
 void
 MacroAssembler::Pop(FloatRegister reg)
 {
     pop(reg);
-    framePushed_ -= sizeof(double);
+    implicitPop(sizeof(double));
 }
 
 void
 MacroAssembler::Pop(const ValueOperand& val)
 {
     popValue(val);
-    framePushed_ -= sizeof(Value);
+    implicitPop(sizeof(Value));
 }
 
 // ===============================================================

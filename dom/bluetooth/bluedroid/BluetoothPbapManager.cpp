@@ -866,6 +866,7 @@ BluetoothPbapManager::ReplyToAuthChallenge(const nsAString& aPassword)
   // Cancel authentication
   if (aPassword.IsEmpty()) {
     ReplyError(ObexResponseCode::Unauthorized);
+    return;
   }
 
   ReplyToConnect(aPassword);
@@ -975,7 +976,7 @@ BluetoothPbapManager::ReplyToGet(uint16_t aPhonebookSize)
    *   or
    * - Part 2b: [headerId:1][length:2][Body:var]
    */
-  uint8_t* res = new uint8_t[mRemoteMaxPacketLength];
+  auto res = MakeUnique<uint8_t[]>(mRemoteMaxPacketLength);
   uint8_t opcode;
 
   // ---- Part 1: [response code:1][length:2] ---- //
@@ -1062,8 +1063,7 @@ BluetoothPbapManager::ReplyToGet(uint16_t aPhonebookSize)
     }
   }
 
-  SendObexData(res, opcode, index);
-  delete [] res;
+  SendObexData(Move(res), opcode, index);
 
   return true;
 }
@@ -1105,6 +1105,14 @@ BluetoothPbapManager::SendObexData(uint8_t* aData, uint8_t aOpcode, int aSize)
 {
   SetObexPacketInfo(aData, aOpcode, aSize);
   mSocket->SendSocketData(new UnixSocketRawData(aData, aSize));
+}
+
+void
+BluetoothPbapManager::SendObexData(UniquePtr<uint8_t[]> aData, uint8_t aOpcode,
+                                   int aSize)
+{
+  SetObexPacketInfo(aData.get(), aOpcode, aSize);
+  mSocket->SendSocketData(new UnixSocketRawData(Move(aData), aSize));
 }
 
 void

@@ -18,6 +18,7 @@
 #include "CrashReporterChild.h"
 #include "GeckoProfiler.h"
 #include "TabChild.h"
+#include "HandlerServiceChild.h"
 
 #include "mozilla/Attributes.h"
 #include "mozilla/LookAndFeel.h"
@@ -1894,6 +1895,20 @@ ContentChild::DeallocPExternalHelperAppChild(PExternalHelperAppChild* aService)
     return true;
 }
 
+PHandlerServiceChild*
+ContentChild::AllocPHandlerServiceChild()
+{
+    HandlerServiceChild* actor = new HandlerServiceChild();
+    actor->AddRef();
+    return actor;
+}
+
+bool ContentChild::DeallocPHandlerServiceChild(PHandlerServiceChild* aHandlerServiceChild)
+{
+    static_cast<HandlerServiceChild*>(aHandlerServiceChild)->Release();
+    return true;
+}
+
 PCellBroadcastChild*
 ContentChild::AllocPCellBroadcastChild()
 {
@@ -2259,6 +2274,39 @@ bool
 ContentChild::RecvPreferenceUpdate(const PrefSetting& aPref)
 {
     Preferences::SetPreference(aPref);
+    return true;
+}
+
+bool
+ContentChild::RecvDataStoragePut(const nsString& aFilename,
+                                 const DataStorageItem& aItem)
+{
+    RefPtr<DataStorage> storage = DataStorage::GetIfExists(aFilename);
+    if (storage) {
+        storage->Put(aItem.key(), aItem.value(), aItem.type());
+    }
+    return true;
+}
+
+bool
+ContentChild::RecvDataStorageRemove(const nsString& aFilename,
+                                    const nsCString& aKey,
+                                    const DataStorageType& aType)
+{
+    RefPtr<DataStorage> storage = DataStorage::GetIfExists(aFilename);
+    if (storage) {
+        storage->Remove(aKey, aType);
+    }
+    return true;
+}
+
+bool
+ContentChild::RecvDataStorageClear(const nsString& aFilename)
+{
+    RefPtr<DataStorage> storage = DataStorage::GetIfExists(aFilename);
+    if (storage) {
+        storage->Clear();
+    }
     return true;
 }
 

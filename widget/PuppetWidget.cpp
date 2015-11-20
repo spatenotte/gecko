@@ -240,8 +240,8 @@ PuppetWidget::ConfigureChildren(const nsTArray<Configuration>& aConfigurations)
     NS_ASSERTION(w->GetParent() == this,
                  "Configured widget is not a child");
     w->SetWindowClipRegion(configuration.mClipRegion, true);
-    nsIntRect bounds;
-    w->GetBoundsUntyped(bounds);
+    LayoutDeviceIntRect bounds;
+    w->GetBounds(bounds);
     if (bounds.Size() != configuration.mBounds.Size()) {
       w->Resize(configuration.mBounds.x, configuration.mBounds.y,
                 configuration.mBounds.width, configuration.mBounds.height,
@@ -1155,7 +1155,7 @@ PuppetWidget::GetChromeDimensions()
     NS_WARNING("PuppetWidget without Tab does not have chrome information.");
     return nsIntPoint();
   }
-  return LayoutDeviceIntPoint::ToUntyped(GetOwningTabChild()->GetChromeDisplacement());
+  return GetOwningTabChild()->GetChromeDisplacement().ToUnknownPoint();
 }
 
 nsIntPoint
@@ -1171,9 +1171,9 @@ PuppetWidget::GetWindowPosition()
 }
 
 NS_METHOD
-PuppetWidget::GetScreenBoundsUntyped(nsIntRect &aRect) {
-  aRect.MoveTo(WidgetToScreenOffsetUntyped());
-  aRect.SizeTo(mBounds.Size());
+PuppetWidget::GetScreenBounds(LayoutDeviceIntRect& aRect) {
+  aRect.MoveTo(WidgetToScreenOffset());
+  aRect.SizeTo(LayoutDeviceIntSize::FromUnknownSize(mBounds.Size()));
   return NS_OK;
 }
 

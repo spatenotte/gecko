@@ -697,10 +697,24 @@ IsCheckSloppyOp(JSOp op)
 #endif
 
 inline bool
+IsAtomOp(JSOp op)
+{
+    return JOF_OPTYPE(op) == JOF_ATOM;
+}
+
+inline bool
 IsGetPropPC(jsbytecode* pc)
 {
     JSOp op = JSOp(*pc);
     return op == JSOP_LENGTH  || op == JSOP_GETPROP || op == JSOP_CALLPROP;
+}
+
+inline bool
+IsHiddenInitOp(JSOp op)
+{
+    return op == JSOP_INITHIDDENPROP || op == JSOP_INITHIDDENELEM ||
+           op == JSOP_INITHIDDENPROP_GETTER || op == JSOP_INITHIDDENELEM_GETTER ||
+           op == JSOP_INITHIDDENPROP_SETTER || op == JSOP_INITHIDDENELEM_SETTER;
 }
 
 inline bool

@@ -64,6 +64,12 @@ function runSafe(context, f, ...args)
   return runSafeWithoutClone(f, ...args);
 }
 
+// Return true if the given value is an instance of the given
+// native type.
+function instanceOf(value, type) {
+  return {}.toString.call(value) == `[object ${type}]`;
+}
+
 // Extend the object |obj| with the property descriptors of each object in
 // |args|.
 function extend(obj, ...args) {
@@ -245,12 +251,27 @@ SingletonEventManager.prototype = {
 };
 
 // Simple API for event listeners where events never fire.
-function ignoreEvent()
+function ignoreEvent(context, name)
 {
   return {
-    addListener: function(context, callback) {},
-    removeListener: function(context, callback) {},
-    hasListener: function(context, callback) {},
+    addListener: function(callback) {
+      let id = context.extension.id;
+      let frame = Components.stack.caller;
+      let msg = `In add-on ${id}, attempting to use listener "${name}", which is unimplemented.`;
+      let winID = context.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+      let scriptError = Cc["@mozilla.org/scripterror;1"]
+        .createInstance(Ci.nsIScriptError);
+      scriptError.initWithWindowID(msg, frame.filename, null,
+                                   frame.lineNumber, frame.columnNumber,
+                                   Ci.nsIScriptError.warningFlag,
+                                   "content javascript", winID);
+      let consoleService = Cc['@mozilla.org/consoleservice;1']
+        .getService(Ci.nsIConsoleService);
+      consoleService.logMessage(scriptError);
+    },
+    removeListener: function(callback) {},
+    hasListener: function(callback) {},
   };
 }
 
@@ -619,4 +640,5 @@ this.ExtensionUtils = {
   Messenger,
   extend,
   flushJarCache,
+  instanceOf,
 };

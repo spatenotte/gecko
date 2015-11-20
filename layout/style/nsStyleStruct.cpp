@@ -200,13 +200,17 @@ nsChangeHint nsStyleFont::CalcDifference(const nsStyleFont& aOther) const
 /* static */ nscoord
 nsStyleFont::ZoomText(nsPresContext *aPresContext, nscoord aSize)
 {
-  return nscoord(float(aSize) * aPresContext->TextZoom());
+  // aSize can be negative (e.g.: calc(-1px)) so we can't assert that here.
+  // The caller is expected deal with that.
+  return NSCoordSaturatingMultiply(aSize, aPresContext->TextZoom());
 }
 
 /* static */ nscoord
 nsStyleFont::UnZoomText(nsPresContext *aPresContext, nscoord aSize)
 {
-  return nscoord(float(aSize) / aPresContext->TextZoom());
+  // aSize can be negative (e.g.: calc(-1px)) so we can't assert that here.
+  // The caller is expected deal with that.
+  return NSCoordSaturatingMultiply(aSize, 1.0 / aPresContext->TextZoom());
 }
 
 /* static */ already_AddRefed<nsIAtom>
@@ -1430,7 +1434,7 @@ nsStylePosition::nsStylePosition(void)
   mGridAutoRowsMax.SetAutoValue();
 
   mGridAutoFlow = NS_STYLE_GRID_AUTO_FLOW_ROW;
-  mBoxSizing = NS_STYLE_BOX_SIZING_CONTENT;
+  mBoxSizing = StyleBoxSizing::Content;
   mAlignContent = NS_STYLE_ALIGN_AUTO;
   mAlignItems = NS_STYLE_ALIGN_AUTO;
   mAlignSelf = NS_STYLE_ALIGN_AUTO;
@@ -1492,6 +1496,8 @@ nsStylePosition::nsStylePosition(const nsStylePosition& aSource)
   , mGridColumnEnd(aSource.mGridColumnEnd)
   , mGridRowStart(aSource.mGridRowStart)
   , mGridRowEnd(aSource.mGridRowEnd)
+  , mGridColumnGap(aSource.mGridColumnGap)
+  , mGridRowGap(aSource.mGridRowGap)
 {
   MOZ_COUNT_CTOR(nsStylePosition);
 }
@@ -1585,7 +1591,9 @@ nsStylePosition::CalcDifference(const nsStylePosition& aOther,
   if (mGridColumnStart != aOther.mGridColumnStart ||
       mGridColumnEnd != aOther.mGridColumnEnd ||
       mGridRowStart != aOther.mGridRowStart ||
-      mGridRowEnd != aOther.mGridRowEnd) {
+      mGridRowEnd != aOther.mGridRowEnd ||
+      mGridColumnGap != aOther.mGridColumnGap ||
+      mGridRowGap != aOther.mGridRowGap) {
     return NS_CombineHint(hint, nsChangeHint_AllReflowHints);
   }
 
@@ -1742,9 +1750,13 @@ nsStylePosition::ComputedJustifyContent(const nsStyleDisplay* aDisplay) const
   switch (aDisplay->mDisplay) {
     case NS_STYLE_DISPLAY_FLEX:
     case NS_STYLE_DISPLAY_INLINE_FLEX:
+      // For flex containers, css-align-3 says the justify-content value
+      // "'stretch' computes to 'flex-start'."
+      // https://drafts.csswg.org/css-align-3/#propdef-justify-content
       // XXX maybe map 'auto' too? (ISSUE 8 in the spec)
       // https://drafts.csswg.org/css-align-3/#content-distribution
-      if (mJustifyContent == NS_STYLE_JUSTIFY_STRETCH) {
+      if ((mJustifyContent & NS_STYLE_ALIGN_ALL_BITS) ==
+          NS_STYLE_JUSTIFY_STRETCH) {
         return NS_STYLE_JUSTIFY_FLEX_START;
       }
       break;

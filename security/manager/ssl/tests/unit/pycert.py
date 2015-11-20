@@ -33,6 +33,7 @@ authorityInformationAccess:<OCSP URI>
 certificatePolicies:<policy OID>
 nameConstraints:{permitted,excluded}:[<dNSName|directoryName>,...]
 nsCertType:sslServer
+TLSFeature:[<TLSFeature>,...]
 
 Where:
   [] indicates an optional field or component of a field
@@ -69,6 +70,10 @@ a nameConstraints extension, the implicit form may not be used.
 
 If an extension name has '[critical]' after it, it will be marked as
 critical. Otherwise (by default), it will not be marked as critical.
+
+TLSFeature values can either consist of a named value (currently only
+'OCSPMustStaple' which corresponds to status_request) or a numeric tls feature
+value (see rfc7633 for more information).
 """
 
 from pyasn1.codec.der import decoder
@@ -191,6 +196,13 @@ class UnknownNSCertTypeError(UnknownBaseError):
         UnknownBaseError.__init__(self, value)
         self.category = 'nsCertType'
 
+class UnknownTLSFeature(UnknownBaseError):
+    """Helper exception type to handle unknown TLS Features."""
+
+    def __init__(self, value):
+        UnknownBaseError.__init__(self, value)
+        self.category = 'TLSFeature'
+
 
 def getASN1Tag(asn1Type):
     """Helper function for returning the base tag value of a given
@@ -307,7 +319,7 @@ class Certificate(object):
         self.issuer = 'Default Issuer'
         actualNow = datetime.datetime.utcnow()
         self.now = datetime.datetime.strptime(str(actualNow.year), '%Y')
-        aYearAndAWhile = datetime.timedelta(days=550)
+        aYearAndAWhile = datetime.timedelta(days=400)
         self.notBefore = self.now - aYearAndAWhile
         self.notAfter = self.now + aYearAndAWhile
         self.subject = 'Default Subject'
@@ -412,6 +424,8 @@ class Certificate(object):
             self.addNameConstraints(value, critical)
         elif extensionType == 'nsCertType':
             self.addNSCertType(value, critical)
+        elif extensionType == 'TLSFeature':
+            self.addTLSFeature(value, critical)
         else:
             raise UnknownExtensionTypeError(extensionType)
 
@@ -534,6 +548,25 @@ class Certificate(object):
         if certType != 'sslServer':
             raise UnknownNSCertTypeError(certType)
         self.addExtension(univ.ObjectIdentifier('2.16.840.1.113730.1.1'), univ.BitString("'01'B"),
+                          critical)
+
+    def addTLSFeature(self, features, critical):
+        namedFeatures = {'OCSPMustStaple': 5}
+        featureList = [f.strip() for f in features.split(',')]
+        print "FeatureList is",featureList
+        sequence = univ.Sequence()
+        for feature in featureList:
+            featureValue = 0
+            try:
+                featureValue = int(feature)
+            except:
+                try:
+                    featureValue = namedFeatures[feature]
+                except:
+                    raise UnknownTLSFeature(feature)
+            sequence.setComponentByPosition(len(sequence),
+                                            univ.Integer(featureValue))
+        self.addExtension(univ.ObjectIdentifier('1.3.6.1.5.5.7.1.24'), sequence,
                           critical)
 
     def getVersion(self):

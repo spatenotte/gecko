@@ -693,6 +693,9 @@ TabChild::Observe(nsISupports *aSubject,
     // In theory a tabChild should contain just 1 top window, but let's double
     // check it comparing the windowID.
     if (window->WindowID() != windowID) {
+      MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
+              ("TabChild, Observe, different windowID, owner ID = %lld, "
+               "ID from wrapper = %lld", window->WindowID(), windowID));
       return NS_OK;
     }
 
@@ -830,6 +833,7 @@ TabChild::NotifyTabContextUpdated()
         } else {
           docShell->SetIsApp(OwnAppId());
         }
+        docShell->SetIsSignedPackage(OriginAttributesRef().mSignedPkg);
     }
 }
 
@@ -2299,11 +2303,15 @@ TabChild::RecvSetUpdateHitRegion(const bool& aEnabled)
 }
 
 bool
-TabChild::RecvSetDocShellIsActive(const bool& aIsActive)
+TabChild::RecvSetDocShellIsActive(const bool& aIsActive, const bool& aIsHidden)
 {
     nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
     if (docShell) {
-      docShell->SetIsActive(aIsActive);
+      if (aIsHidden) {
+        docShell->SetIsActive(aIsActive);
+      } else {
+        docShell->SetIsActiveAndForeground(aIsActive);
+      }
     }
     return true;
 }

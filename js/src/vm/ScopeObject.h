@@ -401,6 +401,10 @@ class ModuleEnvironmentObject : public LexicalScopeBase
     bool createImportBinding(JSContext* cx, HandleAtom importName, HandleModuleObject module,
                              HandleAtom exportName);
 
+    bool hasImportBinding(HandlePropertyName name);
+
+    bool lookupImport(jsid name, ModuleEnvironmentObject** envOut, Shape** shapeOut);
+
   private:
     static bool lookupProperty(JSContext* cx, HandleObject obj, HandleId id,
                                MutableHandleObject objp, MutableHandleShape propp);
@@ -1446,6 +1450,21 @@ CreateScopeObjectsForScopeChain(JSContext* cx, AutoObjectVector& scopeChain,
 
 bool HasNonSyntacticStaticScopeChain(JSObject* staticScope);
 uint32_t StaticScopeChainLength(JSObject* staticScope);
+
+ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
+
+bool CheckVarNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
+                          HandlePropertyName name);
+
+bool CheckLexicalNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
+                              HandleObject varObj, HandlePropertyName name);
+
+bool CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
+                                     Handle<ClonedBlockObject*> lexicalScope,
+                                     HandleObject varObj);
+
+bool CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
+                                   HandleObject scopeChain, HandleObject varObj);
 
 #ifdef DEBUG
 void DumpStaticScopeChain(JSScript* script);

@@ -473,7 +473,8 @@ nsXULPopupManager::PopupMoved(nsIFrame* aFrame, nsIntPoint aPnt)
   nsIntRect curDevSize = view->CalcWidgetBounds(eWindowType_popup);
   nsIWidget* widget = menuPopupFrame->GetWidget();
   if (curDevSize.x == aPnt.x && curDevSize.y == aPnt.y &&
-      (!widget || widget->GetClientOffset() == menuPopupFrame->GetLastClientOffset())) {
+      (!widget || widget->GetClientOffset() ==
+                  menuPopupFrame->GetLastClientOffset())) {
     return;
   }
 
@@ -486,7 +487,7 @@ nsXULPopupManager::PopupMoved(nsIFrame* aFrame, nsIntPoint aPnt)
     menuPopupFrame->SetPopupPosition(nullptr, true, false);
   }
   else {
-    CSSPoint cssPos = LayoutDeviceIntPoint::FromUntyped(aPnt)
+    CSSPoint cssPos = LayoutDeviceIntPoint::FromUnknownPoint(aPnt)
                     / menuPopupFrame->PresContext()->CSSToDevPixelScale();
     menuPopupFrame->MoveTo(RoundedToInt(cssPos), false);
   }
