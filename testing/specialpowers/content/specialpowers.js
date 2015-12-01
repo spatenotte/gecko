@@ -28,6 +28,7 @@ function SpecialPowers(window) {
   this._createFilesOnSuccess = null;
   this.SP_SYNC_MESSAGES = ["SPChromeScriptMessage",
                            "SPLoadChromeScript",
+                           "SPImportInMainProcess",
                            "SPObserverService",
                            "SPPermissionManager",
                            "SPPrefService",
@@ -41,7 +42,6 @@ function SpecialPowers(window) {
                             "SpecialPowers.CreateFiles",
                             "SpecialPowers.RemoveFiles",
                             "SPPingService",
-                            "SPQuotaManager",
                             "SPLoadExtension",
                             "SPStartupExtension",
                             "SPUnloadExtension",

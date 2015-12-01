@@ -513,35 +513,6 @@ static const VMFunction DoCallNativeGetterInfo =
     FunctionInfo<DoCallNativeGetterFn>(DoCallNativeGetter);
 
 //
-// This_Fallback
-//
-
-static bool
-DoThisFallback(JSContext* cx, ICThis_Fallback* stub, HandleValue thisv, MutableHandleValue ret)
-{
-    FallbackICSpew(cx, stub, "This");
-    return BoxNonStrictThis(cx, thisv, ret);
-}
-
-typedef bool (*DoThisFallbackFn)(JSContext*, ICThis_Fallback*, HandleValue, MutableHandleValue);
-static const VMFunction DoThisFallbackInfo = FunctionInfo<DoThisFallbackFn>(DoThisFallback, TailCall);
-
-bool
-ICThis_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
-{
-    MOZ_ASSERT(engine_ == Engine::Baseline);
-    MOZ_ASSERT(R0 == JSReturnOperand);
-
-    // Restore the tail call register.
-    EmitRestoreTailCallReg(masm);
-
-    masm.pushValue(R0);
-    masm.push(ICStubReg);
-
-    return tailCallVM(DoThisFallbackInfo, masm);
-}
-
-//
 // NewArray_Fallback
 //
 
@@ -1778,7 +1749,7 @@ DoGetElemFallback(JSContext* cx, BaselineFrame* frame, ICGetElem_Fallback* stub_
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(frame->script());
     JSOp op = JSOp(*pc);
-    FallbackICSpew(cx, stub, "GetElem(%s)", js_CodeName[op]);
+    FallbackICSpew(cx, stub, "GetElem(%s)", CodeName[op]);
 
     MOZ_ASSERT(op == JSOP_GETELEM || op == JSOP_CALLELEM);
 
@@ -2756,7 +2727,7 @@ DoSetElemFallback(JSContext* cx, BaselineFrame* frame, ICSetElem_Fallback* stub_
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
     JSOp op = JSOp(*pc);
-    FallbackICSpew(cx, stub, "SetElem(%s)", js_CodeName[JSOp(*pc)]);
+    FallbackICSpew(cx, stub, "SetElem(%s)", CodeName[JSOp(*pc)]);
 
     MOZ_ASSERT(op == JSOP_SETELEM ||
                op == JSOP_STRICTSETELEM ||
@@ -4185,7 +4156,7 @@ DoGetNameFallback(JSContext* cx, BaselineFrame* frame, ICGetName_Fallback* stub_
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
     mozilla::DebugOnly<JSOp> op = JSOp(*pc);
-    FallbackICSpew(cx, stub, "GetName(%s)", js_CodeName[JSOp(*pc)]);
+    FallbackICSpew(cx, stub, "GetName(%s)", CodeName[JSOp(*pc)]);
 
     MOZ_ASSERT(op == JSOP_GETNAME || op == JSOP_GETGNAME);
 
@@ -4344,7 +4315,7 @@ DoBindNameFallback(JSContext* cx, BaselineFrame* frame, ICBindName_Fallback* stu
 {
     jsbytecode* pc = stub->icEntry()->pc(frame->script());
     mozilla::DebugOnly<JSOp> op = JSOp(*pc);
-    FallbackICSpew(cx, stub, "BindName(%s)", js_CodeName[JSOp(*pc)]);
+    FallbackICSpew(cx, stub, "BindName(%s)", CodeName[JSOp(*pc)]);
 
     MOZ_ASSERT(op == JSOP_BINDNAME || op == JSOP_BINDGNAME);
 
@@ -4392,7 +4363,7 @@ DoGetIntrinsicFallback(JSContext* cx, BaselineFrame* frame, ICGetIntrinsic_Fallb
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
     mozilla::DebugOnly<JSOp> op = JSOp(*pc);
-    FallbackICSpew(cx, stub, "GetIntrinsic(%s)", js_CodeName[JSOp(*pc)]);
+    FallbackICSpew(cx, stub, "GetIntrinsic(%s)", CodeName[JSOp(*pc)]);
 
     MOZ_ASSERT(op == JSOP_GETINTRINSIC);
 
@@ -4719,7 +4690,7 @@ DoSetPropFallback(JSContext* cx, BaselineFrame* frame, ICSetProp_Fallback* stub_
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
     JSOp op = JSOp(*pc);
-    FallbackICSpew(cx, stub, "SetProp(%s)", js_CodeName[op]);
+    FallbackICSpew(cx, stub, "SetProp(%s)", CodeName[op]);
 
     MOZ_ASSERT(op == JSOP_SETPROP ||
                op == JSOP_STRICTSETPROP ||
@@ -5725,10 +5696,9 @@ GetTemplateObjectForNative(JSContext* cx, Native native, const CallArgs& args,
            ION_COMMONX4_SIMD_OP(ADD_INT32X4_SIMD_OP_NAME_)
            COMP_COMMONX4_TO_INT32X4_SIMD_OP(ADD_INT32X4_SIMD_OP_NAME_)
            COMP_COMMONX4_TO_INT32X4_SIMD_OP(ADD_FLOAT32X4_SIMD_OP_NAME_)
-           FOREACH_INT32X4_SIMD_OP(ADD_INT32X4_SIMD_OP_NAME_)
-           ION_ONLY_INT32X4_SIMD_OP(ADD_INT32X4_SIMD_OP_NAME_))
+           FOREACH_INT32X4_SIMD_OP(ADD_INT32X4_SIMD_OP_NAME_))
        {
-            Rooted<SimdTypeDescr*> descr(cx, &cx->global()->int32x4TypeDescr().as<SimdTypeDescr>());
+            Rooted<SimdTypeDescr*> descr(cx, cx->global()->getOrCreateSimdTypeDescr<Int32x4>(cx));
             res.set(cx->compartment()->jitCompartment()->getSimdTemplateObjectFor(cx, descr));
             return !!res;
        }
@@ -5736,7 +5706,7 @@ GetTemplateObjectForNative(JSContext* cx, Native native, const CallArgs& args,
            FOREACH_FLOAT32X4_SIMD_OP(ADD_FLOAT32X4_SIMD_OP_NAME_)
            ION_COMMONX4_SIMD_OP(ADD_FLOAT32X4_SIMD_OP_NAME_))
        {
-            Rooted<SimdTypeDescr*> descr(cx, &cx->global()->float32x4TypeDescr().as<SimdTypeDescr>());
+            Rooted<SimdTypeDescr*> descr(cx, cx->global()->getOrCreateSimdTypeDescr<Float32x4>(cx));
             res.set(cx->compartment()->jitCompartment()->getSimdTemplateObjectFor(cx, descr));
             return !!res;
        }
@@ -6113,7 +6083,7 @@ DoCallFallback(JSContext* cx, BaselineFrame* frame, ICCall_Fallback* stub_, uint
     RootedScript script(cx, frame->script());
     jsbytecode* pc = stub->icEntry()->pc(script);
     JSOp op = JSOp(*pc);
-    FallbackICSpew(cx, stub, "Call(%s)", js_CodeName[op]);
+    FallbackICSpew(cx, stub, "Call(%s)", CodeName[op]);
 
     MOZ_ASSERT(argc == GET_ARGC(pc));
     bool constructing = (op == JSOP_NEW);
@@ -6219,7 +6189,7 @@ DoSpreadCallFallback(JSContext* cx, BaselineFrame* frame, ICCall_Fallback* stub_
     jsbytecode* pc = stub->icEntry()->pc(script);
     JSOp op = JSOp(*pc);
     bool constructing = (op == JSOP_SPREADNEW);
-    FallbackICSpew(cx, stub, "SpreadCall(%s)", js_CodeName[op]);
+    FallbackICSpew(cx, stub, "SpreadCall(%s)", CodeName[op]);
 
     // Ensure vp array is rooted - we may GC in here.
     AutoArrayRooter vpRoot(cx, 3 + constructing, vp);
@@ -7197,7 +7167,7 @@ ICCall_Native::Compiler::generateStubCode(MacroAssembler& masm)
     EmitBaselineCreateStubFrameDescriptor(masm, scratch);
     masm.push(scratch);
     masm.push(ICTailCallReg);
-    masm.enterFakeExitFrame(NativeExitFrameLayoutToken);
+    masm.enterFakeExitFrameForNative(isConstructing_);
 
     // Execute call.
     masm.setupUnalignedABICall(scratch);
@@ -7295,7 +7265,7 @@ ICCall_ClassHook::Compiler::generateStubCode(MacroAssembler& masm)
     EmitBaselineCreateStubFrameDescriptor(masm, scratch);
     masm.push(scratch);
     masm.push(ICTailCallReg);
-    masm.enterFakeExitFrame(NativeExitFrameLayoutToken);
+    masm.enterFakeExitFrameForNative(isConstructing_);
 
     // Execute call.
     masm.setupUnalignedABICall(scratch);

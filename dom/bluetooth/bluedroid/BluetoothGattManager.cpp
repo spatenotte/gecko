@@ -2072,8 +2072,8 @@ BluetoothGattManager::ServerAddCharacteristic(
     server->mServerIf,
     aServiceHandle,
     aCharacteristicUuid,
-    aPermissions,
     aProperties,
+    aPermissions,
     new ServerAddCharacteristicResultHandler(server));
 }
 
@@ -3687,7 +3687,7 @@ BluetoothGattManager::RequestReadNotification(
   AppendNamedValue(properties, "AttrHandle", aAttributeHandle);
   AppendNamedValue(properties, "Address", bdAddrStr);
   AppendNamedValue(properties, "NeedResponse", true);
-  AppendNamedValue(properties, "Value", new nsTArray<uint8_t>());
+  AppendNamedValue(properties, "Value", nsTArray<uint8_t>());
 
   bs->DistributeSignal(NS_LITERAL_STRING("ReadRequested"),
                        server->mAppUuid,
@@ -3748,7 +3748,7 @@ BluetoothGattManager::RequestWriteNotification(
   value.AppendElements(aValue, aLength);
   AppendNamedValue(properties, "Value", value);
 
-  bs->DistributeSignal(NS_LITERAL_STRING("WrtieRequested"),
+  bs->DistributeSignal(NS_LITERAL_STRING("WriteRequested"),
                        server->mAppUuid,
                        properties);
 }

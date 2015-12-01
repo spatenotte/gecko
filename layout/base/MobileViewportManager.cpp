@@ -127,7 +127,7 @@ MobileViewportManager::UpdateResolution(const nsViewportInfo& aViewportInfo,
 {
   CSSToLayoutDeviceScale cssToDev =
       mPresShell->GetPresContext()->CSSToDevPixelScale();
-  LayoutDeviceToLayerScale res(nsLayoutUtils::GetResolution(mPresShell));
+  LayoutDeviceToLayerScale res(mPresShell->GetResolution());
 
   if (mIsFirstPaint) {
     CSSToScreenScale defaultZoom = aViewportInfo.GetDefaultZoom();
@@ -152,7 +152,7 @@ MobileViewportManager::UpdateResolution(const nsViewportInfo& aViewportInfo,
 
     LayoutDeviceToLayerScale resolution = zoom / cssToDev * ParentLayerToLayerScale(1);
     MVM_LOG("%p: setting resolution %f\n", this, resolution.scale);
-    nsLayoutUtils::SetResolutionAndScaleTo(mPresShell, resolution.scale);
+    mPresShell->SetResolutionAndScaleTo(resolution.scale);
 
     return defaultZoom;
   }
@@ -189,7 +189,7 @@ MobileViewportManager::UpdateResolution(const nsViewportInfo& aViewportInfo,
       / cssViewportChangeRatio);
     MVM_LOG("%p: Old resolution was %f, changed by %f/%f to %f\n", this, res.scale,
       aDisplayWidthChangeRatio.value(), cssViewportChangeRatio, newRes.scale);
-    nsLayoutUtils::SetResolutionAndScaleTo(mPresShell, newRes.scale);
+    mPresShell->SetResolutionAndScaleTo(newRes.scale);
     res = newRes;
   }
 
@@ -222,8 +222,13 @@ void
 MobileViewportManager::UpdateDisplayPortMargins()
 {
   if (nsIFrame* root = mPresShell->GetRootScrollFrame()) {
-    if (!nsLayoutUtils::GetDisplayPort(root->GetContent(), nullptr)) {
-      // There isn't already a displayport, so we don't want to add one.
+    bool hasDisplayPort = nsLayoutUtils::GetDisplayPort(root->GetContent(), nullptr);
+    bool hasResolution = mPresShell->ScaleToResolution() &&
+        mPresShell->GetResolution() != 1.0f;
+    if (!hasDisplayPort && !hasResolution) {
+      // We only want to update the displayport if there is one already, or
+      // add one if there's a resolution on the document (see bug 1225508
+      // comment 1).
       return;
     }
     nsIScrollableFrame* scrollable = do_QueryFrame(root);
@@ -247,7 +252,7 @@ MobileViewportManager::RefreshSPCSPS()
 
   CSSToLayoutDeviceScale cssToDev =
       mPresShell->GetPresContext()->CSSToDevPixelScale();
-  LayoutDeviceToLayerScale res(nsLayoutUtils::GetResolution(mPresShell));
+  LayoutDeviceToLayerScale res(mPresShell->GetResolution());
   CSSToScreenScale zoom = ViewTargetAs<ScreenPixel>(cssToDev * res / ParentLayerToLayerScale(1),
     PixelCastJustification::ScreenIsParentLayerForRoot);
 

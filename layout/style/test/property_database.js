@@ -627,6 +627,74 @@ var unbalancedGradientAndElementValues = [
 if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
   // Extend gradient lists with valid/invalid webkit-prefixed expressions:
   validGradientAndElementValues.push(
+    // 2008 GRADIENTS: -webkit-gradient()
+    // ----------------------------------
+    // linear w/ no color stops (valid) and a variety of position values:
+    "-webkit-gradient(linear, 1 2, 3 4)",
+    "-webkit-gradient(linear,1 2,3 4)", // (no extra space)
+    "-webkit-gradient(linear  ,  1   2  ,  3   4  )", // (lots of extra space)
+    "-webkit-gradient(linear, 1 10% , 0% 4)", // percentages
+    "-webkit-gradient(linear, +1.0 -2%, +5.3% -0)", // (+/- & decimals are valid)
+    "-webkit-gradient(linear, left top, right bottom)", // keywords
+    "-webkit-gradient(linear, right center, center top)",
+    "-webkit-gradient(linear, center center, center center)",
+    "-webkit-gradient(linear, center 5%, 30 top)", // keywords mixed w/ nums
+
+    // linear w/ just 1 color stop:
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, to(lime))",
+    // * testing the various allowable stop values (<number> & <percent>):
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(-0, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(-30, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(+9999, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(-.1, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0%, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(100%, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(9999%, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(-.5%, lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(+0%, lime))",
+    // * testing the various color values:
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, transparent))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, rgb(1,2,3)))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, #00ff00))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, #00f))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, hsla(240, 30%, 50%, 0.9)))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, rgba(255, 230, 10, 0.5)))",
+
+    // linear w/ multiple color stops:
+    // * using from()/to() -- note that out-of-order is OK:
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime), from(blue))",
+    "-webkit-gradient(linear, 1 2, 3 4, to(lime),   to(blue))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime), to(blue))",
+    "-webkit-gradient(linear, 1 2, 3 4, to(lime),   from(blue))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime), to(blue), from(purple))",
+    // * using color-stop():
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, lime), color-stop(30%, blue))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0, lime), color-stop(30%, blue), color-stop(100%, purple))",
+    // * using color-stop() intermixed with from()/to() functions:
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime), color-stop(30%, blue))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(30%, blue), to(lime))",
+    // * overshooting endpoints (0 & 1.0)
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(-30%, lime), color-stop(.4, blue), color-stop(1.5, purple))",
+    // * repeating a stop position (valid)
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(30%, lime), color-stop(30%, blue))",
+    // * stops out of order (valid)
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(70%, lime), color-stop(20%, blue), color-stop(40%, purple))",
+
+    // radial w/ no color stops (valid) and a several different radius values:
+    "-webkit-gradient(radial, 1 2, 8, 3 4, 9)",
+    "-webkit-gradient(radial, 1 2, -1.5, center center, +99999.9999)",
+
+    // radial w/ color stops
+    // (mostly leaning on more-robust 'linear' tests above; just testing a few
+    // examples w/ radial as a sanity-check):
+    "-webkit-gradient(radial, 1 2, 8, 3 4, 9, from(lime))",
+    "-webkit-gradient(radial, 1 2, 8, 3 4, 9, to(blue))",
+    "-webkit-gradient(radial, 1 2, 8, 3 4, 9, color-stop(0.5, #00f), color-stop(0.8, rgba(100, 200, 0, 0.5)))",
+
+    // 2011 GRADIENTS: -webkit-linear-gradient(), -webkit-radial -gradient()
+    // ---------------------------------------------------------------------
     // Basic linear-gradient syntax (valid when prefixed or unprefixed):
     "-webkit-linear-gradient(red, green, blue)",
 
@@ -677,6 +745,99 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
   );
 
   invalidGradientAndElementValues.push(
+    // 2008 GRADIENTS: -webkit-gradient()
+    // https://www.webkit.org/blog/175/introducing-css-gradients/
+    // ----------------------------------
+    // Mostly-empty expressions (missing most required pieces):
+    "-webkit-gradient()",
+    "-webkit-gradient( )",
+    "-webkit-gradient(,)",
+    "-webkit-gradient(bogus)",
+    "-webkit-gradient(linear)",
+    "-webkit-gradient(linear,)",
+    "-webkit-gradient(,linear)",
+    "-webkit-gradient(radial)",
+    "-webkit-gradient(radial,)",
+
+    // linear w/ partial/missing <point> expression(s)
+    "-webkit-gradient(linear, 1)", // Incomplete <point>
+    "-webkit-gradient(linear, left)", // Incomplete <point>
+    "-webkit-gradient(linear, center)", // Incomplete <point>
+    "-webkit-gradient(linear, top)", // Incomplete <point>
+    "-webkit-gradient(linear, 5%)", // Incomplete <point>
+    "-webkit-gradient(linear, 1 2)", // Missing 2nd <point>
+    "-webkit-gradient(linear, 1, 3)", // 2 incomplete <point>s
+    "-webkit-gradient(linear, 1, 3 4)", // Incomplete 1st <point>
+    "-webkit-gradient(linear, 1 2, 3)", // Incomplete 2nd <point>
+    "-webkit-gradient(linear, 1 2, 3, 4)", // Comma inside <point>
+    "-webkit-gradient(linear, 1, 2, 3 4)", // Comma inside <point>
+    "-webkit-gradient(linear, 1, 2, 3, 4)", // Comma inside <point>
+
+    // linear w/ invalid units in <point> expression
+    "-webkit-gradient(linear, 1px 2, 3 4)",
+    "-webkit-gradient(linear, 1 2, 3 4px)",
+    "-webkit-gradient(linear, 1px 2px, 3px 4px)",
+    "-webkit-gradient(linear, calc(1) 2, 3 4)",
+    "-webkit-gradient(linear, 1 2em, 3 4)",
+
+    // linear w/ <radius> (only valid for radial)
+    "-webkit-gradient(linear, 1 2, 8, 3 4, 9)",
+
+    // linear w/ out-of-order position keywords in <point> expression
+    // (horizontal keyword is supposed to come first, for "x" coord)
+    "-webkit-gradient(linear, 0 0, top right)",
+    "-webkit-gradient(linear, bottom center, 0 0)",
+    "-webkit-gradient(linear, top bottom, 0 0)",
+    "-webkit-gradient(linear, bottom top, 0 0)",
+    "-webkit-gradient(linear, bottom top, 0 0)",
+
+    // linear w/ trailing comma (which implies missing color-stops):
+    "-webkit-gradient(linear, 1 2, 3 4,)",
+
+    // linear w/ invalid color values:
+    "-webkit-gradient(linear, 1 2, 3 4, from(invalidcolorname))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(inherit))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(initial))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(currentColor))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(00ff00))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(##00ff00))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(#00fff))", // wrong num hex digits
+    "-webkit-gradient(linear, 1 2, 3 4, from(xyz(0,0,0)))", // bogus color func
+    "-webkit-gradient(linear, 1 2, 3 4, from(rgb(100, 100.5, 30)))", // fraction
+
+    // linear w/ color stops that have comma issues
+    "-webkit-gradient(linear, 1 2, 3 4 from(lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime,))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime),)",
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime) to(blue))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(lime),, to(blue))",
+    "-webkit-gradient(linear, 1 2, 3 4, from(rbg(0, 0, 0,)))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0 lime))",
+    "-webkit-gradient(linear, 1 2, 3 4, color-stop(0,, lime))",
+
+    // radial w/ broken <point>/radius expression(s)
+    "-webkit-gradient(radial, 1)", // Incomplete <point>
+    "-webkit-gradient(radial, 1 2)", // Missing radius + 2nd <point>
+    "-webkit-gradient(radial, 1 2, 8)", // Missing 2nd <point>
+    "-webkit-gradient(radial, 1 2, 8, 3)", // Incomplete 2nd <point>
+    "-webkit-gradient(radial, 1 2, 8, 3 4)", // Missing 2nd radius
+    "-webkit-gradient(radial, 1 2, 3 4, 9)", // Missing 1st radius
+
+    // radial w/ incorrect units on radius (invalid; expecting <number>)
+    "-webkit-gradient(radial, 1 2, 8%,      3 4, 9)",
+    "-webkit-gradient(radial, 1 2, 8px,     3 4, 9)",
+    "-webkit-gradient(radial, 1 2, calc(8), 3 4, 9)",
+    "-webkit-gradient(radial, 1 2, 8em,     3 4, 9)",
+    "-webkit-gradient(radial, 1 2, top,     3 4, 9)",
+
+    // radial w/ trailing comma (which implies missing color-stops):
+    "-webkit-gradient(linear, 1 2, 8, 3 4, 9,)",
+
+    // radial w/ invalid color value (mostly leaning on 'linear' test above):
+    "-webkit-gradient(radial, 1 2, 8, 3 4, 9, from(invalidcolorname))",
+
+    // 2011 GRADIENTS: -webkit-linear-gradient(), -webkit-radial -gradient()
+    // ---------------------------------------------------------------------
     // Syntax that's invalid for all types of gradients:
     // * empty gradient expressions:
     "-webkit-linear-gradient()",
@@ -2585,6 +2746,11 @@ var gCSSProperties = {
       "table-column",
       "table-cell",
       "table-caption",
+      "ruby",
+      "ruby-base",
+      "ruby-base-container",
+      "ruby-text",
+      "ruby-text-container",
       "none"
     ],
     invalid_values: []
@@ -3390,6 +3556,27 @@ var gCSSProperties = {
     invalid_values: [],
     quirks_values: { "5": "5px" },
   },
+  "ruby-align": {
+    domProp: "rubyAlign",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "space-around" ],
+    other_values: [ "start", "center", "space-between" ],
+    invalid_values: [
+      "end", "1", "10px", "50%", "start center"
+    ]
+  },
+  "ruby-position": {
+    domProp: "rubyPosition",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "over" ],
+    other_values: [ "under" ],
+    invalid_values: [
+      "left", "right", "auto", "none", "not_a_position",
+      "over left", "right under", "0", "100px", "50%"
+    ]
+  },
   "table-layout": {
     domProp: "tableLayout",
     inherited: false,
@@ -3530,7 +3717,7 @@ var gCSSProperties = {
     type: CSS_TYPE_TRUE_SHORTHAND,
     subproperties: [ "transition-property", "transition-duration", "transition-timing-function", "transition-delay" ],
     initial_values: [ "all 0s ease 0s", "all", "0s", "0s 0s", "ease" ],
-    other_values: [ "all 0s cubic-bezier(0.25, 0.1, 0.25, 1.0) 0s", "width 1s linear 2s", "width 1s 2s linear", "width linear 1s 2s", "linear width 1s 2s", "linear 1s width 2s", "linear 1s 2s width", "1s width linear 2s", "1s width 2s linear", "1s 2s width linear", "1s linear width 2s", "1s linear 2s width", "1s 2s linear width", "width linear 1s", "width 1s linear", "linear width 1s", "linear 1s width", "1s width linear", "1s linear width", "1s 2s width", "1s width 2s", "width 1s 2s", "1s 2s linear", "1s linear 2s", "linear 1s 2s", "width 1s", "1s width", "linear 1s", "1s linear", "1s 2s", "2s 1s", "width", "linear", "1s", "height", "2s", "ease-in-out", "2s ease-in", "opacity linear", "ease-out 2s", "2s color, 1s width, 500ms height linear, 1s opacity 4s cubic-bezier(0.0, 0.1, 1.0, 1.0)", "1s \\32width linear 2s", "1s -width linear 2s", "1s -\\32width linear 2s", "1s \\32 0width linear 2s", "1s -\\32 0width linear 2s", "1s \\2width linear 2s", "1s -\\2width linear 2s", "2s, 1s width", "1s width, 2s", "2s all, 1s width", "1s width, 2s all", "2s all, 1s width", "2s width, 1s all" ],
+    other_values: [ "all 0s cubic-bezier(0.25, 0.1, 0.25, 1.0) 0s", "width 1s linear 2s", "width 1s 2s linear", "width linear 1s 2s", "linear width 1s 2s", "linear 1s width 2s", "linear 1s 2s width", "1s width linear 2s", "1s width 2s linear", "1s 2s width linear", "1s linear width 2s", "1s linear 2s width", "1s 2s linear width", "width linear 1s", "width 1s linear", "linear width 1s", "linear 1s width", "1s width linear", "1s linear width", "1s 2s width", "1s width 2s", "width 1s 2s", "1s 2s linear", "1s linear 2s", "linear 1s 2s", "width 1s", "1s width", "linear 1s", "1s linear", "1s 2s", "2s 1s", "width", "linear", "1s", "height", "2s", "ease-in-out", "2s ease-in", "opacity linear", "ease-out 2s", "2s color, 1s width, 500ms height linear, 1s opacity 4s cubic-bezier(0.0, 0.1, 1.0, 1.0)", "1s \\32width linear 2s", "1s -width linear 2s", "1s -\\32width linear 2s", "1s \\32 0width linear 2s", "1s -\\32 0width linear 2s", "1s \\2width linear 2s", "1s -\\2width linear 2s", "2s, 1s width", "1s width, 2s", "2s all, 1s width", "1s width, 2s all", "2s all, 1s width", "2s width, 1s all", "3s --my-color" ],
     invalid_values: [ "1s width, 2s none", "2s none, 1s width", "2s inherit", "inherit 2s", "2s width, 1s inherit", "2s inherit, 1s width", "2s initial", "1s width,,2s color", "1s width, ,2s color", "bounce 1s cubic-bezier(0, rubbish) 2s", "bounce 1s steps(rubbish) 2s" ]
   },
   "transition-delay": {
@@ -3554,7 +3741,7 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "all" ],
-    other_values: [ "none", "left", "top", "color", "width, height, opacity", "foobar", "auto", "\\32width", "-width", "-\\32width", "\\32 0width", "-\\32 0width", "\\2width", "-\\2width", "all, all", "all, color", "color, all" ],
+    other_values: [ "none", "left", "top", "color", "width, height, opacity", "foobar", "auto", "\\32width", "-width", "-\\32width", "\\32 0width", "-\\32 0width", "\\2width", "-\\2width", "all, all", "all, color", "color, all", "--my-color" ],
     invalid_values: [ "none, none", "color, none", "none, color", "inherit, color", "color, inherit", "initial, color", "color, initial", "none, color", "color, none" ]
   },
   "transition-timing-function": {
@@ -5670,38 +5857,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.filters.enabled")) {
   };
 }
 
-if (IsCSSPropertyPrefEnabled("layout.css.ruby.enabled")) {
-  // Using unshift to add these values at the beginning.
-  // Adding them to the end would trigger bug 1038905. The "unshift" should be
-  // changed to a "push" when this bug is resolved.
-  gCSSProperties["display"].other_values.unshift("ruby",
-                                                 "ruby-base",
-                                                 "ruby-base-container",
-                                                 "ruby-text",
-                                                 "ruby-text-container");
-  gCSSProperties["ruby-align"] = {
-    domProp: "rubyAlign",
-    inherited: true,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "space-around" ],
-    other_values: [ "start", "center", "space-between" ],
-    invalid_values: [
-      "end", "1", "10px", "50%", "start center"
-    ]
-  };
-  gCSSProperties["ruby-position"] = {
-    domProp: "rubyPosition",
-    inherited: true,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "over" ],
-    other_values: [ "under" ],
-    invalid_values: [
-      "left", "right", "auto", "none", "not_a_position",
-      "over left", "right under", "0", "100px", "50%"
-    ]
-  };
-}
-
 if (IsCSSPropertyPrefEnabled("layout.css.grid.enabled")) {
   var isGridTemplateSubgridValueEnabled =
     IsCSSPropertyPrefEnabled("layout.css.grid-template-subgrid-value.enabled");
@@ -6859,6 +7014,47 @@ if (IsCSSPropertyPrefEnabled("layout.css.float-logical-values.enabled")) {
   gCSSProperties["float"].invalid_values.push("inline-end");
   gCSSProperties["clear"].invalid_values.push("inline-start");
   gCSSProperties["clear"].invalid_values.push("inline-end");
+}
+
+if (IsCSSPropertyPrefEnabled("layout.css.text-emphasis.enabled")) {
+  gCSSProperties["text-emphasis"] = {
+    domProp: "textEmphasis",
+    inherited: true,
+    type: CSS_TYPE_TRUE_SHORTHAND,
+    subproperties: [ "text-emphasis-style", "text-emphasis-color" ],
+    initial_values: [ "none currentColor", "currentColor none", "none", "currentColor" ],
+    other_values: [ "filled dot black", "#f00 circle open", "sesame filled rgba(0,0,255,0.5)", "red", "none black", "green none", "currentColor filled", "currentColor open" ],
+    invalid_values: [ "filled black dot", "filled filled red", "open open circle #000", "circle dot #f00", "rubbish" ]
+  };
+  gCSSProperties["text-emphasis-color"] = {
+    domProp: "textEmphasisColor",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    prerequisites: { "color": "black" },
+    initial_values: [ "currentColor", "-moz-use-text-color" ],
+    other_values: [ "red", "rgba(255,255,255,0.5)", "transparent" ],
+    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
+  };
+  gCSSProperties["text-emphasis-position"] = {
+    domProp: "textEmphasisPosition",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "over right", "right over" ],
+    other_values: [ "over left", "left over", "under left", "left under", "under right", "right under" ],
+    invalid_values: [ "over over", "left left", "over right left", "rubbish left", "over rubbish" ]
+  };
+  gCSSProperties["text-emphasis-style"] = {
+    domProp: "textEmphasisStyle",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "none" ],
+    other_values: [ "filled", "open", "dot", "circle", "double-circle", "triangle", "sesame", "'#'",
+                    "filled dot", "filled circle", "filled double-circle", "filled triangle", "filled sesame",
+                    "dot filled", "circle filled", "double-circle filled", "triangle filled", "sesame filled",
+                    "dot open", "circle open", "double-circle open", "triangle open", "sesame open" ],
+    invalid_values: [ "rubbish", "dot rubbish", "rubbish dot", "open rubbish", "rubbish open", "open filled", "dot circle",
+                      "open '#'", "'#' filled", "dot '#'", "'#' circle", "1", "1 open", "open 1" ]
+  };
 }
 
 // Copy aliased properties' fields from their alias targets.

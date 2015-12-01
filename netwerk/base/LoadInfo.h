@@ -17,6 +17,7 @@
 #include "mozilla/BasePrincipal.h"
 
 class nsINode;
+class nsPIDOMWindow;
 class nsXMLHttpRequest;
 
 namespace mozilla {
@@ -76,7 +77,8 @@ private:
            uint64_t aParentOuterWindowID,
            bool aEnforceSecurity,
            bool aInitialSecurityCheckDone,
-           const OriginAttributes& aOriginAttributes,
+           bool aIsThirdPartyRequest,
+           const NeckoOriginAttributes& aOriginAttributes,
            nsTArray<nsCOMPtr<nsIPrincipal>>& aRedirectChainIncludingInternalRedirects,
            nsTArray<nsCOMPtr<nsIPrincipal>>& aRedirectChain);
   LoadInfo(const LoadInfo& rhs);
@@ -87,6 +89,8 @@ private:
     nsILoadInfo** outLoadInfo);
 
   ~LoadInfo();
+
+  void ComputeIsThirdPartyContext(nsPIDOMWindow* aOuterWindow);
 
   // This function is the *only* function which can change the securityflags
   // of a loadinfo. It only exists because of the XHR code. Don't call it
@@ -108,7 +112,8 @@ private:
   uint64_t                         mParentOuterWindowID;
   bool                             mEnforceSecurity;
   bool                             mInitialSecurityCheckDone;
-  OriginAttributes                 mOriginAttributes;
+  bool                             mIsThirdPartyContext;
+  NeckoOriginAttributes            mOriginAttributes;
   nsTArray<nsCOMPtr<nsIPrincipal>> mRedirectChainIncludingInternalRedirects;
   nsTArray<nsCOMPtr<nsIPrincipal>> mRedirectChain;
 };

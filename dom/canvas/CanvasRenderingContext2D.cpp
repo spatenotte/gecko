@@ -273,8 +273,16 @@ public:
       } else {
         mode = ExtendMode::REPEAT;
       }
+
+      Filter filter;
+      if (state.imageSmoothingEnabled) {
+        filter = Filter::GOOD;
+      } else {
+        filter = Filter::POINT;
+      }
+
       mPattern.InitSurfacePattern(state.patternStyles[aStyle]->mSurface, mode,
-                                  state.patternStyles[aStyle]->mTransform);
+                                  state.patternStyles[aStyle]->mTransform, filter);
     }
 
     return *mPattern.GetPattern();
@@ -1196,13 +1204,20 @@ bool CanvasRenderingContext2D::SwitchRenderingMode(RenderingMode aRenderingMode)
   }
 
 #ifdef USE_SKIA_GPU
+  // Do not attempt to switch into GL mode if the platform doesn't allow it.
+  if ((aRenderingMode == RenderingMode::OpenGLBackendMode) &&
+      (!gfxPlatform::GetPlatform()->HaveChoiceOfHWAndSWCanvas() ||
+       !gfxPlatform::GetPlatform()->UseAcceleratedSkiaCanvas())) {
+      return false;
+  }
+
   if (mRenderingMode == RenderingMode::OpenGLBackendMode) {
     if (mVideoTexture) {
       gfxPlatform::GetPlatform()->GetSkiaGLGlue()->GetGLContext()->MakeCurrent();
       gfxPlatform::GetPlatform()->GetSkiaGLGlue()->GetGLContext()->fDeleteTextures(1, &mVideoTexture);
     }
-	  mCurrentVideoSize.width = 0;
-	  mCurrentVideoSize.height = 0;
+    mCurrentVideoSize.width = 0;
+    mCurrentVideoSize.height = 0;
   }
 #endif
 
@@ -2105,15 +2120,14 @@ CanvasRenderingContext2D::CreatePattern(const CanvasImageSource& source,
     nsLayoutUtils::SurfaceFromElement(htmlElement,
       nsLayoutUtils::SFE_WANT_FIRST_FRAME, mTarget);
 
-  if (!res.mSourceSurface) {
+  if (!res.GetSourceSurface()) {
     error.Throw(NS_ERROR_NOT_AVAILABLE);
     return nullptr;
   }
 
-  RefPtr<CanvasPattern> pat =
-    new CanvasPattern(this, res.mSourceSurface, repeatMode, res.mPrincipal,
-                             res.mIsWriteOnly, res.mCORSUsed);
-
+  RefPtr<CanvasPattern> pat = new CanvasPattern(this, res.GetSourceSurface(), repeatMode,
+                                                res.mPrincipal, res.mIsWriteOnly,
+                                                res.mCORSUsed);
   return pat.forget();
 }
 
@@ -3967,16 +3981,20 @@ gfxFontGroup *CanvasRenderingContext2D::GetCurrentFontStyle()
     nsCOMPtr<nsIPresShell> presShell = GetPresShell();
     bool fontUpdated = SetFontInternal(kDefaultFontStyle, err);
     if (err.Failed() || !fontUpdated) {
+      err.SuppressException();
       gfxFontStyle style;
       style.size = kDefaultFontSize;
       gfxTextPerfMetrics* tp = nullptr;
       if (presShell && !presShell->IsDestroying()) {
         tp = presShell->GetPresContext()->GetTextPerfMetrics();
       }
+      int32_t perDevPixel, perCSSPixel;
+      GetAppUnitsValues(&perDevPixel, &perCSSPixel);
+      gfxFloat devToCssSize = gfxFloat(perDevPixel) / gfxFloat(perCSSPixel);
       CurrentState().fontGroup =
         gfxPlatform::GetPlatform()->CreateFontGroup(FontFamilyList(eFamily_sans_serif),
                                                     &style, tp,
-                                                    nullptr);
+                                                    nullptr, devToCssSize);
       if (CurrentState().fontGroup) {
         CurrentState().font = kDefaultFontStyle;
       } else {
@@ -5395,9 +5413,9 @@ CanvasRenderingContext2D::PutImageData_explicit(int32_t x, int32_t y, uint32_t w
   uint8_t* srcLine = aArray->Data() + copyY * (w * 4) + copyX * 4;
 #if 0
   printf("PutImageData_explicit: dirty x=%d y=%d w=%d h=%d copy x=%d y=%d w=%d h=%d ext x=%d y=%d w=%d h=%d\n",
-	     dirtyRect.x, dirtyRect.y, copyWidth, copyHeight,
-	     copyX, copyY, copyWidth, copyHeight,
-	     x, y, w, h);
+       dirtyRect.x, dirtyRect.y, copyWidth, copyHeight,
+       copyX, copyY, copyWidth, copyHeight,
+       x, y, w, h);
 #endif
   for (uint32_t j = 0; j < copyHeight; j++) {
     uint8_t *src = srcLine;

@@ -652,16 +652,6 @@ menuitem.bookmark-item {
   #bookmarks-menu-button.toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
     list-style-image: url("chrome://browser/skin/Toolbar-lunaSilver.png");
   }
-
-  #loop-button {
-    list-style-image: url(chrome://browser/skin/loop/toolbar-lunaSilver.png)
-  }
-}
-
-@media (-moz-windows-theme: luna-silver) and (min-resolution: 1.1dppx) {
-  #loop-button {
-    list-style-image: url(chrome://browser/skin/loop/toolbar-lunaSilver@2x.png)
-  }
 }
 
 #main-window:not([customizing]) .toolbarbutton-1[disabled=true] > .toolbarbutton-icon,
@@ -2316,19 +2306,6 @@ notification[value="translation"] {
   -moz-appearance: none;
 }
 
-/* Loop/ Hello browser styles */
-
-notification[value="loop-sharing-notification"] .button-menubutton-button {
-  -moz-appearance: none;
-  min-width: 0;
-  border: 0;
-  margin: 0;
-}
-
-notification[value="loop-sharing-notification"] .messageImage {
-  list-style-image: url(chrome://browser/skin/webRTC-shareScreen-16.png);
-}
-
 /* Bookmarks roots menu-items */
 #subscribeToPageMenuitem:not([disabled]),
 #subscribeToPageMenupopup,
@@ -2665,22 +2642,6 @@ notification[value="loop-sharing-notification"] .messageImage {
   width: 40px;
   height: 20px;
   position: relative;
-}
-
-@media (-moz-os-version: windows-xp),
-       (-moz-os-version: windows-vista),
-       (-moz-os-version: windows-win7) {
-  #TabsToolbar > .private-browsing-indicator {
-    background-image: url("chrome://browser/skin/privatebrowsing-mask-tabstrip-XPVista7.png");
-  }
-
-  /* We're intentionally using the titlebar asset here for fullscreen mode.
-   * See bug 1008183.
-   */
-  #private-browsing-indicator-titlebar > .private-browsing-indicator,
-  #main-window[inFullscreen] #TabsToolbar > .private-browsing-indicator {
-    background-image: url("chrome://browser/skin/privatebrowsing-mask-titlebar-XPVista7.png");
-  }
 }
 
 @media (-moz-os-version: windows-xp) {

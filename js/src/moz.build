@@ -50,9 +50,6 @@ with Files('../public/TrackedOptimizationInfo.h'):
     BUG_COMPONENT = component_jit
 
 
-if CONFIG['DEHYDRA_PATH']:
-    DIRS += ['analysis-tests']
-
 if CONFIG['JS_BUNDLED_EDITLINE']:
     DIRS += ['editline']
 
@@ -143,12 +140,14 @@ EXPORTS.js += [
 ]
 
 UNIFIED_SOURCES += [
-    'asmjs/AsmJSCompile.cpp',
     'asmjs/AsmJSFrameIterator.cpp',
     'asmjs/AsmJSLink.cpp',
     'asmjs/AsmJSModule.cpp',
     'asmjs/AsmJSSignalHandlers.cpp',
     'asmjs/AsmJSValidate.cpp',
+    'asmjs/WasmGenerator.cpp',
+    'asmjs/WasmIonCompile.cpp',
+    'asmjs/WasmStubs.cpp',
     'builtin/AtomicsObject.cpp',
     'builtin/Eval.cpp',
     'builtin/Intl.cpp',
@@ -478,6 +477,7 @@ elif CONFIG['JS_CODEGEN_ARM64']:
     if CONFIG['JS_SIMULATOR_ARM64']:
         UNIFIED_SOURCES += [
             'jit/arm64/vixl/Debugger-vixl.cpp',
+            'jit/arm64/vixl/Logic-vixl.cpp',
             'jit/arm64/vixl/MozSimulator-vixl.cpp',
             'jit/arm64/vixl/Simulator-vixl.cpp'
         ]
@@ -704,3 +704,10 @@ selfhosted.inputs = [
     'builtin/TypedObject.js',
     'builtin/WeakSet.js'
 ]
+
+if CONFIG['JS_HAS_CTYPES']:
+    if CONFIG['MOZ_NATIVE_FFI']:
+        CXXFLAGS += CONFIG['MOZ_FFI_CFLAGS']
+    else:
+        # Windows needs this to be linked with a static library.
+        DEFINES['FFI_BUILDING'] = True

@@ -11,6 +11,7 @@
 #include "jsnativestack.h"
 #include "jsnum.h" // For FIX_FPU()
 
+#include "asmjs/WasmIonCompile.h"
 #include "frontend/BytecodeCompiler.h"
 #include "gc/GCInternals.h"
 #include "jit/IonBuilder.h"
@@ -78,19 +79,15 @@ js::SetFakeCPUCount(size_t count)
 }
 
 bool
-js::StartOffThreadAsmJSCompile(ExclusiveContext* cx, AsmJSParallelTask* asmData)
+js::StartOffThreadWasmCompile(ExclusiveContext* cx, wasm::CompileTask* task)
 {
-    // Threads already initialized by the AsmJS compiler.
-    MOZ_ASSERT(asmData->mir);
-    MOZ_ASSERT(asmData->lir == nullptr);
-
     AutoLockHelperThreadState lock;
 
     // Don't append this task if another failed.
-    if (HelperThreadState().asmJSFailed())
+    if (HelperThreadState().wasmFailed())
         return false;
 
-    if (!HelperThreadState().asmJSWorklist().append(asmData))
+    if (!HelperThreadState().wasmWorklist().append(task))
         return false;
 
     HelperThreadState().notifyOne(GlobalHelperThreadState::PRODUCER);
@@ -501,8 +498,6 @@ GlobalHelperThreadState::ensureInitialized()
         }
     }
 
-    resetAsmJSFailureState();
-
     return true;
 }
 
@@ -510,13 +505,12 @@ GlobalHelperThreadState::GlobalHelperThreadState()
  : cpuCount(0),
    threadCount(0),
    threads(nullptr),
-   asmJSCompilationInProgress(false),
+   wasmCompilationInProgress(false),
+   numWasmFailedJobs(0),
    helperLock(nullptr),
    consumerWakeup(nullptr),
    producerWakeup(nullptr),
-   pauseWakeup(nullptr),
-   numAsmJSFailedJobs(0),
-   asmJSFailedFunction(nullptr)
+   pauseWakeup(nullptr)
 {
     cpuCount = GetCPUCount();
     threadCount = ThreadCountForCPUCount(cpuCount);
@@ -682,7 +676,7 @@ GlobalHelperThreadState::maxUnpausedIonCompilationThreads() const
 }
 
 size_t
-GlobalHelperThreadState::maxAsmJSCompilationThreads() const
+GlobalHelperThreadState::maxWasmCompilationThreads() const
 {
     if (IsHelperThreadSimulatingOOM(js::oom::THREAD_TYPE_ASMJS))
         return 1;
@@ -729,16 +723,16 @@ GlobalHelperThreadState::maxGCParallelThreads() const
 }
 
 bool
-GlobalHelperThreadState::canStartAsmJSCompile()
+GlobalHelperThreadState::canStartWasmCompile()
 {
-    // Don't execute an AsmJS job if an earlier one failed.
+    // Don't execute an wasm job if an earlier one failed.
     MOZ_ASSERT(isLocked());
-    if (asmJSWorklist().empty() || numAsmJSFailedJobs)
+    if (wasmWorklist().empty() || numWasmFailedJobs)
         return false;
 
-    // Honor the maximum allowed threads to compile AsmJS jobs at once,
+    // Honor the maximum allowed threads to compile wasm jobs at once,
     // to avoid oversaturating the machine.
-    if (!checkTaskThreadLimit<AsmJSParallelTask*>(maxAsmJSCompilationThreads()))
+    if (!checkTaskThreadLimit<wasm::CompileTask*>(maxWasmCompilationThreads()))
         return false;
 
     return true;
@@ -1193,53 +1187,31 @@ HelperThread::ThreadMain(void* arg)
 }
 
 void
-HelperThread::handleAsmJSWorkload()
+HelperThread::handleWasmWorkload()
 {
     MOZ_ASSERT(HelperThreadState().isLocked());
-    MOZ_ASSERT(HelperThreadState().canStartAsmJSCompile());
+    MOZ_ASSERT(HelperThreadState().canStartWasmCompile());
     MOZ_ASSERT(idle());
 
-    currentTask.emplace(HelperThreadState().asmJSWorklist().popCopy());
+    currentTask.emplace(HelperThreadState().wasmWorklist().popCopy());
     bool success = false;
 
-    AsmJSParallelTask* asmData = asmJSTask();
-    do {
+    wasm::CompileTask* task = wasmTask();
+    {
         AutoUnlockHelperThreadState unlock;
-        PerThreadData::AutoEnterRuntime enter(threadData.ptr(), asmData->runtime);
-
-        jit::JitContext jcx(asmData->mir->compartment->runtime(),
-                            asmData->mir->compartment,
-                            &asmData->mir->alloc());
-
-        int64_t before = PRMJ_Now();
-        jit::AutoSpewEndFunction spewEndFunction(asmData->mir);
-
-        if (!OptimizeMIR(asmData->mir))
-            break;
-
-        asmData->lir = GenerateLIR(asmData->mir);
-        if (!asmData->lir)
-            break;
-
-        int64_t after = PRMJ_Now();
-        asmData->compileTime = (after - before) / PRMJ_USEC_PER_MSEC;
-
-        success = true;
-    } while(0);
+        PerThreadData::AutoEnterRuntime enter(threadData.ptr(), task->args().runtime);
+        success = wasm::CompileFunction(task);
+    }
 
     // On success, try to move work to the finished list.
     if (success)
-        success = HelperThreadState().asmJSFinishedList().append(asmData);
+        success = HelperThreadState().wasmFinishedList().append(task);
 
-    // On failure, signal parent for harvesting in CancelOutstandingJobs().
-    if (!success) {
-        HelperThreadState().noteAsmJSFailure(asmData->func);
-        HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER);
-        currentTask.reset();
-        return;
-    }
+    // On failure, note the failure for harvesting by the parent.
+    if (!success)
+        HelperThreadState().noteWasmFailure();
 
-    // Notify the main thread in case it's blocked waiting for a LifoAlloc.
+    // Notify the main thread in case it's waiting.
     HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER);
     currentTask.reset();
 }
@@ -1583,7 +1555,7 @@ HelperThread::threadLoop()
         while (true) {
             if (terminate)
                 return;
-            if (HelperThreadState().canStartAsmJSCompile() ||
+            if (HelperThreadState().canStartWasmCompile() ||
                 (ionCompile = HelperThreadState().pendingIonCompileHasSufficientPriority()) ||
                 HelperThreadState().canStartParseTask() ||
                 HelperThreadState().canStartCompressionTask() ||
@@ -1595,10 +1567,10 @@ HelperThread::threadLoop()
             HelperThreadState().wait(GlobalHelperThreadState::PRODUCER);
         }
 
-        // Dispatch tasks, prioritizing AsmJS work.
-        if (HelperThreadState().canStartAsmJSCompile()) {
+        // Dispatch tasks, prioritizing wasm work.
+        if (HelperThreadState().canStartWasmCompile()) {
             js::oom::SetThreadType(js::oom::THREAD_TYPE_ASMJS);
-            handleAsmJSWorkload();
+            handleWasmWorkload();
         } else if (ionCompile) {
             js::oom::SetThreadType(js::oom::THREAD_TYPE_ION);
             handleIonWorkload();

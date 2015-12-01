@@ -110,6 +110,14 @@ class TaskQueue;
 extern LazyLogModule gMediaDecoderLog;
 extern LazyLogModule gMediaSampleLog;
 
+enum class MediaEventType : int8_t {
+  PlaybackStarted,
+  PlaybackStopped,
+  PlaybackEnded,
+  DecodeError,
+  Invalidate
+};
+
 /*
   The state machine class. This manages the decoding and seeking in the
   MediaDecoderReader on the decode task queue, and A/V sync on the shared
@@ -223,6 +231,21 @@ public:
   TimedMetadataEventSource& TimedMetadataEvent() {
     return mMetadataManager.TimedMetadataEvent();
   }
+
+  MediaEventSourceExc<nsAutoPtr<MediaInfo>,
+                      nsAutoPtr<MetadataTags>,
+                      MediaDecoderEventVisibility>&
+  MetadataLoadedEvent() { return mMetadataLoadedEvent; }
+
+  MediaEventSourceExc<nsAutoPtr<MediaInfo>,
+                      MediaDecoderEventVisibility>&
+  FirstFrameLoadedEvent() { return mFirstFrameLoadedEvent; }
+
+  MediaEventSource<MediaEventType>&
+  OnPlaybackEvent() { return mOnPlaybackEvent; }
+
+  MediaEventSource<MediaDecoderEventVisibility>&
+  OnSeekingStart() { return mOnSeekingStart; }
 
   // Immutable after construction - may be called on any thread.
   bool IsRealTime() const { return mRealTime; }
@@ -1185,6 +1208,15 @@ private:
 
   MediaEventListener mAudioQueueListener;
   MediaEventListener mVideoQueueListener;
+
+  MediaEventProducerExc<nsAutoPtr<MediaInfo>,
+                        nsAutoPtr<MetadataTags>,
+                        MediaDecoderEventVisibility> mMetadataLoadedEvent;
+  MediaEventProducerExc<nsAutoPtr<MediaInfo>,
+                        MediaDecoderEventVisibility> mFirstFrameLoadedEvent;
+
+  MediaEventProducer<MediaEventType> mOnPlaybackEvent;
+  MediaEventProducer<MediaDecoderEventVisibility> mOnSeekingStart;
 
   // True if audio is offloading.
   // Playback will not start when audio is offloading.

@@ -295,32 +295,32 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     // Emit a branch that can be toggled to a non-operation. On MIPS64 we use
     // "andi" instruction to toggle the branch.
     // See ToggleToJmp(), ToggleToCmp().
-    CodeOffsetLabel toggledJump(Label* label);
+    CodeOffset toggledJump(Label* label);
 
     // Emit a "jalr" or "nop" instruction. ToggleCall can be used to patch
     // this instruction.
-    CodeOffsetLabel toggledCall(JitCode* target, bool enabled);
+    CodeOffset toggledCall(JitCode* target, bool enabled);
 
     static size_t ToggledCallSize(uint8_t* code) {
         // Six instructions used in: MacroAssemblerMIPS64Compat::toggledCall
         return 6 * sizeof(uint32_t);
     }
 
-    CodeOffsetLabel pushWithPatch(ImmWord imm) {
-        CodeOffsetLabel label = movWithPatch(imm, ScratchRegister);
+    CodeOffset pushWithPatch(ImmWord imm) {
+        CodeOffset offset = movWithPatch(imm, ScratchRegister);
         ma_push(ScratchRegister);
-        return label;
+        return offset;
     }
 
-    CodeOffsetLabel movWithPatch(ImmWord imm, Register dest) {
-        CodeOffsetLabel label = CodeOffsetLabel(currentOffset());
+    CodeOffset movWithPatch(ImmWord imm, Register dest) {
+        CodeOffset offset = CodeOffset(currentOffset());
         ma_liPatchable(dest, imm, Li64);
-        return label;
+        return offset;
     }
-    CodeOffsetLabel movWithPatch(ImmPtr imm, Register dest) {
-        CodeOffsetLabel label = CodeOffsetLabel(currentOffset());
+    CodeOffset movWithPatch(ImmPtr imm, Register dest) {
+        CodeOffset offset = CodeOffset(currentOffset());
         ma_liPatchable(dest, imm);
-        return label;
+        return offset;
     }
 
     void jump(Label* label) {
@@ -444,6 +444,7 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
 
     void branchTestBoolean(Condition cond, const ValueOperand& value, Label* label);
     void branchTestBoolean(Condition cond, Register tag, Label* label);
+    void branchTestBoolean(Condition cond, const Address& address, Label* label);
     void branchTestBoolean(Condition cond, const BaseIndex& src, Label* label);
 
     void branch32(Condition cond, Register lhs, Register rhs, Label* label) {
@@ -1094,8 +1095,6 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     void add64(Imm32 imm, Register64 dest) {
         ma_daddu(dest.reg, imm);
     }
-    void sub32(Imm32 imm, Register dest);
-    void sub32(Register src, Register dest);
 
     void incrementInt32Value(const Address& addr) {
         add32(Imm32(1), addr);
@@ -1119,7 +1118,7 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
             break;
           case NonZero:
           case Zero:
-            sub32(src, dest);
+            ma_subu(dest, src);
             ma_b(dest, dest, overflow, cond);
             break;
           default:
@@ -1333,8 +1332,8 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     bool buildOOLFakeExitFrame(void* fakeReturnAddr);
 
   public:
-    CodeOffsetLabel labelForPatch() {
-        return CodeOffsetLabel(nextOffset().getOffset());
+    CodeOffset labelForPatch() {
+        return CodeOffset(nextOffset().getOffset());
     }
 
     void memIntToValue(Address Source, Address Dest) {

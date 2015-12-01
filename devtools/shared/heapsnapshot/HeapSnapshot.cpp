@@ -11,12 +11,15 @@
 
 #include "js/Debug.h"
 #include "js/TypeDecls.h"
-#include "js/UbiNodeCensus.h"
 #include "js/UbiNodeBreadthFirst.h"
+#include "js/UbiNodeCensus.h"
+#include "js/UbiNodeDominatorTree.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/devtools/AutoMemMap.h"
 #include "mozilla/devtools/CoreDump.pb.h"
 #include "mozilla/devtools/DeserializedNode.h"
+#include "mozilla/devtools/DominatorTree.h"
 #include "mozilla/devtools/FileDescriptorOutputStream.h"
 #include "mozilla/devtools/HeapSnapshotTempFileHelperChild.h"
 #include "mozilla/devtools/ZeroCopyNSIOutputStream.h"
@@ -54,20 +57,7 @@ using JS::ubi::AtomOrTwoByteChars;
 
 /*** Cycle Collection Boilerplate *****************************************************************/
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(HeapSnapshot)
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(HeapSnapshot)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(HeapSnapshot)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(HeapSnapshot)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(HeapSnapshot, mParent)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(HeapSnapshot)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(HeapSnapshot)
@@ -538,7 +528,7 @@ HeapSnapshot::ComputeDominatorTree(ErrorResult& rv)
     return nullptr;
   }
 
-  return MakeAndAddRef<DominatorTree>(Move(*maybeTree), mParent);
+  return MakeAndAddRef<DominatorTree>(Move(*maybeTree), this, mParent);
 }
 
 

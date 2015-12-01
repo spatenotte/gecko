@@ -922,18 +922,6 @@ MacroAssemblerMIPS64Compat::add32(Imm32 imm, const Address& dest)
 }
 
 void
-MacroAssemblerMIPS64Compat::sub32(Imm32 imm, Register dest)
-{
-    ma_subu(dest, dest, imm);
-}
-
-void
-MacroAssemblerMIPS64Compat::sub32(Register src, Register dest)
-{
-    as_subu(dest, dest, src);
-}
-
-void
 MacroAssemblerMIPS64Compat::addPtr(Register src, Register dest)
 {
     ma_daddu(dest, src);
@@ -989,7 +977,7 @@ MacroAssemblerMIPS64Compat::movePtr(ImmPtr imm, Register dest)
 void
 MacroAssemblerMIPS64Compat::movePtr(AsmJSImmPtr imm, Register dest)
 {
-    append(AsmJSAbsoluteLink(CodeOffsetLabel(nextOffset().getOffset()), imm.kind()));
+    append(AsmJSAbsoluteLink(CodeOffset(nextOffset().getOffset()), imm.kind()));
     ma_liPatchable(dest, ImmWord(-1));
 }
 
@@ -1468,6 +1456,14 @@ MacroAssemblerMIPS64Compat:: branchTestBoolean(Condition cond, Register tag, Lab
 {
     MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
     ma_b(tag, ImmTag(JSVAL_TAG_BOOLEAN), label, cond);
+}
+
+void
+MacroAssemblerMIPS64Compat::branchTestBoolean(Condition cond, const Address& address, Label* label)
+{
+    MOZ_ASSERT(cond == Equal || cond == NotEqual);
+    extractTag(address, SecondScratchReg);
+    ma_b(SecondScratchReg, ImmTag(JSVAL_TAG_BOOLEAN), label, cond);
 }
 
 void
@@ -2628,19 +2624,19 @@ MacroAssemblerMIPS64Compat::atomicExchangeToTypedIntArray(Scalar::Type arrayType
                                                           Register offsetTemp, Register maskTemp,
                                                           AnyRegister output);
 
-CodeOffsetLabel
+CodeOffset
 MacroAssemblerMIPS64Compat::toggledJump(Label* label)
 {
-    CodeOffsetLabel ret(nextOffset().getOffset());
+    CodeOffset ret(nextOffset().getOffset());
     ma_b(label);
     return ret;
 }
 
-CodeOffsetLabel
+CodeOffset
 MacroAssemblerMIPS64Compat::toggledCall(JitCode* target, bool enabled)
 {
     BufferOffset bo = nextOffset();
-    CodeOffsetLabel offset(bo.getOffset());
+    CodeOffset offset(bo.getOffset());
     addPendingJump(bo, ImmPtr(target->raw()), Relocation::JITCODE);
     ma_liPatchable(ScratchRegister, ImmPtr(target->raw()));
     if (enabled) {

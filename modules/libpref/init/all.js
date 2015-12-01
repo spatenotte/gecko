@@ -345,7 +345,7 @@ pref("media.wave.enabled", true);
 #ifdef MOZ_WEBM
 pref("media.webm.enabled", true);
 #if defined(MOZ_FMP4) && defined(MOZ_WMF)
-pref("media.webm.intel_decoder.enabled", true);
+pref("media.webm.intel_decoder.enabled", false);
 #endif
 #endif
 #ifdef MOZ_GSTREAMER
@@ -439,6 +439,8 @@ pref("media.getusermedia.noise_enabled", false);
 pref("media.getusermedia.aec_enabled", true);
 pref("media.getusermedia.noise_enabled", true);
 #endif
+pref("media.getusermedia.aec_extended_filter", true);
+pref("media.getusermedia.aec_delay_agnostic", true);
 pref("media.getusermedia.noise", 1);
 pref("media.getusermedia.agc_enabled", false);
 pref("media.getusermedia.agc", 1);
@@ -551,7 +553,6 @@ pref("apz.axis_lock.breakout_threshold", "0.03125");  // 1/32 inches
 pref("apz.axis_lock.breakout_angle", "0.3926991");    // PI / 8 (22.5 degrees)
 pref("apz.axis_lock.direct_pan_angle", "1.047197");   // PI / 3 (60 degrees)
 pref("apz.content_response_timeout", 300);
-pref("apz.cross_slide.enabled", false);
 pref("apz.drag.enabled", false);
 pref("apz.danger_zone_x", 50);
 pref("apz.danger_zone_y", 100);
@@ -1036,7 +1037,6 @@ pref("editor.positioning.offset",            0);
 
 // Scripts & Windows prefs
 pref("dom.disable_beforeunload",            false);
-pref("dom.disable_image_src_set",           false);
 pref("dom.disable_window_flip",             false);
 pref("dom.disable_window_move_resize",      false);
 pref("dom.disable_window_status_change",    false);
@@ -1993,6 +1993,9 @@ pref("security.mixed_content.block_display_content", false);
 // Sub-resource integrity
 pref("security.sri.enable", true);
 
+// OCSP must-staple
+pref("security.ssl.enable_ocsp_must_staple", true);
+
 // Disable pinning checks by default.
 pref("security.cert_pinning.enforcement_level", 0);
 // Do not process hpkp headers rooted by not built in roots by default.
@@ -2297,13 +2300,6 @@ pref("layout.css.convertFromNode.enabled", false);
 pref("layout.css.convertFromNode.enabled", true);
 #endif
 
-// Is support for unicode-range enabled?
-#ifdef RELEASE_BUILD
-pref("layout.css.unicode-range.enabled", false);
-#else
-pref("layout.css.unicode-range.enabled", true);
-#endif
-
 // Is support for CSS "text-align: true X" enabled?
 pref("layout.css.text-align-true-value.enabled", false);
 
@@ -2388,14 +2384,6 @@ pref("layout.css.grid-template-subgrid-value.enabled", false);
 // Is support for CSS contain enabled?
 pref("layout.css.contain.enabled", false);
 
-// Is support for CSS Ruby enabled?
-//
-// When this pref is removed, make sure that the pref callback registration
-// in nsLayoutStylesheetCache::EnsureGlobal and the invalidation of
-// mUASheet in nsLayoutStylesheetCache::DependentPrefChanged (if it's not
-// otherwise needed) are removed.
-pref("layout.css.ruby.enabled", true);
-
 // Is support for CSS display:contents enabled?
 pref("layout.css.display-contents.enabled", true);
 
@@ -2439,6 +2427,9 @@ pref("layout.css.control-characters.visible", false);
 #else
 pref("layout.css.control-characters.visible", true);
 #endif
+
+// Is support for text-emphasis enabled?
+pref("layout.css.text-emphasis.enabled", false);
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -4207,6 +4198,8 @@ pref("webgl.enable-privileged-extensions", false);
 pref("webgl.bypass-shader-validation", false);
 pref("webgl.enable-prototype-webgl2", false);
 pref("webgl.disable-fail-if-major-performance-caveat", false);
+pref("webgl.disable-DOM-blit-uploads", false);
+pref("webgl.webgl2-compat-mode", false);
 
 #ifdef RELEASE_BUILD
 // Keep this disabled on Release and Beta for now. (see bug 1171228)
@@ -4222,6 +4215,7 @@ pref("webgl.vendor-string-override", "");
 pref("webgl.angle.try-d3d11", true);
 pref("webgl.angle.force-d3d11", false);
 pref("webgl.angle.force-warp", false);
+pref("webgl.dxgl.enabled", false);
 #endif
 
 pref("gfx.offscreencanvas.enabled", false);
@@ -4833,12 +4827,16 @@ pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,tes
 pref("urlclassifier.phishTable", "goog-phish-shavar,test-phish-simple");
 pref("urlclassifier.downloadBlockTable", "");
 pref("urlclassifier.downloadAllowTable", "");
-pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,goog-downloadwhite-digest256,mozstd-track-digest256,mozstd-trackwhite-digest256,mozfull-track-digest256");
+pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-forbid-simple,goog-downloadwhite-digest256,mozstd-track-digest256,mozstd-trackwhite-digest256,mozfull-track-digest256");
 
 // The table and update/gethash URLs for Safebrowsing phishing and malware
 // checks.
 pref("urlclassifier.trackingTable", "test-track-simple,mozstd-track-digest256");
 pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
+
+// The table and global pref for blocking access to sites forbidden by policy
+pref("browser.safebrowsing.forbiddenURIs.enabled", false);
+pref("urlclassifier.forbiddenTable", "test-forbid-simple");
 
 pref("browser.safebrowsing.provider.mozilla.lists", "mozstd-track-digest256,mozstd-trackwhite-digest256,mozfull-track-digest256");
 pref("browser.safebrowsing.provider.mozilla.updateURL", "https://shavar.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
@@ -4851,6 +4849,9 @@ pref("browser.safebrowsing.provider.mozilla.lists.mozstd.name", "mozstdName");
 pref("browser.safebrowsing.provider.mozilla.lists.mozstd.description", "mozstdDesc");
 pref("browser.safebrowsing.provider.mozilla.lists.mozfull.name", "mozfullName");
 pref("browser.safebrowsing.provider.mozilla.lists.mozfull.description", "mozfullDesc");
+
+// Allow users to ignore Safe Browsing warnings.
+pref("browser.safebrowsing.allowOverride", true);
 
 // Turn off Spatial navigation by default.
 pref("snav.enabled", false);

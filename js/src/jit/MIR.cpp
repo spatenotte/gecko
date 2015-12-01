@@ -1090,7 +1090,7 @@ void
 MCompare::printOpcode(GenericPrinter& out) const
 {
     MDefinition::printOpcode(out);
-    out.printf(" %s", js_CodeName[jsop()]);
+    out.printf(" %s", CodeName[jsop()]);
 }
 
 void
@@ -1434,6 +1434,13 @@ MApplyArgs::New(TempAllocator& alloc, JSFunction* target, MDefinition* fun, MDef
                 MDefinition* self)
 {
     return new(alloc) MApplyArgs(target, fun, argc, self);
+}
+
+MApplyArray*
+MApplyArray::New(TempAllocator& alloc, JSFunction* target, MDefinition* fun, MDefinition* elements,
+                 MDefinition* self)
+{
+    return new(alloc) MApplyArray(target, fun, elements, self);
 }
 
 MDefinition*

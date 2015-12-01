@@ -189,7 +189,7 @@ pref("xpinstall.signatures.required", false);
 pref("extensions.enabledScopes", 1);
 pref("extensions.autoupdate.enabled", true);
 pref("extensions.autoupdate.interval", 86400);
-pref("extensions.update.enabled", false);
+pref("extensions.update.enabled", true);
 pref("extensions.update.interval", 86400);
 pref("extensions.dss.enabled", false);
 pref("extensions.dss.switchPending", false);
@@ -559,6 +559,7 @@ pref("layers.async-video.enabled", true);
 #ifdef MOZ_ANDROID_APZ
 pref("layers.async-pan-zoom.enabled", true);
 pref("apz.axis_lock.mode", 1);
+pref("apz.fling_stop_on_tap_threshold", "0.08");
 #endif
 pref("apz.allow_zooming", true);
 pref("layers.progressive-paint", true);
@@ -941,11 +942,8 @@ pref("dom.vr.enabled", true);
 
 pref("browser.tabs.showAudioPlayingIcon", true);
 
-// Enable service workers and fetch interception on non-release Fennec
-#ifndef RELEASE_BUILD
 pref("dom.serviceWorkers.enabled", true);
 pref("dom.serviceWorkers.interception.enabled", true);
-#endif
 
 // The remote content URL where FxAccountsWebChannel messages originate.  Must use HTTPS.
 pref("identity.fxaccounts.remote.webchannel.uri", "https://accounts.firefox.com");

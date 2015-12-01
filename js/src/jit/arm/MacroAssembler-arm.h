@@ -602,25 +602,25 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
         ma_dtr(IsLoad, sp, totSpace, reg, PostIndex);
     }
 
-    CodeOffsetLabel toggledJump(Label* label);
+    CodeOffset toggledJump(Label* label);
 
     // Emit a BLX or NOP instruction. ToggleCall can be used to patch this
     // instruction.
-    CodeOffsetLabel toggledCall(JitCode* target, bool enabled);
+    CodeOffset toggledCall(JitCode* target, bool enabled);
 
-    CodeOffsetLabel pushWithPatch(ImmWord imm) {
+    CodeOffset pushWithPatch(ImmWord imm) {
         ScratchRegisterScope scratch(asMasm());
-        CodeOffsetLabel label = movWithPatch(imm, scratch);
+        CodeOffset label = movWithPatch(imm, scratch);
         ma_push(scratch);
         return label;
     }
 
-    CodeOffsetLabel movWithPatch(ImmWord imm, Register dest) {
-        CodeOffsetLabel label = CodeOffsetLabel(currentOffset());
+    CodeOffset movWithPatch(ImmWord imm, Register dest) {
+        CodeOffset label = CodeOffset(currentOffset());
         ma_movPatchable(Imm32(imm.value), dest, Always, HasMOVWT() ? L_MOVWT : L_LDR);
         return label;
     }
-    CodeOffsetLabel movWithPatch(ImmPtr imm, Register dest) {
+    CodeOffset movWithPatch(ImmPtr imm, Register dest) {
         return movWithPatch(ImmWord(uintptr_t(imm.value)), dest);
     }
 
@@ -1188,8 +1188,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void add32(Register src, Register dest);
     void add32(Imm32 imm, Register dest);
     void add32(Imm32 imm, const Address& dest);
-    void sub32(Imm32 imm, Register dest);
-    void sub32(Register src, Register dest);
     template <typename T>
     void branchAdd32(Condition cond, T src, Register dest, Label* label) {
         add32(src, dest);
@@ -1197,7 +1195,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     }
     template <typename T>
     void branchSub32(Condition cond, T src, Register dest, Label* label) {
-        sub32(src, dest);
+        ma_sub(src, dest, SetCC);
         j(cond, label);
     }
 
@@ -1766,8 +1764,8 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     bool buildOOLFakeExitFrame(void* fakeReturnAddr);
 
   public:
-    CodeOffsetLabel labelForPatch() {
-        return CodeOffsetLabel(nextOffset().getOffset());
+    CodeOffset labelForPatch() {
+        return CodeOffset(nextOffset().getOffset());
     }
 
     void computeEffectiveAddress(const Address& address, Register dest) {

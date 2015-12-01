@@ -171,7 +171,6 @@ APZCTreeManager::UpdateHitTestingTree(CompositorParent* aCompositor,
       [&state] (HitTestingTreeNode* aNode)
       {
         state.mNodesToDestroy.AppendElement(aNode);
-        return TraversalFlag::Continue;
       });
   mRootNode = nullptr;
 
@@ -593,8 +592,9 @@ APZCTreeManager::UpdateHitTestingTree(TreeBuildingState& aState,
   // transform to layer L when we recurse into the children below. If we are at a layer
   // with an APZC, such as P, then we reset the ancestorTransform to just PC, to start
   // the new accumulation as we go down.
-  Matrix4x4 transform = aLayer.GetTransform();
-  Matrix4x4 ancestorTransform = transform;
+  // If a transform is a perspective transform, it's ignored for this purpose
+  // (see bug 1168263).
+  Matrix4x4 ancestorTransform = aLayer.TransformIsPerspective() ? Matrix4x4() : aLayer.GetTransform();
   if (!apzc) {
     ancestorTransform = ancestorTransform * aAncestorTransform;
   }
@@ -672,7 +672,6 @@ APZCTreeManager::FlushApzRepaints(uint64_t aLayersId)
               apzc->FlushRepaintIfPending();
             }
           }
-	  return TraversalFlag::Continue;
         });
   }
   const CompositorParent::LayerTreeState* state = CompositorParent::GetIndirectShadowTree(aLayersId);
@@ -709,7 +708,7 @@ APZCTreeManager::ReceiveInputEvent(InputData& aEvent,
 
       // When the mouse is outside the window we still want to handle dragging
       // but we won't find an APZC. Fallback to root APZC then.
-      if (!apzc) {
+      if (!apzc && mRootNode) {
         apzc = mRootNode->GetApzc();
       }
 
@@ -1273,7 +1272,6 @@ APZCTreeManager::FlushRepaintsToClearScreenToGeckoTransform()
           MOZ_ASSERT(aNode->GetApzc());
           aNode->GetApzc()->FlushRepaintForNewInputBlock();
         }
-	return TraversalFlag::Continue;
       });
 }
 
@@ -1306,7 +1304,6 @@ APZCTreeManager::ClearTree()
       [&nodesToDestroy](HitTestingTreeNode* aNode)
       {
         nodesToDestroy.AppendElement(aNode);
-        return TraversalFlag::Continue;
       });
 
   for (size_t i = 0; i < nodesToDestroy.Length(); i++) {

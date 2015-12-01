@@ -1738,7 +1738,7 @@ Detecting(JSContext* cx, JSScript* script, jsbytecode* pc)
 
     // General case: a branch or equality op follows the access.
     JSOp op = JSOp(*pc);
-    if (js_CodeSpec[op].format & JOF_DETECTING)
+    if (CodeSpec[op].format & JOF_DETECTING)
         return true;
 
     jsbytecode* endpc = script->codeEnd();
@@ -1756,7 +1756,7 @@ Detecting(JSContext* cx, JSScript* script, jsbytecode* pc)
         // Special case #2: don't warn about (obj.prop == undefined).
         JSAtom* atom = script->getAtom(GET_UINT32_INDEX(pc));
         if (atom == cx->names().undefined &&
-            (pc += js_CodeSpec[op].length) < endpc) {
+            (pc += CodeSpec[op].length) < endpc) {
             op = JSOp(*pc);
             return op == JSOP_EQ || op == JSOP_NE || op == JSOP_STRICTEQ || op == JSOP_STRICTNE;
         }
@@ -1836,7 +1836,7 @@ GetNonexistentProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
         return true;
 
     // Do not warn about tests like (obj[prop] == undefined).
-    pc += js_CodeSpec[*pc].length;
+    pc += CodeSpec[*pc].length;
     if (Detecting(cx, script, pc))
         return true;
 
@@ -1978,6 +1978,7 @@ js::GetPropertyForNameLookup(JSContext* cx, HandleObject obj, HandleId id, Mutab
 static bool
 MaybeReportUndeclaredVarAssignment(JSContext* cx, JSString* propname)
 {
+    unsigned flags;
     {
         jsbytecode* pc;
         JSScript* script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
@@ -1986,16 +1987,17 @@ MaybeReportUndeclaredVarAssignment(JSContext* cx, JSString* propname)
 
         // If the code is not strict and extra warnings aren't enabled, then no
         // check is needed.
-        if (!IsStrictSetPC(pc) && !cx->compartment()->options().extraWarnings(cx))
+        if (IsStrictSetPC(pc))
+            flags = JSREPORT_ERROR;
+        else if (cx->compartment()->options().extraWarnings(cx))
+            flags = JSREPORT_WARNING | JSREPORT_STRICT;
+        else
             return true;
     }
 
     JSAutoByteString bytes(cx, propname);
     return !!bytes &&
-           JS_ReportErrorFlagsAndNumber(cx,
-                                        (JSREPORT_WARNING | JSREPORT_STRICT
-                                         | JSREPORT_STRICT_MODE_ERROR),
-                                        GetErrorMessage, nullptr,
+           JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr,
                                         JSMSG_UNDECLARED_VAR, bytes.ptr());
 }
 

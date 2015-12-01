@@ -255,6 +255,13 @@ static_assert((CSS_PROPERTY_PARSE_PROPERTY_MASK &
 // CSS_PROP_LIST_EXCLUDE_INTERNAL section of nsCSSPropList.h.
 #define CSS_PROPERTY_INTERNAL                     (1<<28)
 
+// This property has values that can establish a containing block for
+// fixed positioned and absolutely positioned elements.
+// This should be set for any properties that can cause an element to be
+// such a containing block, as implemented in
+// nsStyleDisplay::IsFixedPosContainingBlock.
+#define CSS_PROPERTY_FIXPOS_CB                    (1<<29)
+
 /**
  * Types of animatable values.
  */
@@ -782,6 +789,9 @@ public:
   static const KTableEntry kTextCombineUprightKTable[];
   static const KTableEntry kTextDecorationLineKTable[];
   static const KTableEntry kTextDecorationStyleKTable[];
+  static const KTableEntry kTextEmphasisPositionKTable[];
+  static const KTableEntry kTextEmphasisStyleFillKTable[];
+  static const KTableEntry kTextEmphasisStyleShapeKTable[];
   static const KTableEntry kTextOrientationKTable[];
   static const KTableEntry kTextOverflowKTable[];
   static const KTableEntry kTextTransformKTable[];

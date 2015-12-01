@@ -5,6 +5,7 @@
  */
 
 typedef unsigned long long NodeId;
+typedef unsigned long long NodeSize;
 
 /**
  * In a directed graph with a root node `R`, a node `A` is said to "dominate" a
@@ -45,4 +46,25 @@ interface DominatorTree {
    * tree was created from.
    */
   readonly attribute NodeId root;
+
+  /**
+   * Get the retained size of the node with the given id. If given an invalid
+   * id, null is returned. Throws an error on OOM.
+   */
+  [Throws]
+  NodeSize? getRetainedSize(NodeId node);
+
+  /**
+   * Get the set of ids of nodes immediately dominated by the node with the
+   * given id. The resulting array is sorted by greatest to least retained
+   * size. If given an invalid id, null is returned. Throws an error on OOM.
+   */
+  [Throws]
+  sequence<NodeId>? getImmediatelyDominated(NodeId node);
+
+  /**
+   * Get the immediate dominator of the node with the given id. Returns null if
+   * given an invalid id, or the id of the root node.
+   */
+  NodeId? getImmediateDominator(NodeId node);
 };

@@ -257,8 +257,8 @@ using namespace mozilla::dom;
 
 typedef nsTArray<Link*> LinkArray;
 
-static PRLogModuleInfo* gDocumentLeakPRLog;
-static PRLogModuleInfo* gCspPRLog;
+static LazyLogModule gDocumentLeakPRLog("DocumentLeak");
+static LazyLogModule gCspPRLog("CSP");
 
 #define NAME_NOT_VALID ((nsSimpleContentList*)1)
 
@@ -1459,15 +1459,9 @@ nsDocument::nsDocument(const char* aContentType)
 {
   SetContentTypeInternal(nsDependentCString(aContentType));
 
-  if (!gDocumentLeakPRLog)
-    gDocumentLeakPRLog = PR_NewLogModule("DocumentLeak");
-
   if (gDocumentLeakPRLog)
     MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug,
            ("DOCUMENT %p created", this));
-
-  if (!gCspPRLog)
-    gCspPRLog = PR_NewLogModule("CSP");
 
   // Start out mLastStyleSheetSet as null, per spec
   SetDOMStringToNull(mLastStyleSheetSet);
@@ -2317,6 +2311,11 @@ nsDocument::ResetStylesheetsToURI(nsIURI* aURI)
   RemoveStyleSheetsFromStyleSets(mAdditionalSheets[eUserSheet], SheetType::User);
   RemoveStyleSheetsFromStyleSets(mAdditionalSheets[eAuthorSheet], SheetType::Doc);
 
+  nsStyleSheetService *sheetService = nsStyleSheetService::GetInstance();
+  if (sheetService) {
+    RemoveStyleSheetsFromStyleSets(*sheetService->AuthorStyleSheets(), SheetType::Doc);
+  }
+
   // Release all the sheets
   mStyleSheets.Clear();
   mOnDemandBuiltInUASheets.Clear();
@@ -2538,7 +2537,10 @@ nsDocument::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
     if (sameTypeParent) {
       mUpgradeInsecureRequests =
         sameTypeParent->GetDocument()->GetUpgradeInsecureRequests();
+      // if the parent document makes use of upgrade-insecure-requests
+      // then subdocument preloads should always be upgraded.
       mUpgradeInsecurePreloads =
+        mUpgradeInsecureRequests ||
         sameTypeParent->GetDocument()->GetUpgradeInsecurePreloads();
     }
   }
@@ -2650,23 +2652,12 @@ nsDocument::ApplySettingsFromCSP(bool aSpeculative)
   }
 
   // 2) apply settings from speculative csp
-  nsCOMPtr<nsIContentSecurityPolicy> preloadCsp;
-  rv = NodePrincipal()->GetPreloadCsp(getter_AddRefs(preloadCsp));
-  if (preloadCsp) {
-    // Set up any Referrer Policy specified by CSP
-    bool hasReferrerPolicy = false;
-    uint32_t referrerPolicy = mozilla::net::RP_Default;
-    rv = preloadCsp->GetReferrerPolicy(&referrerPolicy, &hasReferrerPolicy);
+  if (!mUpgradeInsecurePreloads) {
+    nsCOMPtr<nsIContentSecurityPolicy> preloadCsp;
+    rv = NodePrincipal()->GetPreloadCsp(getter_AddRefs(preloadCsp));
     NS_ENSURE_SUCCESS_VOID(rv);
-    if (hasReferrerPolicy) {
-      // please note that referrer policy spec defines that the latest
-      // policy awlays wins, hence we can safely overwrite the policy here.
-      mReferrerPolicy = static_cast<ReferrerPolicy>(referrerPolicy);
-      mReferrerPolicySet = true;
-    }
-    if (!mUpgradeInsecurePreloads) {
-      rv = preloadCsp->GetUpgradeInsecureRequests(&mUpgradeInsecurePreloads);
-      NS_ENSURE_SUCCESS_VOID(rv);
+    if (preloadCsp) {
+      preloadCsp->GetUpgradeInsecureRequests(&mUpgradeInsecurePreloads);
     }
   }
 }
@@ -5112,19 +5103,17 @@ nsDocument::DocumentStatesChanged(EventStates aStateMask)
 
 void
 nsDocument::StyleRuleChanged(CSSStyleSheet* aSheet,
-                             css::Rule* aOldStyleRule,
-                             css::Rule* aNewStyleRule)
+                             css::Rule* aStyleRule)
 {
   NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleChanged,
                                (this, aSheet,
-                                aOldStyleRule, aNewStyleRule));
+                                aStyleRule));
 
   if (StyleSheetChangeEventsEnabled()) {
     DO_STYLESHEET_NOTIFICATION(StyleRuleChangeEvent,
                                "StyleRuleChanged",
                                mRule,
-                               aNewStyleRule ? aNewStyleRule->GetDOMRule()
-                                             : nullptr);
+                               aStyleRule ? aStyleRule->GetDOMRule() : nullptr);
   }
 }
 

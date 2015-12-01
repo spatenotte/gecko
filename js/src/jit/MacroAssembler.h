@@ -337,6 +337,12 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Labels for handling exceptions and failures.
     NonAssertingLabel failureLabel_;
 
+    // Asm failure labels
+    NonAssertingLabel asmStackOverflowLabel_;
+    NonAssertingLabel asmSyncInterruptLabel_;
+    NonAssertingLabel asmOnConversionErrorLabel_;
+    NonAssertingLabel asmOnOutOfBoundsLabel_;
+
   public:
     MacroAssembler()
       : framePushed_(0),
@@ -373,13 +379,16 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // asm.js compilation handles its own JitContext-pushing
     struct AsmJSToken {};
-    explicit MacroAssembler(AsmJSToken)
+    explicit MacroAssembler(AsmJSToken, TempAllocator *alloc)
       : framePushed_(0),
 #ifdef DEBUG
         inCall_(false),
 #endif
         emitProfilingInstrumentation_(false)
     {
+        if (alloc)
+            moveResolver_.setAllocator(*alloc);
+
 #if defined(JS_CODEGEN_ARM)
         initWithAllocator();
         m_buffer.id = 0;
@@ -388,8 +397,6 @@ class MacroAssembler : public MacroAssemblerSpecific
         armbuffer_.id = 0;
 #endif
     }
-
-    void resetForNewCodeGenerator(TempAllocator& alloc);
 
     void constructRoot(JSContext* cx) {
         autoRooter_.emplace(cx, this);
@@ -453,8 +460,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     void Push(JSValueType type, Register reg);
     void PushValue(const Address& addr);
     void PushEmptyRooted(VMFunction::RootType rootType);
-    inline CodeOffsetLabel PushWithPatch(ImmWord word);
-    inline CodeOffsetLabel PushWithPatch(ImmPtr imm);
+    inline CodeOffset PushWithPatch(ImmWord word);
+    inline CodeOffset PushWithPatch(ImmPtr imm);
 
     void Pop(const Operand op) DEFINED_ON(x86_shared);
     void Pop(Register reg) PER_SHARED_ARCH;
@@ -485,8 +492,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     // ===============================================================
     // Simple call functions.
 
-    CodeOffsetLabel call(Register reg) PER_SHARED_ARCH;
-    CodeOffsetLabel call(Label* label) PER_SHARED_ARCH;
+    CodeOffset call(Register reg) PER_SHARED_ARCH;
+    CodeOffset call(Label* label) PER_SHARED_ARCH;
     void call(const Address& addr) DEFINED_ON(x86_shared);
     void call(ImmWord imm) PER_SHARED_ARCH;
     // Call a target native function, which is neither traceable nor movable.
@@ -499,7 +506,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void call(const CallSiteDesc& desc, Label* label);
     inline void call(const CallSiteDesc& desc, AsmJSInternalCallee callee);
 
-    CodeOffsetLabel callWithPatch() PER_SHARED_ARCH;
+    CodeOffset callWithPatch() PER_SHARED_ARCH;
     void patchCall(uint32_t callerOffset, uint32_t calleeOffset) PER_SHARED_ARCH;
 
     // Push the return address and make a call. On platforms where this function
@@ -667,6 +674,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     // corresponds to.
     inline void enterFakeExitFrame(enum ExitFrameTokenValues token);
 
+    // Push an exit frame token for a native call.
+    inline void enterFakeExitFrameForNative(bool isConstructing);
+
     // Pop ExitFrame footer in addition to the extra frame.
     inline void leaveExitFrame(size_t extraFrame = 0);
 
@@ -681,7 +691,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     // If the JitCode that created this assembler needs to transition into the VM,
     // we want to store the JitCode on the stack in order to mark it during a GC.
     // This is a reference to a patch location where the JitCode* will be written.
-    CodeOffsetLabel selfReferencePatch_;
+    CodeOffset selfReferencePatch_;
 
   public:
     // ===============================================================
@@ -714,6 +724,13 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void xorPtr(Register src, Register dest) PER_ARCH;
     inline void xorPtr(Imm32 imm, Register dest) PER_ARCH;
+
+    // ===============================================================
+    // Arithmetic functions
+
+    inline void sub32(const Address& src, Register dest) PER_SHARED_ARCH;
+    inline void sub32(Register src, Register dest) PER_SHARED_ARCH;
+    inline void sub32(Imm32 imm, Register dest) PER_SHARED_ARCH;
 
     // ===============================================================
     // Shift functions
@@ -1034,7 +1051,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
         // All barriers are off by default.
         // They are enabled if necessary at the end of CodeGenerator::generate().
-        CodeOffsetLabel nopJump = toggledJump(&done);
+        CodeOffset nopJump = toggledJump(&done);
         writePrebarrierOffset(nopJump);
 
         callPreBarrier(address, type);
@@ -1293,7 +1310,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     };
     friend class AutoProfilerCallInstrumentation;
 
-    void appendProfilerCallSite(CodeOffsetLabel label) {
+    void appendProfilerCallSite(CodeOffset label) {
         propagateOOM(profilerCallSites_.append(label));
     }
 
@@ -1307,7 +1324,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     bool emitProfilingInstrumentation_;
 
     // Record locations of the call sites.
-    Vector<CodeOffsetLabel, 0, SystemAllocPolicy> profilerCallSites_;
+    Vector<CodeOffset, 0, SystemAllocPolicy> profilerCallSites_;
 
   public:
     void loadBaselineOrIonRaw(Register script, Register dest, Label* failure);
@@ -1333,6 +1350,32 @@ class MacroAssembler : public MacroAssemblerSpecific
         return &failureLabel_;
     }
 
+    Label* asmSyncInterruptLabel() {
+        return &asmSyncInterruptLabel_;
+    }
+    const Label* asmSyncInterruptLabel() const {
+        return &asmSyncInterruptLabel_;
+    }
+    Label* asmStackOverflowLabel() {
+        return &asmStackOverflowLabel_;
+    }
+    const Label* asmStackOverflowLabel() const {
+        return &asmStackOverflowLabel_;
+    }
+    Label* asmOnOutOfBoundsLabel() {
+        return &asmOnOutOfBoundsLabel_;
+    }
+    const Label* asmOnOutOfBoundsLabel() const {
+        return &asmOnOutOfBoundsLabel_;
+    }
+    Label* asmOnConversionErrorLabel() {
+        return &asmOnConversionErrorLabel_;
+    }
+    const Label* asmOnConversionErrorLabel() const {
+        return &asmOnConversionErrorLabel_;
+    }
+
+    bool asmMergeWith(const MacroAssembler& masm);
     void finish();
     void link(JitCode* code);
 
@@ -1698,6 +1741,34 @@ StackDecrementForCall(uint32_t alignment, size_t bytesAlreadyPushed, size_t byte
     return bytesToPush +
            ComputeByteAlignment(bytesAlreadyPushed + bytesToPush, alignment);
 }
+
+static inline MIRType
+ToMIRType(MIRType t)
+{
+    return t;
+}
+
+template <class VecT>
+class ABIArgIter
+{
+    ABIArgGenerator gen_;
+    const VecT& types_;
+    unsigned i_;
+
+    void settle() { if (!done()) gen_.next(ToMIRType(types_[i_])); }
+
+  public:
+    explicit ABIArgIter(const VecT& types) : types_(types), i_(0) { settle(); }
+    void operator++(int) { MOZ_ASSERT(!done()); i_++; settle(); }
+    bool done() const { return i_ == types_.length(); }
+
+    ABIArg* operator->() { MOZ_ASSERT(!done()); return &gen_.current(); }
+    ABIArg& operator*() { MOZ_ASSERT(!done()); return gen_.current(); }
+
+    unsigned index() const { MOZ_ASSERT(!done()); return i_; }
+    MIRType mirType() const { MOZ_ASSERT(!done()); return ToMIRType(types_[i_]); }
+    uint32_t stackBytesConsumedSoFar() const { return gen_.stackBytesConsumedSoFar(); }
+};
 
 } // namespace jit
 } // namespace js

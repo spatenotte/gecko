@@ -3107,6 +3107,9 @@ js::GetThisValue(JSObject* obj)
     if (obj->is<DynamicWithObject>())
         return ObjectValue(*obj->as<DynamicWithObject>().withThis());
 
+    if (obj->is<NonSyntacticVariablesObject>())
+        return GetThisValue(obj->enclosingScope());
+
     return ObjectValue(*obj);
 }
 
@@ -3475,10 +3478,11 @@ js::DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start)
 
         if (jsbytecode* pc = i.pc()) {
             fprintf(stderr, "  pc = %p\n", pc);
-            fprintf(stderr, "  current op: %s\n", js_CodeName[*pc]);
+            fprintf(stderr, "  current op: %s\n", CodeName[*pc]);
             MaybeDumpObject("staticScope", i.script()->getStaticBlockScope(pc));
         }
-        MaybeDumpValue("this", i.thisv(cx));
+        if (i.isNonEvalFunctionFrame())
+            MaybeDumpValue("this", i.thisArgument(cx));
         if (!i.isJit()) {
             fprintf(stderr, "  rval: ");
             dumpValue(i.interpFrame()->returnValue());

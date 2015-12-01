@@ -1048,9 +1048,11 @@ gfxFontGroup *
 gfxWindowsPlatform::CreateFontGroup(const FontFamilyList& aFontFamilyList,
                                     const gfxFontStyle *aStyle,
                                     gfxTextPerfMetrics* aTextPerf,
-                                    gfxUserFontSet *aUserFontSet)
+                                    gfxUserFontSet *aUserFontSet,
+                                    gfxFloat aDevToCssSize)
 {
-    return new gfxFontGroup(aFontFamilyList, aStyle, aTextPerf, aUserFontSet);
+    return new gfxFontGroup(aFontFamilyList, aStyle, aTextPerf,
+                            aUserFontSet, aDevToCssSize);
 }
 
 gfxFontEntry* 
@@ -1660,7 +1662,9 @@ gfxWindowsPlatform::GetDXGIAdapter()
       DXGI_ADAPTER_DESC desc;
       if (SUCCEEDED(adapter->GetDesc(&desc)) &&
           desc.AdapterLuid.HighPart == parent.AdapterLuid.HighPart &&
-          desc.AdapterLuid.LowPart == parent.AdapterLuid.LowPart)
+          desc.AdapterLuid.LowPart == parent.AdapterLuid.LowPart &&
+          desc.VendorId == parent.VendorId &&
+          desc.DeviceId == parent.DeviceId)
       {
         mAdapter = adapter.forget();
         break;
@@ -2208,7 +2212,7 @@ gfxWindowsPlatform::AttemptWARPDeviceCreation()
     return FeatureStatus::Crashed;
   }
 
-  if (FAILED(hr)) {
+  if (FAILED(hr) || !mD3D11Device) {
     // This should always succeed... in theory.
     gfxCriticalError() << "Failed to initialize WARP D3D11 device! " << hexa(hr);
     return FeatureStatus::Failed;
@@ -2281,7 +2285,7 @@ gfxWindowsPlatform::AttemptD3D11ContentDeviceCreation()
     return FeatureStatus::Crashed;
   }
 
-  if (FAILED(hr)) {
+  if (FAILED(hr) || !mD3D11ContentDevice) {
     return FeatureStatus::Failed;
   }
 
@@ -2325,7 +2329,7 @@ gfxWindowsPlatform::AttemptD3D11ImageBridgeDeviceCreation()
     return FeatureStatus::Crashed;
   }
 
-  if (FAILED(hr)) {
+  if (FAILED(hr) || !mD3D11ImageBridgeDevice) {
     return FeatureStatus::Failed;
   }
 
@@ -2689,7 +2693,7 @@ gfxWindowsPlatform::CreateD3D11DecoderDevice()
     return nullptr;
   }
 
-  if (FAILED(hr) || !DoesD3D11DeviceWork()) {
+  if (FAILED(hr) || !device || !DoesD3D11DeviceWork()) {
     return nullptr;
   }
 

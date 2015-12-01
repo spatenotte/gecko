@@ -27,6 +27,8 @@
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/VideoTrack.h"
 #include "mozilla/dom/VideoTrackList.h"
+#include "nsPrintfCString.h"
+#include "mozilla/Telemetry.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::layers;
@@ -555,6 +557,7 @@ MediaDecoder::MediaDecoder(MediaDecoderOwner* aOwner)
                      "MediaDecoder::mDecoderPosition (Canonical)")
   , mMediaSeekable(AbstractThread::MainThread(), true,
                    "MediaDecoder::mMediaSeekable (Canonical)")
+  , mTelemetryReported(false)
 {
   MOZ_COUNT_CTOR(MediaDecoder);
   MOZ_ASSERT(NS_IsMainThread());
@@ -610,6 +613,10 @@ MediaDecoder::Shutdown()
   if (mDecoderStateMachine) {
     mDecoderStateMachine->DispatchShutdown();
     mTimedMetadataListener.Disconnect();
+    mMetadataLoadedListener.Disconnect();
+    mFirstFrameLoadedListener.Disconnect();
+    mOnPlaybackEvent.Disconnect();
+    mOnSeekingStart.Disconnect();
   }
 
   // Force any outstanding seek and byterange requests to complete
@@ -631,6 +638,29 @@ MediaDecoder::~MediaDecoder()
   MediaMemoryTracker::RemoveMediaDecoder(this);
   UnpinForSeek();
   MOZ_COUNT_DTOR(MediaDecoder);
+}
+
+void
+MediaDecoder::OnPlaybackEvent(MediaEventType aEvent)
+{
+  switch (aEvent) {
+    case MediaEventType::PlaybackStarted:
+      mPlaybackStatistics->Start();
+      break;
+    case MediaEventType::PlaybackStopped:
+      mPlaybackStatistics->Stop();
+      ComputePlaybackRate();
+      break;
+    case MediaEventType::PlaybackEnded:
+      PlaybackEnded();
+      break;
+    case MediaEventType::DecodeError:
+      DecodeError();
+      break;
+    case MediaEventType::Invalidate:
+      Invalidate();
+      break;
+  }
 }
 
 MediaResourceCallback*
@@ -689,6 +719,15 @@ MediaDecoder::SetStateMachineParameters()
   }
   mTimedMetadataListener = mDecoderStateMachine->TimedMetadataEvent().Connect(
     AbstractThread::MainThread(), this, &MediaDecoder::OnMetadataUpdate);
+  mMetadataLoadedListener = mDecoderStateMachine->MetadataLoadedEvent().Connect(
+    AbstractThread::MainThread(), this, &MediaDecoder::MetadataLoaded);
+  mFirstFrameLoadedListener = mDecoderStateMachine->FirstFrameLoadedEvent().Connect(
+    AbstractThread::MainThread(), this, &MediaDecoder::FirstFrameLoaded);
+
+  mOnPlaybackEvent = mDecoderStateMachine->OnPlaybackEvent().Connect(
+    AbstractThread::MainThread(), this, &MediaDecoder::OnPlaybackEvent);
+  mOnSeekingStart = mDecoderStateMachine->OnSeekingStart().Connect(
+    AbstractThread::MainThread(), this, &MediaDecoder::SeekingStarted);
 }
 
 void
@@ -796,10 +835,7 @@ MediaDecoder::MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
                              MediaDecoderEventVisibility aEventVisibility)
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  if (mShuttingDown) {
-    return;
-  }
+  MOZ_ASSERT(!mShuttingDown);
 
   DECODER_LOG("MetadataLoaded, channels=%u rate=%u hasAudio=%d hasVideo=%d",
               aInfo->mAudio.mChannels, aInfo->mAudio.mRate,
@@ -815,6 +851,42 @@ MediaDecoder::MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
     mFiredMetadataLoaded = true;
     mOwner->MetadataLoaded(mInfo, nsAutoPtr<const MetadataTags>(aTags.forget()));
   }
+
+  EnsureTelemetryReported();
+}
+
+void
+MediaDecoder::EnsureTelemetryReported()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (mTelemetryReported || !mInfo) {
+    // Note: sometimes we get multiple MetadataLoaded calls (for example
+    // for chained ogg). So we ensure we don't report duplicate results for
+    // these resources.
+    return;
+  }
+
+  nsTArray<nsCString> codecs;
+  if (mInfo->HasAudio() && !mInfo->mAudio.GetAsAudioInfo()->mMimeType.IsEmpty()) {
+    codecs.AppendElement(mInfo->mAudio.GetAsAudioInfo()->mMimeType);
+  }
+  if (mInfo->HasVideo() && !mInfo->mVideo.GetAsVideoInfo()->mMimeType.IsEmpty()) {
+    codecs.AppendElement(mInfo->mVideo.GetAsVideoInfo()->mMimeType);
+  }
+  if (codecs.IsEmpty()) {
+    if (mResource->GetContentType().IsEmpty()) {
+      NS_WARNING("Somehow the resource's content type is empty");
+      return;
+    }
+    codecs.AppendElement(nsPrintfCString("resource; %s", mResource->GetContentType().get()));
+  }
+  for (const nsCString& codec : codecs) {
+    DECODER_LOG("Telemetry MEDIA_CODEC_USED= '%s'", codec.get());
+    Telemetry::Accumulate(Telemetry::ID::MEDIA_CODEC_USED, codec);
+  }
+
+  mTelemetryReported = true;
 }
 
 const char*
@@ -837,10 +909,7 @@ MediaDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
                                MediaDecoderEventVisibility aEventVisibility)
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  if (mShuttingDown) {
-    return;
-  }
+  MOZ_ASSERT(!mShuttingDown);
 
   DECODER_LOG("FirstFrameLoaded, channels=%u rate=%u hasAudio=%d hasVideo=%d mPlayState=%s mIsDormant=%d",
               aInfo->mAudio.mChannels, aInfo->mAudio.mRate,
@@ -1601,16 +1670,6 @@ bool
 MediaDecoder::IsOmxEnabled()
 {
   return Preferences::GetBool("media.omx.enabled", false);
-}
-
-bool
-MediaDecoder::IsOmxAsyncEnabled()
-{
-#if ANDROID_VERSION >= 16
-  return Preferences::GetBool("media.omx.async.enabled", false);
-#else
-  return false;
-#endif
 }
 #endif
 

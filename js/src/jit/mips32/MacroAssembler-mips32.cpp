@@ -837,18 +837,6 @@ MacroAssemblerMIPSCompat::add32(Imm32 imm, const Address& dest)
 }
 
 void
-MacroAssemblerMIPSCompat::sub32(Imm32 imm, Register dest)
-{
-    ma_subu(dest, dest, imm);
-}
-
-void
-MacroAssemblerMIPSCompat::sub32(Register src, Register dest)
-{
-    as_subu(dest, dest, src);
-}
-
-void
 MacroAssemblerMIPSCompat::addPtr(Register src, Register dest)
 {
     ma_addu(dest, src);
@@ -904,7 +892,7 @@ MacroAssemblerMIPSCompat::movePtr(ImmPtr imm, Register dest)
 void
 MacroAssemblerMIPSCompat::movePtr(AsmJSImmPtr imm, Register dest)
 {
-    append(AsmJSAbsoluteLink(CodeOffsetLabel(nextOffset().getOffset()), imm.kind()));
+    append(AsmJSAbsoluteLink(CodeOffset(nextOffset().getOffset()), imm.kind()));
     ma_liPatchable(dest, ImmWord(-1));
 }
 
@@ -2533,19 +2521,19 @@ MacroAssemblerMIPSCompat::atomicExchangeToTypedIntArray(Scalar::Type arrayType, 
                                                         Register offsetTemp, Register maskTemp,
                                                         AnyRegister output);
 
-CodeOffsetLabel
+CodeOffset
 MacroAssemblerMIPSCompat::toggledJump(Label* label)
 {
-    CodeOffsetLabel ret(nextOffset().getOffset());
+    CodeOffset ret(nextOffset().getOffset());
     ma_b(label);
     return ret;
 }
 
-CodeOffsetLabel
+CodeOffset
 MacroAssemblerMIPSCompat::toggledCall(JitCode* target, bool enabled)
 {
     BufferOffset bo = nextOffset();
-    CodeOffsetLabel offset(bo.getOffset());
+    CodeOffset offset(bo.getOffset());
     addPendingJump(bo, ImmPtr(target->raw()), Relocation::JITCODE);
     ma_liPatchable(ScratchRegister, ImmPtr(target->raw()));
     if (enabled) {

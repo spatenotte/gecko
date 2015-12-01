@@ -6,6 +6,8 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.AppConstants;
+import android.widget.AdapterView;
+import android.widget.Button;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.GeckoProfileDirectories.NoMozillaDirectoryException;
 import org.mozilla.gecko.db.BrowserDB;
@@ -629,9 +631,8 @@ public abstract class GeckoApp
             setLocale(message.getString("locale"));
 
         } else if ("Permissions:Data".equals(event)) {
-            String host = message.getString("host");
             final NativeJSObject[] permissions = message.getObjectArray("permissions");
-            showSiteSettingsDialog(host, permissions);
+            showSiteSettingsDialog(permissions);
 
         } else if ("PrivateBrowsing:Data".equals(event)) {
             mPrivateBrowsingSession = message.optString("session", null);
@@ -667,19 +668,6 @@ public abstract class GeckoApp
                     snackbarCallback);
         } else if ("SystemUI:Visibility".equals(event)) {
             setSystemUiVisible(message.getBoolean("visible"));
-
-        } else if ("Toast:Show".equals(event)) {
-            final String msg = message.getString("message");
-            final String duration = message.getString("duration");
-            final NativeJSObject button = message.optObject("button", null);
-            if (button != null) {
-                final String label = button.optString("label", "");
-                final String icon = button.optString("icon", "");
-                final String id = button.optString("id", "");
-                showButtonToast(msg, duration, label, icon, id);
-            } else {
-                showNormalToast(msg, duration);
-            }
 
         } else if ("ToggleChrome:Focus".equals(event)) {
             focusChrome();
@@ -759,59 +747,48 @@ public abstract class GeckoApp
      *        Array of JSON objects to represent site permissions.
      *        Example: { type: "offline-app", setting: "Store Offline Data", value: "Allow" }
      */
-    private void showSiteSettingsDialog(final String host, final NativeJSObject[] permissions) {
+    private void showSiteSettingsDialog(final NativeJSObject[] permissions) {
         final AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(R.string.site_settings_title);
 
-        View customTitleView = getLayoutInflater().inflate(R.layout.site_setting_title, null);
-        ((TextView) customTitleView.findViewById(R.id.title)).setText(R.string.site_settings_title);
-        ((TextView) customTitleView.findViewById(R.id.host)).setText(host);
-        builder.setCustomTitle(customTitleView);
-
-        // If there are no permissions to clear, show the user a message about that.
-        // In the future, we want to disable the menu item if there are no permissions to clear.
-        if (permissions.length == 0) {
-            builder.setMessage(R.string.site_settings_no_settings);
-        } else {
-
-            final ArrayList<HashMap<String, String>> itemList =
-                    new ArrayList<HashMap<String, String>>();
-            for (final NativeJSObject permObj : permissions) {
-                final HashMap<String, String> map = new HashMap<String, String>();
-                map.put("setting", permObj.getString("setting"));
-                map.put("value", permObj.getString("value"));
-                itemList.add(map);
-            }
-
-            // setMultiChoiceItems doesn't support using an adapter, so we're creating a hack with
-            // setSingleChoiceItems and changing the choiceMode below when we create the dialog
-            builder.setSingleChoiceItems(new SimpleAdapter(
-                GeckoApp.this,
-                itemList,
-                R.layout.site_setting_item,
-                new String[] { "setting", "value" },
-                new int[] { R.id.setting, R.id.value }
-                ), -1, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int id) { }
-                });
-
-            builder.setPositiveButton(R.string.site_settings_clear, new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int id) {
-                    ListView listView = ((AlertDialog) dialog).getListView();
-                    SparseBooleanArray checkedItemPositions = listView.getCheckedItemPositions();
-
-                    // An array of the indices of the permissions we want to clear
-                    JSONArray permissionsToClear = new JSONArray();
-                    for (int i = 0; i < checkedItemPositions.size(); i++)
-                        if (checkedItemPositions.get(i))
-                            permissionsToClear.put(i);
-
-                    GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
-                        "Permissions:Clear", permissionsToClear.toString()));
-                }
-            });
+        final ArrayList<HashMap<String, String>> itemList =
+                new ArrayList<HashMap<String, String>>();
+        for (final NativeJSObject permObj : permissions) {
+            final HashMap<String, String> map = new HashMap<String, String>();
+            map.put("setting", permObj.getString("setting"));
+            map.put("value", permObj.getString("value"));
+            itemList.add(map);
         }
+
+        // setMultiChoiceItems doesn't support using an adapter, so we're creating a hack with
+        // setSingleChoiceItems and changing the choiceMode below when we create the dialog
+        builder.setSingleChoiceItems(new SimpleAdapter(
+            GeckoApp.this,
+            itemList,
+            R.layout.site_setting_item,
+            new String[] { "setting", "value" },
+            new int[] { R.id.setting, R.id.value }
+            ), -1, new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int id) { }
+            });
+
+        builder.setPositiveButton(R.string.site_settings_clear, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int id) {
+                ListView listView = ((AlertDialog) dialog).getListView();
+                SparseBooleanArray checkedItemPositions = listView.getCheckedItemPositions();
+
+                // An array of the indices of the permissions we want to clear
+                JSONArray permissionsToClear = new JSONArray();
+                for (int i = 0; i < checkedItemPositions.size(); i++)
+                    if (checkedItemPositions.get(i))
+                        permissionsToClear.put(i);
+
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent(
+                    "Permissions:Clear", permissionsToClear.toString()));
+            }
+        });
 
         builder.setNegativeButton(R.string.site_settings_cancel, new DialogInterface.OnClickListener(){
             @Override
@@ -823,31 +800,39 @@ public abstract class GeckoApp
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
             public void run() {
-                Dialog dialog = builder.create();
+                AlertDialog dialog = builder.create();
                 dialog.show();
 
-                ListView listView = ((AlertDialog) dialog).getListView();
+                final ListView listView = dialog.getListView();
                 if (listView != null) {
                     listView.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
-                    int listSize = listView.getAdapter().getCount();
-                    for (int i = 0; i < listSize; i++)
-                        listView.setItemChecked(i, true);
                 }
-            }
-        });
-    }
 
-    public void showNormalToast(final String message, final String duration) {
-        ThreadUtils.postToUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Toast toast;
-                if (duration.equals("long")) {
-                    toast = Toast.makeText(GeckoApp.this, message, Toast.LENGTH_LONG);
-                } else {
-                    toast = Toast.makeText(GeckoApp.this, message, Toast.LENGTH_SHORT);
-                }
-                toast.show();
+                final Button clearButton = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
+                clearButton.setEnabled(false);
+
+                dialog.getListView().setOnItemClickListener(new AdapterView.OnItemClickListener() {
+                    @Override
+                    public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
+                        if (Versions.feature11Plus) {
+                            if (listView.getCheckedItemCount() == 0) {
+                                clearButton.setEnabled(false);
+                            } else {
+                                clearButton.setEnabled(true);
+                            }
+                        } else {
+                            final SparseBooleanArray items = listView.getCheckedItemPositions();
+                            for (int j = 0; j < items.size(); j++) {
+                                if (items.valueAt(j) == true) {
+                                    clearButton.setEnabled(true);
+                                    return;
+                                }
+                            }
+
+                            clearButton.setEnabled(false);
+                        }
+                    }
+                });
             }
         });
     }
@@ -1351,7 +1336,6 @@ public abstract class GeckoApp
             "Share:Text",
             "Snackbar:Show",
             "SystemUI:Visibility",
-            "Toast:Show",
             "ToggleChrome:Focus",
             "ToggleChrome:Hide",
             "ToggleChrome:Show",
@@ -2068,7 +2052,7 @@ public abstract class GeckoApp
             }
         });
 
-        RestrictedProfiles.update(this);
+        Restrictions.update(this);
     }
 
     @Override
@@ -2176,7 +2160,6 @@ public abstract class GeckoApp
             "Session:StatePurged",
             "Share:Text",
             "SystemUI:Visibility",
-            "Toast:Show",
             "ToggleChrome:Focus",
             "ToggleChrome:Hide",
             "ToggleChrome:Show",

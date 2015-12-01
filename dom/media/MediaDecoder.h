@@ -222,6 +222,8 @@ namespace mozilla {
 class VideoFrameContainer;
 class MediaDecoderStateMachine;
 
+enum class MediaEventType : int8_t;
+
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with MediaDecoder::GetCurrentTime implementation.
 #ifdef GetCurrentTime
@@ -442,7 +444,7 @@ public:
 
   // Called as data arrives on the stream and is read into the cache.  Called
   // on the main thread only.
-  virtual void NotifyDataArrived() override;
+  void NotifyDataArrived();
 
   // Return true if we are currently seeking in the media resource.
   // Call on the main thread only.
@@ -463,17 +465,20 @@ protected:
   // changed, this causes a durationchanged event to fire to the media
   // element.
   void UpdateEstimatedMediaDuration(int64_t aDuration) override;
+
 public:
+  // Called from HTMLMediaElement when owner document activity changes
+  virtual void SetElementVisibility(bool aIsVisible) {}
 
   // Set a flag indicating whether seeking is supported
   virtual void SetMediaSeekable(bool aMediaSeekable) override;
 
   // Returns true if this media supports seeking. False for example for WebM
   // files without an index and chained ogg files.
-  virtual bool IsMediaSeekable() final override;
+  bool IsMediaSeekable();
   // Returns true if seeking is supported on a transport level (e.g. the server
   // supports range requests, we are playing a file, etc.).
-  virtual bool IsTransportSeekable() override;
+  bool IsTransportSeekable();
 
   // Return the time ranges that can be seeked into.
   virtual media::TimeIntervals GetSeekable();
@@ -567,26 +572,6 @@ private:
   // so recompute it. The monitor must be held.
   virtual void UpdatePlaybackRate();
 
-  // Used to estimate rates of data passing through the decoder's channel.
-  // Records activity stopping on the channel.
-  void DispatchPlaybackStarted() {
-    RefPtr<MediaDecoder> self = this;
-    nsCOMPtr<nsIRunnable> r =
-      NS_NewRunnableFunction([self] () { self->mPlaybackStatistics->Start(); });
-    AbstractThread::MainThread()->Dispatch(r.forget());
-  }
-
-  // Used to estimate rates of data passing through the decoder's channel.
-  // Records activity stopping on the channel.
-  void DispatchPlaybackStopped() {
-    RefPtr<MediaDecoder> self = this;
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([self] () {
-      self->mPlaybackStatistics->Stop();
-      self->ComputePlaybackRate();
-    });
-    AbstractThread::MainThread()->Dispatch(r.forget());
-  }
-
   // The actual playback rate computation. The monitor must be held.
   void ComputePlaybackRate();
 
@@ -606,21 +591,6 @@ private:
   // notifies any thread blocking on this object's monitor of the
   // change. Call on the main thread only.
   virtual void ChangeState(PlayState aState);
-
-  // May be called by the reader to notify this decoder that the metadata from
-  // the media file has been read. Call on the decode thread only.
-  void OnReadMetadataCompleted() override { }
-
-  // Called when the metadata from the media file has been loaded by the
-  // state machine. Call on the main thread only.
-  virtual void MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
-                              nsAutoPtr<MetadataTags> aTags,
-                              MediaDecoderEventVisibility aEventVisibility) override;
-
-  // Called when the first audio and/or video from the media file has been loaded
-  // by the state machine. Call on the main thread only.
-  virtual void FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
-                                MediaDecoderEventVisibility aEventVisibility) override;
 
   // Called from MetadataLoaded(). Creates audio tracks and adds them to its
   // owner's audio track list, and implies to video tracks respectively.
@@ -687,6 +657,8 @@ private:
   void SetCDMProxy(CDMProxy* aProxy);
 #endif
 
+  void EnsureTelemetryReported();
+
 #ifdef MOZ_RAW
   static bool IsRawEnabled();
 #endif
@@ -711,7 +683,6 @@ private:
 
 #ifdef MOZ_OMX_DECODER
   static bool IsOmxEnabled();
-  static bool IsOmxAsyncEnabled();
 #endif
 
 #ifdef MOZ_ANDROID_OMX
@@ -751,6 +722,12 @@ private:
 
 protected:
   virtual ~MediaDecoder();
+
+  // Called when the first audio and/or video from the media file has been loaded
+  // by the state machine. Call on the main thread only.
+  virtual void FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
+                                MediaDecoderEventVisibility aEventVisibility);
+
   void SetStateMachineParameters();
 
   static void DormantTimerExpired(nsITimer *aTimer, void *aClosure);
@@ -816,8 +793,16 @@ protected:
   RefPtr<MediaResource> mResource;
 
 private:
+  // Called when the metadata from the media file has been loaded by the
+  // state machine. Call on the main thread only.
+  void MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
+                      nsAutoPtr<MetadataTags> aTags,
+                      MediaDecoderEventVisibility aEventVisibility);
+
   MediaEventSource<void>*
   DataArrivedEvent() override { return &mDataArrivedEvent; }
+
+  void OnPlaybackEvent(MediaEventType aEvent);
 
   MediaEventProducer<void> mDataArrivedEvent;
 
@@ -936,6 +921,12 @@ protected:
 
   // A listener to receive metadata updates from MDSM.
   MediaEventListener mTimedMetadataListener;
+
+  MediaEventListener mMetadataLoadedListener;
+  MediaEventListener mFirstFrameLoadedListener;
+
+  MediaEventListener mOnPlaybackEvent;
+  MediaEventListener mOnSeekingStart;
 
 protected:
   // Whether the state machine is shut down.
@@ -1085,12 +1076,14 @@ private:
   // Called by the MediaResource to keep track of the number of bytes read
   // from the resource. Called on the main by an event runner dispatched
   // by the MediaResource read functions.
-  void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset) final override;
+  void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset);
 
   // Called by nsChannelToPipeListener or MediaResource when the
   // download has ended. Called on the main thread only. aStatus is
   // the result from OnStopRequest.
   void NotifyDownloadEnded(nsresult aStatus);
+
+  bool mTelemetryReported;
 };
 
 } // namespace mozilla

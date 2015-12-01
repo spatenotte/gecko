@@ -274,29 +274,29 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     // Emit a branch that can be toggled to a non-operation. On MIPS we use
     // "andi" instruction to toggle the branch.
     // See ToggleToJmp(), ToggleToCmp().
-    CodeOffsetLabel toggledJump(Label* label);
+    CodeOffset toggledJump(Label* label);
 
     // Emit a "jalr" or "nop" instruction. ToggleCall can be used to patch
     // this instruction.
-    CodeOffsetLabel toggledCall(JitCode* target, bool enabled);
+    CodeOffset toggledCall(JitCode* target, bool enabled);
 
     static size_t ToggledCallSize(uint8_t* code) {
         // Four instructions used in: MacroAssemblerMIPSCompat::toggledCall
         return 4 * sizeof(uint32_t);
     }
 
-    CodeOffsetLabel pushWithPatch(ImmWord imm) {
-        CodeOffsetLabel label = movWithPatch(imm, ScratchRegister);
+    CodeOffset pushWithPatch(ImmWord imm) {
+        CodeOffset label = movWithPatch(imm, ScratchRegister);
         ma_push(ScratchRegister);
         return label;
     }
 
-    CodeOffsetLabel movWithPatch(ImmWord imm, Register dest) {
-        CodeOffsetLabel label = CodeOffsetLabel(currentOffset());
+    CodeOffset movWithPatch(ImmWord imm, Register dest) {
+        CodeOffset label = CodeOffset(currentOffset());
         ma_liPatchable(dest, imm);
         return label;
     }
-    CodeOffsetLabel movWithPatch(ImmPtr imm, Register dest) {
+    CodeOffset movWithPatch(ImmPtr imm, Register dest) {
         return movWithPatch(ImmWord(uintptr_t(imm.value)), dest);
     }
 
@@ -1080,8 +1080,6 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
         as_sltiu(ScratchRegister, dest.low, imm.value);
         as_addu(dest.high, dest.high, ScratchRegister);
     }
-    void sub32(Imm32 imm, Register dest);
-    void sub32(Register src, Register dest);
 
     void incrementInt32Value(const Address& addr) {
         add32(Imm32(1), ToPayload(addr));
@@ -1105,7 +1103,7 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
             break;
           case NonZero:
           case Zero:
-            sub32(src, dest);
+            ma_subu(dest, src);
             ma_b(dest, dest, overflow, cond);
             break;
           default:
@@ -1316,8 +1314,8 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     bool buildOOLFakeExitFrame(void* fakeReturnAddr);
 
   public:
-    CodeOffsetLabel labelForPatch() {
-        return CodeOffsetLabel(nextOffset().getOffset());
+    CodeOffset labelForPatch() {
+        return CodeOffset(nextOffset().getOffset());
     }
 
     void memIntToValue(Address Source, Address Dest) {

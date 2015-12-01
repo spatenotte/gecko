@@ -45,49 +45,57 @@ class MacroAssemblerX86Shared : public Assembler
     MacroAssembler& asMasm();
     const MacroAssembler& asMasm() const;
 
-  protected:
-    struct PlatformSpecificLabel;
+  public:
+    typedef Vector<CodeOffset, 0, SystemAllocPolicy> UsesVector;
 
-    template<class LabelType = PlatformSpecificLabel>
+  protected:
+    // For Double, Float and SimdData, make the move ctors explicit so that MSVC
+    // knows what to use instead of copying these data structures.
     struct Double {
         double value;
-        LabelType uses;
+        UsesVector uses;
         explicit Double(double value) : value(value) {}
+        Double(Double&& other) : value(other.value), uses(mozilla::Move(other.uses)) {}
+        explicit Double(const Double&) = delete;
     };
 
     // These use SystemAllocPolicy since asm.js releases memory after each
     // function is compiled, and these need to live until after all functions
     // are compiled.
-    Vector<Double<PlatformSpecificLabel>, 0, SystemAllocPolicy> doubles_;
+    Vector<Double, 0, SystemAllocPolicy> doubles_;
     typedef HashMap<double, size_t, DefaultHasher<double>, SystemAllocPolicy> DoubleMap;
     DoubleMap doubleMap_;
 
-    template<class LabelType = PlatformSpecificLabel>
     struct Float {
         float value;
-        LabelType uses;
+        UsesVector uses;
         explicit Float(float value) : value(value) {}
+        Float(Float&& other) : value(other.value), uses(mozilla::Move(other.uses)) {}
+        explicit Float(const Float&) = delete;
     };
 
-    Vector<Float<PlatformSpecificLabel>, 0, SystemAllocPolicy> floats_;
+    Vector<Float, 0, SystemAllocPolicy> floats_;
     typedef HashMap<float, size_t, DefaultHasher<float>, SystemAllocPolicy> FloatMap;
     FloatMap floatMap_;
 
-    template<class LabelType = PlatformSpecificLabel>
     struct SimdData {
         SimdConstant value;
-        LabelType uses;
+        UsesVector uses;
         explicit SimdData(const SimdConstant& v) : value(v) {}
-        SimdConstant::Type type() { return value.type(); }
+        SimdData(SimdData&& other) : value(other.value), uses(mozilla::Move(other.uses)) {}
+        explicit SimdData(const SimdData&) = delete;
+        SimdConstant::Type type() const { return value.type(); }
     };
 
-    Vector<SimdData<PlatformSpecificLabel>, 0, SystemAllocPolicy> simds_;
+    Vector<SimdData, 0, SystemAllocPolicy> simds_;
     typedef HashMap<SimdConstant, size_t, SimdConstant, SystemAllocPolicy> SimdMap;
     SimdMap simdMap_;
 
-    Float<>* getFloat(float f);
-    Double<>* getDouble(double d);
-    SimdData<>* getSimdData(const SimdConstant& v);
+    Float* getFloat(float f);
+    Double* getDouble(double d);
+    SimdData* getSimdData(const SimdConstant& v);
+
+    bool asmMergeWith(const MacroAssemblerX86Shared& other);
 
   public:
     using Assembler::call;
@@ -197,7 +205,7 @@ class MacroAssemblerX86Shared : public Assembler
     void cmp32(Register lhs, const Operand& rhs) {
         cmpl(rhs, lhs);
     }
-    CodeOffsetLabel cmp32WithPatch(Register lhs, Imm32 rhs) {
+    CodeOffset cmp32WithPatch(Register lhs, Imm32 rhs) {
         return cmplWithPatch(rhs, lhs);
     }
     void add32(Register src, Register dest) {
@@ -212,18 +220,6 @@ class MacroAssemblerX86Shared : public Assembler
     void add32(Imm32 imm, const Address& dest) {
         addl(imm, Operand(dest));
     }
-    void sub32(Imm32 imm, Register dest) {
-        subl(imm, dest);
-    }
-    void sub32(const Operand& src, Register dest) {
-        subl(src, dest);
-    }
-    void sub32(Register src, Register dest) {
-        subl(src, dest);
-    }
-    void sub32(Register src, const Operand& dest) {
-        subl(src, dest);
-    }
     template <typename T>
     void branchAdd32(Condition cond, T src, Register dest, Label* label) {
         add32(src, dest);
@@ -231,7 +227,7 @@ class MacroAssemblerX86Shared : public Assembler
     }
     template <typename T>
     void branchSub32(Condition cond, T src, Register dest, Label* label) {
-        sub32(src, dest);
+        subl(src, dest);
         j(cond, label);
     }
     void atomic_inc32(const Operand& addr) {
@@ -1013,7 +1009,7 @@ class MacroAssemblerX86Shared : public Assembler
         BaseIndex srcZ(src);
         srcZ.offset += 2 * sizeof(int32_t);
 
-        ScratchSimdScope scratch(asMasm());
+        ScratchSimd128Scope scratch(asMasm());
         vmovq(Operand(src), dest);
         vmovd(Operand(srcZ), scratch);
         vmovlhps(scratch, dest, dest);
@@ -1022,7 +1018,7 @@ class MacroAssemblerX86Shared : public Assembler
         Address srcZ(src);
         srcZ.offset += 2 * sizeof(int32_t);
 
-        ScratchSimdScope scratch(asMasm());
+        ScratchSimd128Scope scratch(asMasm());
         vmovq(Operand(src), dest);
         vmovd(Operand(srcZ), scratch);
         vmovlhps(scratch, dest, dest);
@@ -1078,7 +1074,7 @@ class MacroAssemblerX86Shared : public Assembler
         Address destZ(dest);
         destZ.offset += 2 * sizeof(int32_t);
         vmovq(src, Operand(dest));
-        ScratchSimdScope scratch(asMasm());
+        ScratchSimd128Scope scratch(asMasm());
         vmovhlps(src, scratch, scratch);
         vmovd(scratch, Operand(destZ));
     }
@@ -1086,7 +1082,7 @@ class MacroAssemblerX86Shared : public Assembler
         BaseIndex destZ(dest);
         destZ.offset += 2 * sizeof(int32_t);
         vmovq(src, Operand(dest));
-        ScratchSimdScope scratch(asMasm());
+        ScratchSimd128Scope scratch(asMasm());
         vmovhlps(src, scratch, scratch);
         vmovd(scratch, Operand(destZ));
     }
@@ -1149,7 +1145,7 @@ class MacroAssemblerX86Shared : public Assembler
         Address srcZ(src);
         srcZ.offset += 2 * sizeof(float);
         vmovsd(src, dest);
-        ScratchSimdScope scratch(asMasm());
+        ScratchSimd128Scope scratch(asMasm());
         vmovss(srcZ, scratch);
         vmovlhps(scratch, dest, dest);
     }
@@ -1157,7 +1153,7 @@ class MacroAssemblerX86Shared : public Assembler
         BaseIndex srcZ(src);
         srcZ.offset += 2 * sizeof(float);
         vmovsd(src, dest);
-        ScratchSimdScope scratch(asMasm());
+        ScratchSimd128Scope scratch(asMasm());
         vmovss(srcZ, scratch);
         vmovlhps(scratch, dest, dest);
     }
@@ -1173,7 +1169,7 @@ class MacroAssemblerX86Shared : public Assembler
         Address destZ(dest);
         destZ.offset += 2 * sizeof(int32_t);
         storeDouble(src, dest);
-        ScratchSimdScope scratch(asMasm());
+        ScratchSimd128Scope scratch(asMasm());
         vmovhlps(src, scratch, scratch);
         storeFloat32(scratch, destZ);
     }
@@ -1181,7 +1177,7 @@ class MacroAssemblerX86Shared : public Assembler
         BaseIndex destZ(dest);
         destZ.offset += 2 * sizeof(int32_t);
         storeDouble(src, dest);
-        ScratchSimdScope scratch(asMasm());
+        ScratchSimd128Scope scratch(asMasm());
         vmovhlps(src, scratch, scratch);
         storeFloat32(scratch, destZ);
     }
@@ -1476,8 +1472,8 @@ class MacroAssemblerX86Shared : public Assembler
     }
 
     // Emit a JMP that can be toggled to a CMP. See ToggleToJmp(), ToggleToCmp().
-    CodeOffsetLabel toggledJump(Label* label) {
-        CodeOffsetLabel offset(size());
+    CodeOffset toggledJump(Label* label) {
+        CodeOffset offset(size());
         jump(label);
         return offset;
     }
@@ -1491,8 +1487,8 @@ class MacroAssemblerX86Shared : public Assembler
         // Exists for ARM compatibility.
     }
 
-    CodeOffsetLabel labelForPatch() {
-        return CodeOffsetLabel(size());
+    CodeOffset labelForPatch() {
+        return CodeOffset(size());
     }
 
     void abiret() {

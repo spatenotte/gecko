@@ -23,14 +23,14 @@ import org.mozilla.gecko.LocaleManager;
 import org.mozilla.gecko.Locales;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.RestrictedProfiles;
+import org.mozilla.gecko.Restrictions;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.TelemetryContract.Method;
 import org.mozilla.gecko.background.common.GlobalConstants;
 import org.mozilla.gecko.background.healthreport.HealthReportConstants;
 import org.mozilla.gecko.db.BrowserContract.SuggestedSites;
-import org.mozilla.gecko.restrictions.Restriction;
+import org.mozilla.gecko.restrictions.Restrictable;
 import org.mozilla.gecko.tabqueue.TabQueueHelper;
 import org.mozilla.gecko.updater.UpdateService;
 import org.mozilla.gecko.updater.UpdateServiceHelper;
@@ -463,7 +463,7 @@ OnSharedPreferenceChangeListener
             while (iterator.hasNext()) {
                 Header header = iterator.next();
 
-                if (header.id == R.id.pref_header_advanced && !RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_ADVANCED_SETTINGS)) {
+                if (header.id == R.id.pref_header_advanced && !Restrictions.isAllowed(this, Restrictable.ADVANCED_SETTINGS)) {
                     iterator.remove();
                 }
             }
@@ -672,20 +672,13 @@ OnSharedPreferenceChangeListener
             if (pref instanceof PreferenceGroup) {
                 // If datareporting is disabled, remove UI.
                 if (PREFS_DATA_REPORTING_PREFERENCES.equals(key)) {
-                    if (!AppConstants.MOZ_DATA_REPORTING) {
-                        preferences.removePreference(pref);
-                        i--;
-                        continue;
-                    }
-                } else if (PREFS_CATEGORY_HOMEPAGE.equals(key)) {
-                    // Only enable the home page setting on Nightly.
-                    if (!AppConstants.NIGHTLY_BUILD) {
+                    if (!AppConstants.MOZ_DATA_REPORTING || !Restrictions.isAllowed(this, Restrictable.DATA_CHOICES)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
                 } else if (PREFS_SCREEN_ADVANCED.equals(key) &&
-                        !RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_ADVANCED_SETTINGS)) {
+                        !Restrictions.isAllowed(this, Restrictable.ADVANCED_SETTINGS)) {
                     preferences.removePreference(pref);
                     i--;
                     continue;
@@ -701,7 +694,7 @@ OnSharedPreferenceChangeListener
                     }
                 } else if (PREFS_OPEN_URLS_IN_PRIVATE.equals(key)) {
                     // Remove UI for opening external links in private browsing on non-Nightly builds.
-                    if (!AppConstants.NIGHTLY_BUILD || !RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_PRIVATE_BROWSING)) {
+                    if (!AppConstants.NIGHTLY_BUILD || !Restrictions.isAllowed(this, Restrictable.PRIVATE_BROWSING)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -721,39 +714,39 @@ OnSharedPreferenceChangeListener
                         continue;
                     }
                 } else if (PREFS_TELEMETRY_ENABLED.equals(key)) {
-                    if (!AppConstants.MOZ_TELEMETRY_REPORTING) {
+                    if (!AppConstants.MOZ_TELEMETRY_REPORTING || !Restrictions.isAllowed(this, Restrictable.DATA_CHOICES)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
                 } else if (PREFS_HEALTHREPORT_UPLOAD_ENABLED.equals(key) ||
                            PREFS_HEALTHREPORT_LINK.equals(key)) {
-                    if (!AppConstants.MOZ_SERVICES_HEALTHREPORT) {
+                    if (!AppConstants.MOZ_SERVICES_HEALTHREPORT || !Restrictions.isAllowed(this, Restrictable.DATA_CHOICES)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
                 } else if (PREFS_CRASHREPORTER_ENABLED.equals(key)) {
-                    if (!AppConstants.MOZ_CRASHREPORTER) {
+                    if (!AppConstants.MOZ_CRASHREPORTER || !Restrictions.isAllowed(this, Restrictable.DATA_CHOICES)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
                 } else if (PREFS_GEO_REPORTING.equals(key) ||
                            PREFS_GEO_LEARN_MORE.equals(key)) {
-                    if (!AppConstants.MOZ_STUMBLER_BUILD_TIME_ENABLED || !RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_LOCATION_SERVICE)) {
+                    if (!AppConstants.MOZ_STUMBLER_BUILD_TIME_ENABLED || !Restrictions.isAllowed(this, Restrictable.DATA_CHOICES)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
                 } else if (PREFS_DEVTOOLS_REMOTE_USB_ENABLED.equals(key)) {
-                    if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_REMOTE_DEBUGGING)) {
+                    if (!Restrictions.isAllowed(this, Restrictable.REMOTE_DEBUGGING)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
                 } else if (PREFS_DEVTOOLS_REMOTE_WIFI_ENABLED.equals(key)) {
-                    if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_REMOTE_DEBUGGING)) {
+                    if (!Restrictions.isAllowed(this, Restrictable.REMOTE_DEBUGGING)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -766,7 +759,7 @@ OnSharedPreferenceChangeListener
                     }
                 } else if (PREFS_DEVTOOLS_REMOTE_LINK.equals(key)) {
                     // Remove the "Learn more" link if remote debugging is disabled
-                    if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_REMOTE_DEBUGGING)) {
+                    if (!Restrictions.isAllowed(this, Restrictable.REMOTE_DEBUGGING)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -783,7 +776,7 @@ OnSharedPreferenceChangeListener
                     continue;
                 } else if (PREFS_SYNC.equals(key)) {
                     // Don't show sync prefs while in guest mode.
-                    if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_MODIFY_ACCOUNTS)) {
+                    if (!Restrictions.isAllowed(this, Restrictable.MODIFY_ACCOUNTS)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -797,13 +790,6 @@ OnSharedPreferenceChangeListener
                             return true;
                         }
                     });
-                } else if (handlers.containsKey(key)) {
-                    PrefHandler handler = handlers.get(key);
-                    if (!handler.setupPref(this, pref)) {
-                        preferences.removePreference(pref);
-                        i--;
-                        continue;
-                    }
                 } else if (PREFS_TAB_QUEUE.equals(key)) {
                     // Only show tab queue pref on nightly builds with the tab queue build flag.
                     if (!TabQueueHelper.TAB_QUEUE_ENABLED) {
@@ -826,19 +812,19 @@ OnSharedPreferenceChangeListener
                         continue;
                     }
                 } else if (PREFS_TRACKING_PROTECTION_PRIVATE_BROWSING.equals(key)) {
-                    if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_PRIVATE_BROWSING)) {
+                    if (!Restrictions.isAllowed(this, Restrictable.PRIVATE_BROWSING)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
                 } else if (PREFS_TRACKING_PROTECTION_LEARN_MORE.equals(key)) {
-                    if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_PRIVATE_BROWSING)) {
+                    if (!Restrictions.isAllowed(this, Restrictable.PRIVATE_BROWSING)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
                     }
                 } else if (PREFS_MP_ENABLED.equals(key)) {
-                    if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_MASTER_PASSWORD)) {
+                    if (!Restrictions.isAllowed(this, Restrictable.MASTER_PASSWORD)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -850,7 +836,7 @@ OnSharedPreferenceChangeListener
                         continue;
                     }
                 } else if (PREFS_CLEAR_PRIVATE_DATA.equals(key) || PREFS_CLEAR_PRIVATE_DATA_EXIT.equals(key)) {
-                    if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_CLEAR_HISTORY)) {
+                    if (!Restrictions.isAllowed(this, Restrictable.CLEAR_HISTORY)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -858,13 +844,7 @@ OnSharedPreferenceChangeListener
                 } else if (PREFS_HOMEPAGE.equals(key)) {
                         String setUrl = GeckoSharedPrefs.forProfile(getBaseContext()).getString(PREFS_HOMEPAGE, AboutPages.HOME);
                         setHomePageSummary(pref, setUrl);
-                        pref.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
-                            @Override
-                            public boolean onPreferenceChange(final Preference preference, final Object newValue) {
-                                setHomePageSummary(pref, String.valueOf(newValue));
-                                return true;
-                            }
-                        });
+                        pref.setOnPreferenceChangeListener(this);
                 } else if (PREFS_FAQ_LINK.equals(key)) {
                     // Format the FAQ link
                     final String VERSION = AppConstants.MOZ_APP_VERSION;
@@ -873,6 +853,15 @@ OnSharedPreferenceChangeListener
 
                     final String url = getResources().getString(R.string.faq_link, VERSION, OS, LOCALE);
                     ((LinkPreference) pref).setUrl(url);
+                } else if (handlers.containsKey(key)) {
+                    // This should be the last task. We might have removed some of this preferences previously. We only
+                    // want to run the PrefHandler for a preference if it still exists.
+                    PrefHandler handler = handlers.get(key);
+                    if (!handler.setupPref(this, pref)) {
+                        preferences.removePreference(pref);
+                        i--;
+                        continue;
+                    }
                 }
 
                 // Some Preference UI elements are not actually preferences,
@@ -1182,6 +1171,10 @@ OnSharedPreferenceChangeListener
             // We don't want the "use master password" pref to change until the
             // user has gone through the dialog.
             return false;
+        }
+
+        if (PREFS_HOMEPAGE.equals(prefName)) {
+            setHomePageSummary(preference, String.valueOf(newValue));
         }
 
         if (PREFS_BROWSER_LOCALE.equals(prefName)) {

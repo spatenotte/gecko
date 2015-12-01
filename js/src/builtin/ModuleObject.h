@@ -10,6 +10,8 @@
 #include "jsapi.h"
 #include "jsatom.h"
 
+#include "gc/Zone.h"
+
 #include "js/TraceableVector.h"
 
 #include "vm/NativeObject.h"
@@ -78,9 +80,13 @@ class ExportEntryObject : public NativeObject
     JSAtom* localName();
 };
 
+typedef Rooted<ExportEntryObject*> RootedExportEntryObject;
+typedef Handle<ExportEntryObject*> HandleExportEntryObject;
+
 class IndirectBindingMap
 {
   public:
+    explicit IndirectBindingMap(Zone* zone);
     bool init();
 
     void trace(JSTracer* trc);
@@ -112,7 +118,7 @@ class IndirectBindingMap
         RelocatablePtrShape shape;
     };
 
-    typedef HashMap<jsid, Binding, JsidHasher, SystemAllocPolicy> Map;
+    typedef HashMap<jsid, Binding, JsidHasher, ZoneAllocPolicy> Map;
 
     Map map_;
 };
@@ -171,6 +177,7 @@ class ModuleNamespaceObject : public ProxyObject
         static const char family;
     };
 
+  public:
     static const ProxyHandler proxyHandler;
 };
 
@@ -186,7 +193,7 @@ struct FunctionDeclaration
     RelocatablePtrFunction fun;
 };
 
-using FunctionDeclarationVector = TraceableVector<FunctionDeclaration>;
+using FunctionDeclarationVector = TraceableVector<FunctionDeclaration, 0, ZoneAllocPolicy>;
 
 class ModuleObject : public NativeObject
 {
@@ -264,9 +271,9 @@ class ModuleObject : public NativeObject
 class MOZ_STACK_CLASS ModuleBuilder
 {
   public:
-    explicit ModuleBuilder(JSContext* cx);
+    explicit ModuleBuilder(JSContext* cx, HandleModuleObject module);
 
-    bool buildAndInit(frontend::ParseNode* pn, HandleModuleObject module);
+    bool buildAndInit(frontend::ParseNode* pn);
 
   private:
     using AtomVector = TraceableVector<JSAtom*>;
@@ -277,8 +284,8 @@ class MOZ_STACK_CLASS ModuleBuilder
     using RootedExportEntryVector = JS::Rooted<ExportEntryVector> ;
 
     JSContext* cx_;
+    RootedModuleObject module_;
     RootedAtomVector requestedModules_;
-
     RootedAtomVector importedBoundNames_;
     RootedImportEntryVector importEntries_;
     RootedExportEntryVector exportEntries_;
@@ -292,11 +299,13 @@ class MOZ_STACK_CLASS ModuleBuilder
 
     ImportEntryObject* importEntryFor(JSAtom* localName);
 
-    bool appendLocalExportEntry(HandleAtom exportName, HandleAtom localName);
-    bool appendIndirectExportEntry(HandleAtom exportName, HandleAtom moduleRequest,
-                                   HandleAtom importName);
+    bool appendExportEntry(HandleAtom exportName, HandleAtom localName);
+    bool appendExportFromEntry(HandleAtom exportName, HandleAtom moduleRequest,
+                               HandleAtom importName);
 
     bool maybeAppendRequestedModule(HandleAtom module);
+
+    bool appendLocalExportEntry(HandleExportEntryObject exp);
 
     template <typename T>
     ArrayObject* createArray(const TraceableVector<T>& vector);
@@ -307,5 +316,12 @@ JSObject* InitImportEntryClass(JSContext* cx, HandleObject obj);
 JSObject* InitExportEntryClass(JSContext* cx, HandleObject obj);
 
 } // namespace js
+
+template<>
+inline bool
+JSObject::is<js::ModuleNamespaceObject>() const
+{
+    return js::IsDerivedProxyObject(this, &js::ModuleNamespaceObject::proxyHandler);
+}
 
 #endif /* builtin_ModuleObject_h */

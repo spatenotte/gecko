@@ -3212,7 +3212,7 @@ js::FillBytecodeTypeMap(JSScript* script, uint32_t* bytecodeMap)
     uint32_t added = 0;
     for (jsbytecode* pc = script->code(); pc < script->codeEnd(); pc += GetBytecodeLength(pc)) {
         JSOp op = JSOp(*pc);
-        if (js_CodeSpec[op].format & JOF_TYPESET) {
+        if (CodeSpec[op].format & JOF_TYPESET) {
             bytecodeMap[added++] = script->pcToOffset(pc);
             if (added == script->nTypeSets())
                 break;
@@ -3222,18 +3222,10 @@ js::FillBytecodeTypeMap(JSScript* script, uint32_t* bytecodeMap)
 }
 
 void
-js::TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, const js::Value& rval)
+js::TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, TypeSet::Type type)
 {
-    /* Allow the non-TYPESET scenario to simplify stubs used in compound opcodes. */
-    if (!(js_CodeSpec[*pc].format & JOF_TYPESET))
-        return;
-
-    if (!script->hasBaselineScript())
-        return;
-
     AutoEnterAnalysis enter(cx);
 
-    TypeSet::Type type = TypeSet::GetValueType(rval);
     StackTypeSet* types = TypeScript::BytecodeTypes(script, pc);
     if (types->hasType(type))
         return;
@@ -3241,6 +3233,19 @@ js::TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, const js:
     InferSpew(ISpewOps, "bytecodeType: %p %05u: %s",
               script, script->pcToOffset(pc), TypeSet::TypeString(type));
     types->addType(cx, type);
+}
+
+void
+js::TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, const js::Value& rval)
+{
+    /* Allow the non-TYPESET scenario to simplify stubs used in compound opcodes. */
+    if (!(CodeSpec[*pc].format & JOF_TYPESET))
+        return;
+
+    if (!script->hasBaselineScript())
+        return;
+
+    TypeMonitorResult(cx, script, pc, TypeSet::GetValueType(rval));
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -3872,7 +3877,11 @@ TypeNewScript::rollbackPartiallyInitializedObjects(JSContext* cx, ObjectGroup* g
         if (!iter.isConstructing() || !iter.matchCallee(cx, function))
             continue;
 
-        Value thisv = iter.thisv(cx);
+        // Derived class constructors initialize their this-binding later and
+        // we shouldn't run the definite properties analysis on them.
+        MOZ_ASSERT(!iter.script()->isDerivedClassConstructor());
+
+        Value thisv = iter.thisArgument(cx);
         if (!thisv.isObject() ||
             thisv.toObject().hasLazyGroup() ||
             thisv.toObject().group() != group)
@@ -4459,7 +4468,7 @@ TypeScript::printTypes(JSContext* cx, HandleScript script) const
             fprintf(stderr, "%s", sprinter.string());
         }
 
-        if (js_CodeSpec[*pc].format & JOF_TYPESET) {
+        if (CodeSpec[*pc].format & JOF_TYPESET) {
             StackTypeSet* types = TypeScript::BytecodeTypes(script, pc);
             fprintf(stderr, "  typeset %u:", unsigned(types - typeArray()));
             types->print();
