@@ -35,7 +35,6 @@ Cu.import("resource://gre/modules/PermissionsTable.jsm");
 
 var permissionManager = Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager);
 var secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
-var privacyMonitor = Cc["@mozilla.org/privacy-monitor;1"].getService().wrappedJSObject;
 
 var permissionSpecificChecker = {};
 
@@ -270,9 +269,6 @@ ContentPermissionPrompt.prototype = {
       request.allow(buildDefaultChoices(typesInfo));
       return;
     }
-
-    // Calling WebIDL for logging requests
-    privacyMonitor.logPermissionRequest(request.principal.appId, typesInfo);
 
     if (typesInfo.length == 0) {
       request.cancel();

@@ -4,7 +4,7 @@
 
 "use strict";
 
-const DEBUG = false;
+const DEBUG = true;
 function debug(s) { dump("-*- ContactManager: " + s + "\n"); }
 
 const Cc = Components.classes;
@@ -22,6 +22,8 @@ XPCOMUtils.defineLazyServiceGetter(Services, "DOMRequest",
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
+
+var privacyMonitor = Cc["@mozilla.org/privacy-monitor;1"].getService().wrappedJSObject;
 
 const CONTACTS_SENDMORE_MINIMUM = 5;
 
@@ -349,6 +351,9 @@ ContactManager.prototype = {
     };
 
     this.askPermission(reason, request, allowCallback, cancelCallback);
+
+    this.notifyListener(reason);
+
     return request;
   },
 
@@ -369,6 +374,9 @@ ContactManager.prototype = {
     };
 
     this.askPermission("find", request, allowCallback, cancelCallback);
+
+    this.notifyListener("find");
+
     return request;
   },
 
@@ -401,6 +409,9 @@ ContactManager.prototype = {
     };
 
     this.askPermission("find", cursor, allowCallback, cancelCallback);
+
+    this.notifyListener("find");
+
     return cursor;
   },
 
@@ -452,6 +463,9 @@ ContactManager.prototype = {
     };
 
     this.askPermission("remove", request, allowCallback, cancelCallback);
+
+    this.notifyListener("remove");
+
     return request;
   },
 
@@ -472,6 +486,9 @@ ContactManager.prototype = {
     };
 
     this.askPermission("remove", request, allowCallback, cancelCallback);
+
+    this.notifyListener("remove");
+
     return request;
   },
 
@@ -528,6 +545,36 @@ ContactManager.prototype = {
 
     this.askPermission("listen", null, allowCallback);
   },
+
+  notifyListener: function(aAccess) {
+  // figure out type of permission to log
+  let access;
+  switch(aAccess) {
+    case "create":
+      access = "create";
+      break;
+    case "update":
+    case "remove":
+      access = "write";
+      break;
+    case "find":
+    case "listen":
+    case "revision":
+    case "count":
+      access = "read";
+      break;
+    default:
+      access = "unknown";
+  }
+  let type = "contacts-" + access;
+
+  let principal = this._window.document.nodePrincipal;
+  let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(principal.appId);
+
+  debug('App name : ' + app.name + ', permission: ' + type);
+
+  //privacyMonitor.notifyListener(app.name, type);
+},
 
   classID: Components.ID("{8beb3a66-d70a-4111-b216-b8e995ad3aff}"),
   contractID: "@mozilla.org/contactManager;1",
