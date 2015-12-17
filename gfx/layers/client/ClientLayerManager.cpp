@@ -396,15 +396,25 @@ ClientLayerManager::DidComposite(uint64_t aTransactionId,
                                  const TimeStamp& aCompositeEnd)
 {
   MOZ_ASSERT(mWidget);
-  nsIWidgetListener *listener = mWidget->GetWidgetListener();
-  if (listener) {
-    listener->DidCompositeWindow(aCompositeStart, aCompositeEnd);
+
+  // |aTransactionId| will be > 0 if the compositor is acknowledging a shadow
+  // layers transaction.
+  if (aTransactionId) {
+    nsIWidgetListener *listener = mWidget->GetWidgetListener();
+    if (listener) {
+      listener->DidCompositeWindow(aCompositeStart, aCompositeEnd);
+    }
+    listener = mWidget->GetAttachedWidgetListener();
+    if (listener) {
+      listener->DidCompositeWindow(aCompositeStart, aCompositeEnd);
+    }
+    mTransactionIdAllocator->NotifyTransactionCompleted(aTransactionId);
   }
-  listener = mWidget->GetAttachedWidgetListener();
-  if (listener) {
-    listener->DidCompositeWindow(aCompositeStart, aCompositeEnd);
+
+  // These observers fire whether or not we were in a transaction.
+  for (size_t i = 0; i < mDidCompositeObservers.Length(); i++) {
+    mDidCompositeObservers[i]->DidComposite();
   }
-  mTransactionIdAllocator->NotifyTransactionCompleted(aTransactionId);
 }
 
 void
@@ -636,6 +646,7 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
   }
 
   mForwarder->RemoveTexturesIfNecessary();
+  mForwarder->RemoveCompositablesIfNecessary();
   mForwarder->SendPendingAsyncMessges();
   mPhase = PHASE_NONE;
 
@@ -703,24 +714,6 @@ ClientLayerManager::GetTexturePool(SurfaceFormat aFormat, TextureFlags aFlags)
                             mForwarder));
 
   return mTexturePools.LastElement();
-}
-
-void
-ClientLayerManager::ReturnTextureClientDeferred(TextureClient& aClient) {
-  GetTexturePool(aClient.GetFormat(),
-                 aClient.GetFlags())->ReturnTextureClientDeferred(&aClient);
-}
-
-void
-ClientLayerManager::ReturnTextureClient(TextureClient& aClient) {
-  GetTexturePool(aClient.GetFormat(),
-                 aClient.GetFlags())->ReturnTextureClient(&aClient);
-}
-
-void
-ClientLayerManager::ReportClientLost(TextureClient& aClient) {
-  GetTexturePool(aClient.GetFormat(),
-                 aClient.GetFlags())->ReportClientLost();
 }
 
 void
@@ -820,6 +813,20 @@ void
 ClientLayerManager::SetNextPaintSyncId(int32_t aSyncId)
 {
   mForwarder->SetPaintSyncId(aSyncId);
+}
+
+void
+ClientLayerManager::AddDidCompositeObserver(DidCompositeObserver* aObserver)
+{
+  if (!mDidCompositeObservers.Contains(aObserver)) {
+    mDidCompositeObservers.AppendElement(aObserver);
+  }
+}
+
+void
+ClientLayerManager::RemoveDidCompositeObserver(DidCompositeObserver* aObserver)
+{
+  mDidCompositeObservers.RemoveElement(aObserver);
 }
 
 ClientLayer::~ClientLayer()

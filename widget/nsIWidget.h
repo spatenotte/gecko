@@ -104,7 +104,14 @@ typedef void* nsNativeWidget;
 #define NS_NATIVE_SHAREABLE_WINDOW 11
 #define NS_NATIVE_OPENGL_CONTEXT   12
 // See RegisterPluginWindowForRemoteUpdates
-#define NS_NATIVE_PLUGIN_ID            13
+#define NS_NATIVE_PLUGIN_ID        13
+// This is available only with GetNativeData() in parent process.  Anybody
+// shouldn't access this pointer as a valid pointer since the result may be
+// special value like NS_ONLY_ONE_NATIVE_IME_CONTEXT.  So, the result is just
+// an identifier of distinguishing a text composition is caused by which native
+// IME context.  Note that the result is only valid in the process.  So,
+// XP code should use nsIWidget::GetNativeIMEContext() instead of using this.
+#define NS_RAW_NATIVE_IME_CONTEXT  14
 #ifdef XP_MACOSX
 #define NS_NATIVE_PLUGIN_PORT_QD    100
 #define NS_NATIVE_PLUGIN_PORT_CG    101
@@ -123,8 +130,8 @@ typedef void* nsNativeWidget;
 #endif
 
 #define NS_IWIDGET_IID \
-{ 0xd953b7a1, 0x6981, 0x4ed7, \
-  { 0xbc, 0xf0, 0xed, 0x96, 0x70, 0xee, 0x23, 0x28 } }
+{ 0xaaa79c8d, 0xc99d, 0x4fe1, \
+  { 0xa5, 0x11, 0xd3, 0xeb, 0xb1, 0x61, 0x9e, 0x26 } }
 
 /*
  * Window shadow styles
@@ -329,6 +336,7 @@ class nsIWidget : public nsISupports {
     typedef mozilla::widget::IMEState IMEState;
     typedef mozilla::widget::InputContext InputContext;
     typedef mozilla::widget::InputContextAction InputContextAction;
+    typedef mozilla::widget::NativeIMEContext NativeIMEContext;
     typedef mozilla::widget::SizeConstraints SizeConstraints;
     typedef mozilla::widget::TextEventDispatcher TextEventDispatcher;
     typedef mozilla::CompositorVsyncDispatcher CompositorVsyncDispatcher;
@@ -337,6 +345,7 @@ class nsIWidget : public nsISupports {
     typedef mozilla::LayoutDeviceIntRect LayoutDeviceIntRect;
     typedef mozilla::LayoutDeviceIntRegion LayoutDeviceIntRegion;
     typedef mozilla::LayoutDeviceIntSize LayoutDeviceIntSize;
+    typedef mozilla::ScreenIntPoint ScreenIntPoint;
 
     // Used in UpdateThemeGeometries.
     struct ThemeGeometry {
@@ -344,9 +353,10 @@ class nsIWidget : public nsISupports {
       // nsITheme::ThemeGeometryTypeForWidget.
       nsITheme::ThemeGeometryType mType;
       // The device-pixel rect within the window for the themed widget
-      nsIntRect mRect;
+      LayoutDeviceIntRect mRect;
 
-      ThemeGeometry(nsITheme::ThemeGeometryType aType, const nsIntRect& aRect)
+      ThemeGeometry(nsITheme::ThemeGeometryType aType,
+                    const LayoutDeviceIntRect& aRect)
         : mType(aType)
         , mRect(aRect)
       { }
@@ -395,10 +405,10 @@ class nsIWidget : public nsISupports {
      * @param     aInitData     data that is used for widget initialization
      *
      */
-    NS_IMETHOD Create(nsIWidget        *aParent,
-                      nsNativeWidget   aNativeParent,
-                      const nsIntRect  &aRect,
-                      nsWidgetInitData *aInitData = nullptr) = 0;
+    NS_IMETHOD Create(nsIWidget* aParent,
+                      nsNativeWidget aNativeParent,
+                      const LayoutDeviceIntRect& aRect,
+                      nsWidgetInitData* aInitData = nullptr) = 0;
 
     /**
      * Allocate, initialize, and return a widget that is a child of
@@ -417,9 +427,9 @@ class nsIWidget : public nsISupports {
      * understood code, and shouldn't be used in new code.
      */
     virtual already_AddRefed<nsIWidget>
-    CreateChild(const nsIntRect  &aRect,
-                nsWidgetInitData *aInitData = nullptr,
-                bool             aForceUseIWidgetParent = false) = 0;
+    CreateChild(const LayoutDeviceIntRect& aRect,
+                nsWidgetInitData* aInitData = nullptr,
+                bool aForceUseIWidgetParent = false) = 0;
 
     /**
      * Attach to a top level widget. 
@@ -984,7 +994,7 @@ class nsIWidget : public nsISupports {
         uintptr_t mWindowID; // e10s specific, the unique plugin port id
         bool mVisible; // e10s specific, widget visibility
         LayoutDeviceIntRect mBounds;
-        nsTArray<nsIntRect> mClipRegion;
+        nsTArray<LayoutDeviceIntRect> mClipRegion;
     };
 
     /**
@@ -1004,7 +1014,7 @@ class nsIWidget : public nsISupports {
      * moved in that order.
      */
     virtual nsresult ConfigureChildren(const nsTArray<Configuration>& aConfigurations) = 0;
-    virtual nsresult SetWindowClipRegion(const nsTArray<nsIntRect>& aRects,
+    virtual nsresult SetWindowClipRegion(const nsTArray<LayoutDeviceIntRect>& aRects,
                                          bool aIntersectWithExisting) = 0;
 
     /**
@@ -1012,7 +1022,7 @@ class nsIWidget : public nsISupports {
      * region. If this widget is not clipped, appends a single rectangle
      * (0, 0, bounds.width, bounds.height).
      */
-    virtual void GetWindowClipRegion(nsTArray<nsIntRect>* aRects) = 0;
+    virtual void GetWindowClipRegion(nsTArray<LayoutDeviceIntRect>* aRects) = 0;
 
     /**
      * Register or unregister native plugin widgets which receive Configuration
@@ -1148,7 +1158,7 @@ class nsIWidget : public nsISupports {
      * Invalidate a specified rect for a widget so that it will be repainted
      * later.
      */
-    NS_IMETHOD Invalidate(const nsIntRect & aRect) = 0;
+    NS_IMETHOD Invalidate(const LayoutDeviceIntRect& aRect) = 0;
 
     enum LayerManagerPersistence
     {
@@ -1225,7 +1235,8 @@ class nsIWidget : public nsISupports {
      *
      * Always called from the compositing thread.
      */
-    virtual void DrawWindowUnderlay(LayerManagerComposite* aManager, nsIntRect aRect) = 0;
+    virtual void DrawWindowUnderlay(LayerManagerComposite* aManager,
+                                    LayoutDeviceIntRect aRect) = 0;
 
     /**
      * Called after the LayerManager draws the layer tree
@@ -1294,12 +1305,12 @@ class nsIWidget : public nsISupports {
      *
      * @param aOpaqueRegion the region of the window that is opaque.
      */
-    virtual void UpdateOpaqueRegion(const nsIntRegion &aOpaqueRegion) {}
+    virtual void UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion) {}
 
     /**
      * Informs the widget about the region of the window that is draggable.
      */
-    virtual void UpdateWindowDraggingRegion(const nsIntRegion& aRegion) {}
+    virtual void UpdateWindowDraggingRegion(const LayoutDeviceIntRegion& aRegion) {}
 
     /**
      * Tells the widget whether the given input block results in a swipe.
@@ -1641,7 +1652,7 @@ class nsIWidget : public nsISupports {
      */
     virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                                 TouchPointerState aPointerState,
-                                                nsIntPoint aPointerScreenPoint,
+                                                ScreenIntPoint aPointerScreenPoint,
                                                 double aPointerPressure,
                                                 uint32_t aPointerOrientation,
                                                 nsIObserver* aObserver) = 0;
@@ -1654,7 +1665,7 @@ class nsIWidget : public nsISupports {
      * @param aObserver The observer that will get notified once the events
      * have been dispatched.
      */
-    virtual nsresult SynthesizeNativeTouchTap(nsIntPoint aPointerScreenPoint,
+    virtual nsresult SynthesizeNativeTouchTap(ScreenIntPoint aPointerScreenPoint,
                                               bool aLongTap,
                                               nsIObserver* aObserver);
 
@@ -1690,7 +1701,7 @@ private:
   class LongTapInfo
   {
   public:
-    LongTapInfo(int32_t aPointerId, nsIntPoint& aPoint,
+    LongTapInfo(int32_t aPointerId, ScreenIntPoint& aPoint,
                 mozilla::TimeDuration aDuration,
                 nsIObserver* aObserver) :
       mPointerId(aPointerId),
@@ -1702,7 +1713,7 @@ private:
     }
 
     int32_t mPointerId;
-    nsIntPoint mPosition;
+    ScreenIntPoint mPosition;
     mozilla::TimeDuration mDuration;
     nsCOMPtr<nsIObserver> mObserver;
     mozilla::TimeStamp mStamp;
@@ -1787,6 +1798,13 @@ public:
      * Get current input context.
      */
     NS_IMETHOD_(InputContext) GetInputContext() = 0;
+
+    /**
+     * Get native IME context.  This is different from GetNativeData() with
+     * NS_RAW_NATIVE_IME_CONTEXT, the result is unique even if in a remote
+     * process.
+     */
+    NS_IMETHOD_(NativeIMEContext) GetNativeIMEContext();
 
     /*
      * Given a WidgetKeyboardEvent, this method synthesizes a corresponding

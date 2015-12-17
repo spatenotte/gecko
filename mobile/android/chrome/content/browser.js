@@ -120,6 +120,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode", "resource://gre/modules/Re
 
 XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
 
+XPCOMUtils.defineLazyServiceGetter(this, "FontEnumerator",
+  "@mozilla.org/gfx/fontenumerator;1",
+  "nsIFontEnumerator");
+
 var lazilyLoadedBrowserScripts = [
   ["SelectHelper", "chrome://browser/content/SelectHelper.js"],
   ["InputWidgetHelper", "chrome://browser/content/InputWidgetHelper.js"],
@@ -159,7 +163,7 @@ var lazilyLoadedObserverScripts = [
 ];
 if (AppConstants.NIGHTLY_BUILD) {
   lazilyLoadedObserverScripts.push(
-    ["ActionBarHandler", ["ActionBar:OpenNew", "ActionBar:Close", "TextSelection:Get"],
+    ["ActionBarHandler", ["TextSelection:Get", "TextSelection:Action", "TextSelection:End"],
       "chrome://browser/content/ActionBarHandler.js"]
   );
 }
@@ -456,10 +460,12 @@ var BrowserApp = {
     Services.obs.addObserver(this, "Webapps:Load", false);
     Services.obs.addObserver(this, "Webapps:AutoUninstall", false);
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
+    Services.obs.addObserver(this, "Fonts:Reload", false);
+
     Messaging.addListener(this.getHistory.bind(this), "Session:GetHistory");
 
     function showFullScreenWarning() {
-      NativeWindow.toast.show(Strings.browser.GetStringFromName("alertFullScreenToast"), "short");
+      Snackbars.show(Strings.browser.GetStringFromName("alertFullScreenToast"), Snackbars.LENGTH_SHORT);
     }
 
     window.addEventListener("fullscreen", function() {
@@ -563,20 +569,18 @@ var BrowserApp = {
       InitLater(() => AccessFu.attach(window), window, "AccessFu");
     }
 
-    if (!AppConstants.MOZ_ANDROID_NATIVE_ACCOUNT_UI) {
-      // We can't delay registering WebChannel listeners: if the first page is
-      // about:accounts, which can happen when starting the Firefox Account flow
-      // from the first run experience, or via the Firefox Account Status
-      // Activity, we can and do miss messages from the fxa-content-server.
-      // However, we never allow suitably restricted profiles from listening to
-      // fxa-content-server messages.
-      if (ParentalControls.isAllowed(ParentalControls.MODIFY_ACCOUNTS)) {
-        console.log("browser.js: loading Firefox Accounts WebChannel");
-        Cu.import("resource://gre/modules/FxAccountsWebChannel.jsm");
-        EnsureFxAccountsWebChannel();
-      } else {
-        console.log("browser.js: not loading Firefox Accounts WebChannel; this profile cannot connect to Firefox Accounts.");
-      }
+    // We can't delay registering WebChannel listeners: if the first page is
+    // about:accounts, which can happen when starting the Firefox Account flow
+    // from the first run experience, or via the Firefox Account Status
+    // Activity, we can and do miss messages from the fxa-content-server.
+    // However, we never allow suitably restricted profiles from listening to
+    // fxa-content-server messages.
+    if (ParentalControls.isAllowed(ParentalControls.MODIFY_ACCOUNTS)) {
+      console.log("browser.js: loading Firefox Accounts WebChannel");
+      Cu.import("resource://gre/modules/FxAccountsWebChannel.jsm");
+      EnsureFxAccountsWebChannel();
+    } else {
+      console.log("browser.js: not loading Firefox Accounts WebChannel; this profile cannot connect to Firefox Accounts.");
     }
 
     // Notify Java that Gecko has loaded.
@@ -615,6 +619,13 @@ var BrowserApp = {
       InitLater(() => LoginManagerParent.init(), window, "LoginManagerParent");
 
     }, false);
+
+    // Pass caret StateChanged events to ActionBarHandler.
+    if (AppConstants.NIGHTLY_BUILD) {
+      window.addEventListener("mozcaretstatechanged", e => {
+        ActionBarHandler.caretStateChangedHandler(e);
+      }, /* useCapture = */ true, /* wantsUntrusted = */ false);
+    }
   },
 
   get _startupStatus() {
@@ -1260,7 +1271,7 @@ var BrowserApp = {
 
   // Calling this will update the state in BrowserApp after a tab has been
   // closed in the Java UI.
-  _handleTabClosed: function _handleTabClosed(aTab, aShowUndoToast) {
+  _handleTabClosed: function _handleTabClosed(aTab, aShowUndoSnackbar) {
     if (aTab == this.selectedTab)
       this.selectedTab = null;
 
@@ -1270,8 +1281,8 @@ var BrowserApp = {
     evt.initUIEvent("TabClose", true, false, window, tabIndex);
     aTab.browser.dispatchEvent(evt);
 
-    if (aShowUndoToast) {
-      // Get a title for the undo close toast. Fall back to the URL if there is no title.
+    if (aShowUndoSnackbar) {
+      // Get a title for the undo close snackbar. Fall back to the URL if there is no title.
       let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
       let closedTabData = ss.getClosedTabs(window)[0];
 
@@ -2093,6 +2104,10 @@ var BrowserApp = {
         let data = JSON.parse(aData);
         let tab = this.getTabForId(data.tabId);
         tab.tilesData = data.payload;
+        break;
+
+      case "Fonts:Reload":
+        FontEnumerator.updateFontList();
         break;
 
       default:
@@ -3078,7 +3093,7 @@ var NativeWindow = {
     _copyStringToDefaultClipboard: function(aString) {
       let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
       clipboard.copyString(aString);
-      NativeWindow.toast.show(Strings.browser.GetStringFromName("selectionHelper.textCopied"), "short");
+      Snackbars.show(Strings.browser.GetStringFromName("selectionHelper.textCopied"), Snackbars.LENGTH_SHORT);
     },
 
     _stripScheme: function(aString) {
@@ -5870,7 +5885,7 @@ var XPInstallObserver = {
 
     switch (aTopic) {
       case "addon-install-started":
-        NativeWindow.toast.show(strings.GetStringFromName("alertAddonsDownloading"), "short");
+        Snackbars.show(strings.GetStringFromName("alertAddonsDownloading"), Snackbars.LENGTH_SHORT);
         break;
       case "addon-install-disabled": {
         if (!tab)
@@ -6913,7 +6928,7 @@ var SearchEngines = {
     Services.search.addEngine(engine.url, Ci.nsISearchEngine.DATA_XML, engine.iconURL, false, {
       onSuccess: function() {
         // Display a toast confirming addition of new search engine.
-        NativeWindow.toast.show(Strings.browser.formatStringFromName("alertSearchEngineAddedToast", [engine.title], 1), "long");
+        Snackbars.show(Strings.browser.formatStringFromName("alertSearchEngineAddedToast", [engine.title], 1), Snackbars.LENGTH_SHORT);
       },
 
       onError: function(aCode) {
@@ -6927,7 +6942,7 @@ var SearchEngines = {
           errorMessage = "alertSearchEngineErrorToast";
         }
 
-        NativeWindow.toast.show(Strings.browser.formatStringFromName(errorMessage, [engine.title], 1), "long");
+        Snackbars.show(Strings.browser.formatStringFromName(errorMessage, [engine.title], 1), Snackbars.LENGTH_SHORT);
       }
     });
   },
@@ -7008,7 +7023,7 @@ var SearchEngines = {
             name = title.value + " " + i;
 
           Services.search.addEngineWithDetails(name, favicon, null, null, method, formURL);
-          NativeWindow.toast.show(Strings.browser.formatStringFromName("alertSearchEngineAddedToast", [name], 1), "long");
+          Snackbars.show(Strings.browser.formatStringFromName("alertSearchEngineAddedToast", [name], 1), Snackbars.LENGTH_SHORT);
           let engine = Services.search.getEngineByName(name);
           engine.wrappedJSObject._queryCharset = charset;
           for (let i = 0; i < formData.length; ++i) {
@@ -7635,3 +7650,4 @@ HTMLContextMenuItem.prototype = Object.create(ContextMenuItem.prototype, {
     }
   },
 });
+

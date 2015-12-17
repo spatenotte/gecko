@@ -318,8 +318,10 @@ var PlacesCommandHook = {
    *        whether or not to show the edit-bookmark UI for the bookmark item
    */
   bookmarkPage: Task.async(function* (aBrowser, aParent, aShowEditUI) {
-    if (PlacesUIUtils.useAsyncTransactions)
-      return (yield this._bookmarkPagePT(aBrowser, aParent, aShowEditUI));
+    if (PlacesUIUtils.useAsyncTransactions) {
+      yield this._bookmarkPagePT(aBrowser, aParent, aShowEditUI);
+      return;
+    }
 
     var uri = aBrowser.currentURI;
     var itemId = PlacesUtils.getMostRecentBookmarkForURI(uri);
@@ -784,11 +786,13 @@ var BookmarksEventHandler = {
    */
   onClick: function BEH_onClick(aEvent, aView) {
     // Only handle middle-click or left-click with modifiers.
-#ifdef XP_MACOSX
-    var modifKey = aEvent.metaKey || aEvent.shiftKey;
-#else
-    var modifKey = aEvent.ctrlKey || aEvent.shiftKey;
-#endif
+    let modifKey;
+    if (AppConstants.platform == "macosx") {
+      modifKey = aEvent.metaKey || aEvent.shiftKey;
+    } else {
+      modifKey = aEvent.ctrlKey || aEvent.shiftKey;
+    }
+
     if (aEvent.button == 2 || (aEvent.button == 0 && !modifKey))
       return;
 

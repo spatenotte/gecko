@@ -601,7 +601,7 @@ public:
    * for the themed widget
    */
   void RegisterThemeGeometry(uint8_t aWidgetType,
-                             const nsIntRect& aRect) {
+                             const mozilla::LayoutDeviceIntRect& aRect) {
     if (mIsPaintingToWindow) {
       mThemeGeometries.AppendElement(ThemeGeometry(aWidgetType, aRect));
     }
@@ -2682,7 +2682,7 @@ public:
   virtual void ConfigureLayer(ImageLayer* aLayer,
                               const ContainerLayerParameters& aParameters) override;
 
-  static nsRegion GetInsideClipRegion(nsDisplayItem* aItem, nsPresContext* aPresContext, uint8_t aClip,
+  static nsRegion GetInsideClipRegion(nsDisplayItem* aItem, uint8_t aClip,
                                       const nsRect& aRect, bool* aSnap);
 
   virtual bool ShouldFixToViewport(nsDisplayListBuilder* aBuilder) override;

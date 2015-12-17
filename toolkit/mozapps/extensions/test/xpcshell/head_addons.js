@@ -373,7 +373,8 @@ function do_get_file_hash(aFile, aAlgorithm) {
   let toHexString = charCode => ("0" + charCode.toString(16)).slice(-2);
 
   let binary = crypto.finish(false);
-  return aAlgorithm + ":" + [toHexString(binary.charCodeAt(i)) for (i in binary)].join("")
+  let hash = Array.from(binary, c => toHexString(c.charCodeAt(0)));
+  return aAlgorithm + ":" + hash.join("");
 }
 
 /**
@@ -1132,7 +1133,9 @@ function promiseSetExtensionModifiedTime(aPath, aTime) {
     try {
       let iterator = new OS.File.DirectoryIterator(aPath);
       entries = yield iterator.nextBatch();
-    } catch (ex if ex instanceof OS.File.Error) {
+    } catch (ex) {
+      if (!(ex instanceof OS.File.Error))
+        throw ex;
       return;
     } finally {
       if (iterator) {
@@ -2116,3 +2119,36 @@ var promiseConsoleOutput = Task.async(function*(aTask) {
     Services.console.unregisterListener(listener);
   }
 });
+
+/**
+ * Creates an extension proxy file.
+ * See: https://developer.mozilla.org/en-US/Add-ons/Setting_up_extension_development_environment#Firefox_extension_proxy_file
+ * @param   aDir
+ *          The directory to add the proxy file to.
+ * @param   aAddon
+ *          An nsIFile for the add-on file that this is a proxy file for.
+ * @param   aId
+ *          A string to use for the add-on ID.
+ * @return  An nsIFile for the proxy file.
+ */
+function writeProxyFileToDir(aDir, aAddon, aId) {
+  let dir = aDir.clone();
+
+  if (!dir.exists())
+    dir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+
+  let file = dir.clone();
+  file.append(aId);
+
+  let addonPath = aAddon.path;
+
+  let fos = AM_Cc["@mozilla.org/network/file-output-stream;1"].
+            createInstance(AM_Ci.nsIFileOutputStream);
+  fos.init(file,
+           FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | FileUtils.MODE_TRUNCATE,
+           FileUtils.PERMS_FILE, 0);
+  fos.write(addonPath, addonPath.length);
+  fos.close();
+
+  return file;
+}

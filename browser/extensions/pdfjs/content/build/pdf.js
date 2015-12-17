@@ -20,8 +20,8 @@ if (typeof PDFJS === 'undefined') {
   (typeof window !== 'undefined' ? window : this).PDFJS = {};
 }
 
-PDFJS.version = '1.3.42';
-PDFJS.build = '84a47f8';
+PDFJS.version = '1.3.76';
+PDFJS.build = 'f7ec866';
 
 (function pdfjsWrapper() {
   // Use strict in our context only - users might not want it
@@ -248,7 +248,6 @@ function error(msg) {
     console.log('Error: ' + msg);
     console.log(backtrace());
   }
-  UnsupportedManager.notify(UNSUPPORTED_FEATURES.unknown);
   throw new Error(msg);
 }
 
@@ -274,22 +273,6 @@ var UNSUPPORTED_FEATURES = PDFJS.UNSUPPORTED_FEATURES = {
   shadingPattern: 'shadingPattern',
   font: 'font'
 };
-
-var UnsupportedManager = PDFJS.UnsupportedManager =
-  (function UnsupportedManagerClosure() {
-  var listeners = [];
-  return {
-    listen: function (cb) {
-      listeners.push(cb);
-    },
-    notify: function (featureId) {
-      warn('Unsupported feature "' + featureId + '"');
-      for (var i = 0, ii = listeners.length; i < ii; i++) {
-        listeners[i](featureId);
-      }
-    }
-  };
-})();
 
 // Combines two URLs. The baseUrl shall be absolute URL. If the url is an
 // absolute URL, it will be returned as is.
@@ -1772,6 +1755,12 @@ var PDFDocumentLoadingTask = (function PDFDocumentLoadingTaskClosure() {
      * an {Object} with the properties: {number} loaded and {number} total.
      */
     this.onProgress = null;
+
+    /**
+     * Callback to when unsupported feature is used. The callback receives
+     * an {PDFJS.UNSUPPORTED_FEATURES} argument.
+     */
+    this.onUnsupportedFeature = null;
   }
 
   PDFDocumentLoadingTask.prototype =
@@ -2530,9 +2519,6 @@ var PDFWorker = (function PDFWorkerClosure() {
           messageHandler.on('console_error', function (data) {
             console.error.apply(console, data);
           });
-          messageHandler.on('_unsupported_feature', function (data) {
-            UnsupportedManager.notify(data);
-          });
 
           var testObj = new Uint8Array([PDFJS.postMessageTransfers ? 255 : 0]);
           // Some versions of Opera throw a DATA_CLONE_ERR on serializing the
@@ -2897,6 +2883,19 @@ var WorkerTransport = (function WorkerTransportClosure() {
         } else {
           error(data.error);
         }
+      }, this);
+
+      messageHandler.on('UnsupportedFeature',
+          function transportUnsupportedFeature(data) {
+        if (this.destroyed) {
+          return; // Ignore any pending requests if the worker was terminated.
+        }
+        var featureId = data.featureId;
+        var loadingTask = this.loadingTask;
+        if (loadingTask.onUnsupportedFeature) {
+          loadingTask.onUnsupportedFeature(featureId);
+        }
+        PDFJS.UnsupportedManager.notify(featureId);
       }, this);
 
       messageHandler.on('JpegDecode', function(data) {
@@ -3314,6 +3313,26 @@ var InternalRenderTask = (function InternalRenderTaskClosure() {
   };
 
   return InternalRenderTask;
+})();
+
+/**
+ * (Deprecated) Global observer of unsupported feature usages. Use
+ * onUnsupportedFeature callback of the {PDFDocumentLoadingTask} instance.
+ */
+PDFJS.UnsupportedManager = (function UnsupportedManagerClosure() {
+  var listeners = [];
+  return {
+    listen: function (cb) {
+      deprecated('Global UnsupportedManager.listen is used: ' +
+                 ' use PDFDocumentLoadingTask.onUnsupportedFeature instead');
+      listeners.push(cb);
+    },
+    notify: function (featureId) {
+      for (var i = 0, ii = listeners.length; i < ii; i++) {
+        listeners[i](featureId);
+      }
+    }
+  };
 })();
 
 
@@ -4011,27 +4030,29 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
     }
   }
 
-  function composeSMaskAlpha(maskData, layerData) {
+  function composeSMaskAlpha(maskData, layerData, transferMap) {
     var length = maskData.length;
     var scale = 1 / 255;
     for (var i = 3; i < length; i += 4) {
-      var alpha = maskData[i];
+      var alpha = transferMap ? transferMap[maskData[i]] : maskData[i];
       layerData[i] = (layerData[i] * alpha * scale) | 0;
     }
   }
 
-  function composeSMaskLuminosity(maskData, layerData) {
+  function composeSMaskLuminosity(maskData, layerData, transferMap) {
     var length = maskData.length;
     for (var i = 3; i < length; i += 4) {
       var y = (maskData[i - 3] * 77) +  // * 0.3 / 255 * 0x10000
               (maskData[i - 2] * 152) + // * 0.59 ....
               (maskData[i - 1] * 28);   // * 0.11 ....
-      layerData[i] = (layerData[i] * y) >> 16;
+      layerData[i] = transferMap ?
+        (layerData[i] * transferMap[y >> 8]) >> 8 :
+        (layerData[i] * y) >> 16;
     }
   }
 
   function genericComposeSMask(maskCtx, layerCtx, width, height,
-                               subtype, backdrop) {
+                               subtype, backdrop, transferMap) {
     var hasBackdrop = !!backdrop;
     var r0 = hasBackdrop ? backdrop[0] : 0;
     var g0 = hasBackdrop ? backdrop[1] : 0;
@@ -4055,7 +4076,7 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       if (hasBackdrop) {
         composeSMaskBackdrop(maskData.data, r0, g0, b0);
       }
-      composeFn(maskData.data, layerData.data);
+      composeFn(maskData.data, layerData.data, transferMap);
 
       maskCtx.putImageData(layerData, 0, row);
     }
@@ -4069,7 +4090,7 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
                      smask.offsetX, smask.offsetY);
 
     var backdrop = smask.backdrop || null;
-    if (WebGLUtils.isEnabled) {
+    if (!smask.transferMap && WebGLUtils.isEnabled) {
       var composed = WebGLUtils.composeSMask(layerCtx.canvas, mask,
         {subtype: smask.subtype, backdrop: backdrop});
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -4077,7 +4098,7 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       return;
     }
     genericComposeSMask(maskCtx, layerCtx, mask.width, mask.height,
-                        smask.subtype, backdrop);
+                        smask.subtype, backdrop, smask.transferMap);
     ctx.drawImage(mask, 0, 0);
   }
 
@@ -4352,6 +4373,7 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
 
       composeSMask(this.ctx, this.current.activeSMask, groupCtx);
       this.ctx.restore();
+      copyCtxState(groupCtx, this.ctx);
     },
     save: function CanvasGraphics_save() {
       this.ctx.save();
@@ -4822,16 +4844,22 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
           scaledY = 0;
         }
 
-        if (font.remeasure && width > 0 && this.isFontSubpixelAAEnabled) {
-          // some standard fonts may not have the exact width, trying to
-          // rescale per character
+        if (font.remeasure && width > 0) {
+          // Some standard fonts may not have the exact width: rescale per
+          // character if measured width is greater than expected glyph width
+          // and subpixel-aa is enabled, otherwise just center the glyph.
           var measuredWidth = ctx.measureText(character).width * 1000 /
             fontSize * fontSizeScale;
-          var characterScaleX = width / measuredWidth;
-          restoreNeeded = true;
-          ctx.save();
-          ctx.scale(characterScaleX, 1);
-          scaledX /= characterScaleX;
+          if (width < measuredWidth && this.isFontSubpixelAAEnabled) {
+            var characterScaleX = width / measuredWidth;
+            restoreNeeded = true;
+            ctx.save();
+            ctx.scale(characterScaleX, 1);
+            scaledX /= characterScaleX;
+          } else if (width !== measuredWidth) {
+            scaledX += (width - measuredWidth) / 2000 *
+              fontSize / fontSizeScale;
+          }
         }
 
         if (simpleFillText && !accent) {
@@ -5127,7 +5155,8 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
           scaleX: scaleX,
           scaleY: scaleY,
           subtype: group.smask.subtype,
-          backdrop: group.smask.backdrop
+          backdrop: group.smask.backdrop,
+          transferMap: group.smask.transferMap || null
         });
       } else {
         // Setup the current ctx so when the group is popped we draw it at the
@@ -5471,7 +5500,6 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
     },
 
     paintXObject: function CanvasGraphics_paintXObject() {
-      UnsupportedManager.notify(UNSUPPORTED_FEATURES.unknown);
       warn('Unsupported \'paintXObject\' command.');
     },
 
@@ -6376,8 +6404,6 @@ var TilingPattern = (function TilingPatternClosure() {
 })();
 
 
-PDFJS.disableFontFace = false;
-
 function FontLoader(docId) {
   this.docId = docId;
   this.styleElement = null;
@@ -6400,6 +6426,7 @@ FontLoader.prototype = {
     var styleElement = this.styleElement;
     if (styleElement) {
       styleElement.parentNode.removeChild(styleElement);
+      styleElement = this.styleElement = null;
     }
   },
   bind: function fontLoaderBind(fonts, callback) {

@@ -156,6 +156,7 @@ namespace jit {
     _(JSOP_INITALIASEDLEXICAL) \
     _(JSOP_UNINITIALIZED)      \
     _(JSOP_CALL)               \
+    _(JSOP_CALLITER)           \
     _(JSOP_FUNCALL)            \
     _(JSOP_FUNAPPLY)           \
     _(JSOP_NEW)                \
@@ -217,7 +218,8 @@ namespace jit {
     _(JSOP_INITHIDDENPROP_SETTER) \
     _(JSOP_INITHIDDENELEM)     \
     _(JSOP_INITHIDDENELEM_GETTER) \
-    _(JSOP_INITHIDDENELEM_SETTER)
+    _(JSOP_INITHIDDENELEM_SETTER) \
+    _(JSOP_CHECKOBJCOERCIBLE)
 
 class BaselineCompiler : public BaselineCompilerSpecific
 {

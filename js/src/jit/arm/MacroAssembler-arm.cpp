@@ -2019,7 +2019,7 @@ MacroAssemblerARMCompat::movePtr(ImmPtr imm, Register dest)
 }
 
 void
-MacroAssemblerARMCompat::movePtr(AsmJSImmPtr imm, Register dest)
+MacroAssemblerARMCompat::movePtr(wasm::SymbolicAddress imm, Register dest)
 {
     RelocStyle rs;
     if (HasMOVWT())
@@ -2027,7 +2027,7 @@ MacroAssemblerARMCompat::movePtr(AsmJSImmPtr imm, Register dest)
     else
         rs = L_LDR;
 
-    append(AsmJSAbsoluteLink(CodeOffset(currentOffset()), imm.kind()));
+    append(AsmJSAbsoluteLink(CodeOffset(currentOffset()), imm));
     ma_movPatchable(Imm32(-1), dest, Always, rs);
 }
 
@@ -2189,10 +2189,10 @@ MacroAssemblerARMCompat::loadPtr(AbsoluteAddress address, Register dest)
 }
 
 void
-MacroAssemblerARMCompat::loadPtr(AsmJSAbsoluteAddress address, Register dest)
+MacroAssemblerARMCompat::loadPtr(wasm::SymbolicAddress address, Register dest)
 {
     MOZ_ASSERT(dest != pc); // Use dest as a scratch register.
-    movePtr(AsmJSImmPtr(address.kind()), dest);
+    movePtr(address, dest);
     loadPtr(Address(dest, 0), dest);
 }
 
@@ -4828,9 +4828,6 @@ MacroAssemblerARMCompat::compareExchangeToTypedIntArray(Scalar::Type arrayType, 
       case Scalar::Uint8:
         compareExchange8ZeroExtend(mem, oldval, newval, output.gpr());
         break;
-      case Scalar::Uint8Clamped:
-        compareExchange8ZeroExtend(mem, oldval, newval, output.gpr());
-        break;
       case Scalar::Int16:
         compareExchange16SignExtend(mem, oldval, newval, output.gpr());
         break;
@@ -4871,9 +4868,6 @@ MacroAssemblerARMCompat::atomicExchangeToTypedIntArray(Scalar::Type arrayType, c
         atomicExchange8SignExtend(mem, value, output.gpr());
         break;
       case Scalar::Uint8:
-        atomicExchange8ZeroExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Uint8Clamped:
         atomicExchange8ZeroExtend(mem, value, output.gpr());
         break;
       case Scalar::Int16:
@@ -5116,7 +5110,7 @@ MacroAssembler::call(ImmPtr imm)
 }
 
 void
-MacroAssembler::call(AsmJSImmPtr imm)
+MacroAssembler::call(wasm::SymbolicAddress imm)
 {
     movePtr(imm, CallReg);
     call(CallReg);

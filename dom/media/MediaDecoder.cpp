@@ -502,6 +502,7 @@ MediaDecoder::MediaDecoder(MediaDecoderOwner* aOwner)
   , mIgnoreProgressData(false)
   , mInfiniteStream(false)
   , mOwner(aOwner)
+  , mFrameStats(new FrameStatistics())
   , mVideoFrameContainer(aOwner->GetVideoFrameContainer())
   , mPlaybackStatistics(new MediaChannelStatistics())
   , mPinnedForSeek(false)
@@ -579,6 +580,9 @@ MediaDecoder::MediaDecoder(MediaDecoderOwner* aOwner)
   // readyState
   mWatchManager.Watch(mPlayState, &MediaDecoder::UpdateReadyState);
   mWatchManager.Watch(mNextFrameStatus, &MediaDecoder::UpdateReadyState);
+  // ReadyState computation depends on MediaDecoder::CanPlayThrough, which
+  // depends on the download rate.
+  mWatchManager.Watch(mBuffered, &MediaDecoder::UpdateReadyState);
 
   // mLogicalPosition
   mWatchManager.Watch(mCurrentPosition, &MediaDecoder::UpdateLogicalPosition);
@@ -611,12 +615,16 @@ MediaDecoder::Shutdown()
   // necessary to unblock the state machine thread if it's blocked, so
   // the asynchronous shutdown in nsDestroyStateMachine won't deadlock.
   if (mDecoderStateMachine) {
-    mDecoderStateMachine->DispatchShutdown();
     mTimedMetadataListener.Disconnect();
     mMetadataLoadedListener.Disconnect();
     mFirstFrameLoadedListener.Disconnect();
     mOnPlaybackEvent.Disconnect();
     mOnSeekingStart.Disconnect();
+    mOnMediaNotSeekable.Disconnect();
+
+    mDecoderStateMachine->BeginShutdown()->Then(
+      AbstractThread::MainThread(), __func__, this,
+      &MediaDecoder::FinishShutdown, &MediaDecoder::FinishShutdown);
   }
 
   // Force any outstanding seek and byterange requests to complete
@@ -661,6 +669,14 @@ MediaDecoder::OnPlaybackEvent(MediaEventType aEvent)
       Invalidate();
       break;
   }
+}
+
+void
+MediaDecoder::FinishShutdown()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mDecoderStateMachine->BreakCycles();
+  SetStateMachine(nullptr);
 }
 
 MediaResourceCallback*
@@ -728,6 +744,8 @@ MediaDecoder::SetStateMachineParameters()
     AbstractThread::MainThread(), this, &MediaDecoder::OnPlaybackEvent);
   mOnSeekingStart = mDecoderStateMachine->OnSeekingStart().Connect(
     AbstractThread::MainThread(), this, &MediaDecoder::SeekingStarted);
+  mOnMediaNotSeekable = mDecoderStateMachine->OnMediaNotSeekable().Connect(
+    AbstractThread::MainThread(), this, &MediaDecoder::OnMediaNotSeekable);
 }
 
 void
@@ -841,6 +859,7 @@ MediaDecoder::MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
               aInfo->mAudio.mChannels, aInfo->mAudio.mRate,
               aInfo->HasAudio(), aInfo->HasVideo());
 
+  SetMediaSeekable(aInfo->mMediaSeekable);
   mInfo = aInfo.forget();
   ConstructMediaTracks();
 
@@ -1522,10 +1541,6 @@ MediaDecoder::NotifyDataArrived() {
   }
 
   mDataArrivedEvent.Notify();
-
-  // ReadyState computation depends on MediaDecoder::CanPlayThrough, which
-  // depends on the download rate.
-  UpdateReadyState();
 }
 
 // Provide access to the state machine object
@@ -1533,13 +1548,6 @@ MediaDecoderStateMachine*
 MediaDecoder::GetStateMachine() const {
   MOZ_ASSERT(NS_IsMainThread());
   return mDecoderStateMachine;
-}
-
-// Drop reference to state machine.  Only called during shutdown dance.
-void
-MediaDecoder::BreakCycles() {
-  MOZ_ASSERT(NS_IsMainThread());
-  SetStateMachine(nullptr);
 }
 
 void
@@ -1811,6 +1819,21 @@ MediaDecoder::RemoveMediaTracks()
   }
 
   mMediaTracksConstructed = false;
+}
+
+MediaDecoderOwner::NextFrameStatus
+MediaDecoder::NextFrameBufferedStatus()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  // Next frame hasn't been decoded yet.
+  // Use the buffered range to consider if we have the next frame available.
+  media::TimeUnit currentPosition =
+    media::TimeUnit::FromMicroseconds(CurrentPosition());
+  media::TimeInterval interval(currentPosition,
+                               currentPosition + media::TimeUnit::FromMicroseconds(DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED));
+  return GetBuffered().Contains(interval)
+    ? MediaDecoderOwner::NEXT_FRAME_AVAILABLE
+    : MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE;
 }
 
 MediaMemoryTracker::MediaMemoryTracker()

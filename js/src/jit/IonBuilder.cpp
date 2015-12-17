@@ -615,7 +615,8 @@ IonBuilder::analyzeNewLoopTypes(MBasicBlock* entry, jsbytecode* start, jsbytecod
             return true;
         }
     }
-    loopHeaders_.append(LoopHeader(start, entry));
+    if (!loopHeaders_.append(LoopHeader(start, entry)))
+        return false;
 
     jsbytecode* last = nullptr;
     jsbytecode* earlier = nullptr;
@@ -1880,6 +1881,7 @@ IonBuilder::inspectOpcode(JSOp op)
         return jsop_funapply(GET_ARGC(pc));
 
       case JSOP_CALL:
+      case JSOP_CALLITER:
       case JSOP_NEW:
       case JSOP_SUPERCALL:
         return jsop_call(GET_ARGC(pc), (JSOp)*pc == JSOP_NEW || (JSOp)*pc == JSOP_SUPERCALL);
@@ -2093,6 +2095,9 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_NEWTARGET:
         return jsop_newtarget();
+
+      case JSOP_CHECKOBJCOERCIBLE:
+        return jsop_checkobjcoercible();
 
 #ifdef DEBUG
       case JSOP_PUSHBLOCKSCOPE:
@@ -3415,8 +3420,12 @@ IonBuilder::tableSwitch(JSOp op, jssrcnote* sn)
     MBasicBlock* defaultcase = newBlock(current, defaultpc);
     if (!defaultcase)
         return ControlStatus_Error;
-    tableswitch->addDefault(defaultcase);
-    tableswitch->addBlock(defaultcase);
+
+    if (!tableswitch->addDefault(defaultcase))
+        return ControlStatus_Error;
+
+    if (!tableswitch->addBlock(defaultcase))
+        return ControlStatus_Error;
 
     // Create cases
     jsbytecode* casepc = nullptr;
@@ -3444,14 +3453,22 @@ IonBuilder::tableSwitch(JSOp op, jssrcnote* sn)
             if (!caseblock)
                 return ControlStatus_Error;
 
-            tableswitch->addBlock(caseblock);
+            if (!tableswitch->addBlock(caseblock))
+                return ControlStatus_Error;
+
             // Add constant to indicate which case this is for use by
             // processNextTableSwitchCase.
             MConstant* constant = MConstant::New(alloc(), Int32Value(i + low));
             caseblock->add(constant);
         }
 
-        tableswitch->addCase(tableswitch->addSuccessor(caseblock));
+        size_t caseIndex;
+        if (!tableswitch->addSuccessor(caseblock, &caseIndex))
+            return ControlStatus_Error;
+
+        if (!tableswitch->addCase(caseIndex))
+            return ControlStatus_Error;
+
         pc2 += JUMP_OFFSET_LEN;
     }
 
@@ -5385,7 +5402,7 @@ IonBuilder::selectInliningTargets(const ObjectVector& targets, CallInfo& callInf
             inlineable = false;
         }
 
-        choiceSet.append(inlineable);
+        choiceSet.infallibleAppend(inlineable);
         if (inlineable)
             *numInlineable += 1;
     }
@@ -5877,7 +5894,8 @@ IonBuilder::inlineCalls(CallInfo& callInfo, const ObjectVector& targets, BoolVec
 
         // Connect the inline path to the returnBlock.
         ObjectGroup* funcGroup = target->isSingleton() ? nullptr : target->group();
-        dispatch->addCase(target, funcGroup, inlineBlock);
+        if (!dispatch->addCase(target, funcGroup, inlineBlock))
+            return false;
 
         MDefinition* retVal = inlineReturnBlock->peek(-1);
         retPhi->addInput(retVal);
@@ -10295,6 +10313,31 @@ IonBuilder::jsop_rest()
     return true;
 }
 
+bool
+IonBuilder::jsop_checkobjcoercible()
+{
+    MDefinition* toCheck = current->peek(-1);
+
+    if (!toCheck->mightBeType(MIRType_Undefined) &&
+        !toCheck->mightBeType(MIRType_Null))
+    {
+        toCheck->setImplicitlyUsedUnchecked();
+        return true;
+    }
+
+    MOZ_ASSERT(toCheck->type() == MIRType_Value ||
+               toCheck->type() == MIRType_Null  ||
+               toCheck->type() == MIRType_Undefined);
+
+    // If we want to squeeze more perf here, we can throw without checking,
+    // if IsNullOrUndefined(toCheck->type()). Since this is a failure case,
+    // it should be OK.
+    MCheckObjCoercible* check = MCheckObjCoercible::New(alloc(), current->pop());
+    current->add(check);
+    current->push(check);
+    return resumeAfter(check);
+}
+
 uint32_t
 IonBuilder::getDefiniteSlot(TemporaryTypeSet* types, PropertyName* name, uint32_t* pnfixed)
 {
@@ -10941,6 +10984,11 @@ IonBuilder::jsop_getprop(PropertyName* name)
         trackOptimizationAttempt(TrackedStrategy::GetProp_InlineAccess);
         if (!getPropTryInlineAccess(&emitted, obj, name, barrier, types) || emitted)
             return emitted;
+
+        // Try to emit loads from a module namespace.
+        trackOptimizationAttempt(TrackedStrategy::GetProp_ModuleNamespace);
+        if (!getPropTryModuleNamespace(&emitted, obj, name, barrier, types) || emitted)
+            return emitted;
     }
 
     // Try to emit a polymorphic cache.
@@ -11399,6 +11447,49 @@ IonBuilder::getPropTryDefiniteSlot(bool* emitted, MDefinition* obj, PropertyName
     current->push(load);
 
     if (!pushTypeBarrier(load, types, barrier))
+        return false;
+
+    trackOptimizationSuccess();
+    *emitted = true;
+    return true;
+}
+
+bool
+IonBuilder::getPropTryModuleNamespace(bool* emitted, MDefinition* obj, PropertyName* name,
+                                      BarrierKind barrier, TemporaryTypeSet* types)
+{
+    MOZ_ASSERT(*emitted == false);
+
+    TemporaryTypeSet* objTypes = obj->resultTypeSet();
+    if (!objTypes) {
+        trackOptimizationOutcome(TrackedOutcome::NoTypeInfo);
+        return true;
+    }
+
+    JSObject* singleton = objTypes->maybeSingleton();
+    if (!singleton) {
+        trackOptimizationOutcome(TrackedOutcome::NotSingleton);
+        return true;
+    }
+
+    if (!singleton->is<ModuleNamespaceObject>()) {
+        trackOptimizationOutcome(TrackedOutcome::NotModuleNamespace);
+        return true;
+    }
+
+    ModuleNamespaceObject* ns = &singleton->as<ModuleNamespaceObject>();
+    ModuleEnvironmentObject* env;
+    Shape* shape;
+    if (!ns->bindings().lookup(NameToId(name), &env, &shape)) {
+        trackOptimizationOutcome(TrackedOutcome::UnknownProperty);
+        return true;
+    }
+
+    obj->setImplicitlyUsedUnchecked();
+    MConstant* envConst = constant(ObjectValue(*env));
+    uint32_t slot = shape->slot();
+    uint32_t nfixed = env->numFixedSlots();
+    if (!loadSlot(envConst, slot, nfixed, types->getKnownMIRType(), barrier, types))
         return false;
 
     trackOptimizationSuccess();
@@ -12959,7 +13050,7 @@ IonBuilder::jsop_toid()
         return true;
 
     MDefinition* index = current->pop();
-    MToId* ins = MToId::New(alloc(), current->peek(-1), index);
+    MToId* ins = MToId::New(alloc(), index);
 
     current->add(ins);
     current->push(ins);
@@ -13523,6 +13614,14 @@ IonBuilder::addGuardReceiverPolymorphic(MDefinition* obj,
             return nullptr;
     }
 
+    return guard;
+}
+
+MInstruction*
+IonBuilder::addSharedTypedArrayGuard(MDefinition* obj)
+{
+    MGuardSharedTypedArray* guard = MGuardSharedTypedArray::New(alloc(), obj);
+    current->add(guard);
     return guard;
 }
 

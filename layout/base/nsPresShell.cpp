@@ -2317,27 +2317,6 @@ PresShell::CheckVisibilityContent(nsIContent* aNode, int16_t aStartOffset,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-PresShell::GetSelectionCaretsVisibility(bool* aOutVisibility)
-{
-  *aOutVisibility = (SelectionCaretPrefEnabled() &&
-    mSelectionCarets && mSelectionCarets->GetVisibility());
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-PresShell::SetSelectionCaretsVisibility(bool aVisibility)
-{
-  if (SelectionCaretPrefEnabled() && mSelectionCarets) {
-    if (aVisibility) {
-      mSelectionCarets->UpdateSelectionCarets();
-    } else {
-      mSelectionCarets->SetVisibility(false);
-    }
-  }
-  return NS_OK;
-}
-
 //end implementations nsISelectionController
 
 nsIFrame*
@@ -5351,13 +5330,16 @@ float PresShell::GetCumulativeResolution()
   return resolution;
 }
 
-float PresShell::GetCumulativeScaleResolution()
+float PresShell::GetCumulativeNonRootScaleResolution()
 {
   float resolution = 1.0;
   nsIPresShell* currentShell = this;
   while (currentShell) {
-    resolution *=  currentShell->ScaleToResolution() ? currentShell->GetResolution() : 1.0f;
-    nsPresContext* parentCtx = currentShell->GetPresContext()->GetParentPresContext();
+    nsPresContext* currentCtx = currentShell->GetPresContext();
+    if (currentCtx != currentCtx->GetRootPresContext()) {
+      resolution *=  currentShell->ScaleToResolution() ? currentShell->GetResolution() : 1.0f;
+    }
+    nsPresContext* parentCtx = currentCtx->GetParentPresContext();
     if (parentCtx) {
       currentShell = parentCtx->PresShell();
     } else {

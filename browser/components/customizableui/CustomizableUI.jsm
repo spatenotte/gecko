@@ -39,6 +39,9 @@ const kPrefCustomizationDebug        = "browser.uiCustomization.debug";
 const kPrefDrawInTitlebar            = "browser.tabs.drawInTitlebar";
 const kPrefWebIDEInNavbar            = "devtools.webide.widget.inNavbarByDefault";
 
+const kExpectedWindowURL = "chrome://browser/content/browser.xul";
+
+
 /**
  * The keys are the handlers that are fired when the event type (the value)
  * is fired on the subview. A widget that provides a subview has the option
@@ -53,14 +56,16 @@ const kSubviewEvents = [
  * The current version. We can use this to auto-add new default widgets as necessary.
  * (would be const but isn't because of testing purposes)
  */
-var kVersion = 4;
+var kVersion = 5;
 
 /**
  * Buttons removed from built-ins by version they were removed. kVersion must be
  * bumped any time a new id is added to this. Use the button id as key, and
  * version the button is removed in as the value.  e.g. "pocket-button": 5
  */
-var ObsoleteBuiltinButtons = {};
+var ObsoleteBuiltinButtons = {
+  "loop-button": 5
+};
 
 /**
  * gPalette is a map of every widget that CustomizableUI.jsm knows about, keyed
@@ -178,6 +183,7 @@ var CustomizableUIInternal = {
 #ifndef MOZ_DEV_EDITION
       "developer-button",
 #endif
+      "sync-button",
     ];
 
 #ifdef E10S_TESTING_ONLY
@@ -1297,6 +1303,9 @@ var CustomizableUIInternal = {
   },
 
   buildWidget: function(aDocument, aWidget) {
+    if (aDocument.documentURI != kExpectedWindowURL) {
+      throw new Error("buildWidget was called for a non-browser window!");
+    }
     if (typeof aWidget == "string") {
       aWidget = gPalette.get(aWidget);
     }

@@ -77,13 +77,14 @@ class FasterMakeBackend(CommonBackend):
         elif isinstance(obj, (FinalTargetFiles,
                               FinalTargetPreprocessedFiles)) and \
                 obj.install_target.startswith('dist/bin'):
-            for path, strings in obj.files.walk():
-                for f in strings:
+            for path, files in obj.files.walk():
+                for f in files:
                     if isinstance(obj, FinalTargetPreprocessedFiles):
-                        self._add_preprocess(obj, f, path, defines=defines)
+                        self._add_preprocess(obj, f.full_path, path,
+                                             defines=defines)
                     else:
                         self._install_manifests[obj.install_target].add_symlink(
-                            mozpath.join(obj.srcdir, f),
+                            f.full_path,
                             mozpath.join(path, mozpath.basename(f))
                         )
 
@@ -137,7 +138,8 @@ class FasterMakeBackend(CommonBackend):
         for jarinfo in pp.out:
             install_target = obj.install_target
             if jarinfo.base:
-                install_target = mozpath.join(install_target, jarinfo.base)
+                install_target = mozpath.normpath(
+                    mozpath.join(install_target, jarinfo.base))
             for e in jarinfo.entries:
                 if e.is_locale:
                     if jarinfo.relativesrcdir:
