@@ -573,7 +573,7 @@ ContactManager.prototype = {
 
   debug('App name : ' + app.name + ', permission: ' + type);
 
-  //privacyMonitor.notifyListener(app.name, type);
+  privacyMonitor.notifyListener(app.name, type);
 },
 
   classID: Components.ID("{8beb3a66-d70a-4111-b216-b8e995ad3aff}"),

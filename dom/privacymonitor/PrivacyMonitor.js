@@ -5,6 +5,10 @@ const Cc = Components.classes;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
+                                   "@mozilla.org/childprocessmessagemanager;1",
+                                   "nsIMessageSender");
+
 function debug(str) {
   dump("-*- Permission WebIDL: " + str + "\n");
 }
@@ -24,8 +28,26 @@ PrivacyMonitor.prototype = {
                                     interfaces: [Ci.PrivacyMonitor],
                                     flags: Ci.nsIClassInfo.DOM_OBJECT}),
 
-  notifyListener: function(name, permission) {
+  notifyListener: function(appName, permission) {
+    // var name = "onapirequest";
+    // Object.defineProperty(this, name, {
+    //   get: function get() {
+    //     return this.__DOM_IMPL__.getEventHandler(name);
+    //   },
+    //   set: function set(handler) {
+    //     this.__DOM_IMPL__.setEventHandler(name, handler);
+    //   }
+    // });
+
+    debug("Sending Async Message");
+
+    cpmm.sendAsyncMessage("PrivacyMonitor:APIRequest", {appName: appName, permission: permission});
     return [];
+  },
+
+  getAppName: function(request) {
+    let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(request.principal.appId);
+    return app.name;
   }
 };
 
