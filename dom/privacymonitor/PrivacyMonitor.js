@@ -9,6 +9,11 @@ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
 
+XPCOMUtils.defineLazyGetter(this, "messenger", function() {
+  return Cc["@mozilla.org/system-message-internal;1"]
+           .getService(Ci.nsISystemMessagesInternal);
+});
+
 function debug(str) {
   dump("-*- Permission WebIDL: " + str + "\n");
 }
@@ -29,24 +34,17 @@ PrivacyMonitor.prototype = {
                                     flags: Ci.nsIClassInfo.DOM_OBJECT}),
 
   notifyListener: function(appName, permission) {
-    // var name = "onapirequest";
-    // Object.defineProperty(this, name, {
-    //   get: function get() {
-    //     return this.__DOM_IMPL__.getEventHandler(name);
-    //   },
-    //   set: function set(handler) {
-    //     this.__DOM_IMPL__.setEventHandler(name, handler);
-    //   }
-    // });
-
     debug("Sending Async Message");
 
-    cpmm.sendAsyncMessage("PrivacyMonitor:APIRequest", {appName: appName, permission: permission});
+    let message = {name: appName, permission: permission};
+    //messenger.sendMessage('privacy-request-notification', message, null, );
+
     return [];
   },
 
   getAppName: function(request) {
     let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(request.principal.appId);
+    debug('manifest URL: ' + app.manifestURL);
     return app.name;
   }
 };

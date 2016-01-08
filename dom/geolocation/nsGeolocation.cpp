@@ -17,6 +17,7 @@
 #include "nsDOMClassInfoID.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
+#include "nsIConsoleService.h"
 #include "nsContentUtils.h"
 #include "nsContentPermissionHelper.h"
 #include "nsIDocument.h"
@@ -1446,6 +1447,8 @@ Geolocation::GetCurrentPositionReady(nsGeolocationRequest* aRequest)
 
   nsCOMPtr<nsIRunnable> ev = new RequestAllowEvent(true, aRequest);
   NS_DispatchToMainThread(ev);
+
+
 
   return NS_OK;
 }
