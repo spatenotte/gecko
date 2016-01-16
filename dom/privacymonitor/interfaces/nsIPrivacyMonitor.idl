@@ -1,0 +1,7 @@
+#include "domstubs.idl"
+
+[scriptable, uuid(7dff72d1-bb11-4e3c-b5ee-bdd783cf2b83)]
+interface nsIPrivacyMonitor : nsISupports {
+  	void notifyListener(in string appName, in string permission);
+  	string getAppName(in jsval request);
+};

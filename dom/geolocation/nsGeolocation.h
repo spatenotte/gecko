@@ -38,6 +38,7 @@
 
 class nsGeolocationService;
 class nsGeolocationRequest;
+class nsIPrivacyMonitor;
 
 namespace mozilla {
 namespace dom {
@@ -180,6 +181,8 @@ public:
   void ServiceReady();
 
 private:
+
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor;
 
   ~Geolocation();
 

@@ -1,3 +1,5 @@
+DIRS += ['interfaces']
+
 EXTRA_COMPONENTS += [
  'PrivacyMonitor.js',
  'PrivacyMonitor.manifest',

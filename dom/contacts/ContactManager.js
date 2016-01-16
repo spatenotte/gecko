@@ -571,7 +571,7 @@ ContactManager.prototype = {
   let principal = this._window.document.nodePrincipal;
   let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(principal.appId);
 
-  debug('App name : ' + app.name + ', permission: ' + type);
+  debug("App name : " + app.name + ", permission: " + type + " , manifest URL: " + app.manifestURL);
 
   privacyMonitor.notifyListener(app.name, type);
 },

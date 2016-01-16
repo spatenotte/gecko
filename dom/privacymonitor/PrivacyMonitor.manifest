@@ -1,2 +1,3 @@
 component {b4ab68fb-4e4c-40db-b091-be66badfe568} PrivacyMonitor.js
 contract @mozilla.org/privacy-monitor;1 {b4ab68fb-4e4c-40db-b091-be66badfe568}
+interfaces components/privacy_monitor.xpt

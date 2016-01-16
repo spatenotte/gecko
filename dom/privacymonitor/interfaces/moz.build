@@ -1,0 +1,5 @@
+XPIDL_SOURCES += [
+    'nsIPrivacyMonitor.idl'
+]
+
+XPIDL_MODULE = 'privacy_monitor'

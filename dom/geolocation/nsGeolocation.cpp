@@ -9,6 +9,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/Telemetry.h"
 
+#include "nsIPrivacyMonitor.h"
 #include "nsISettingsService.h"
 
 #include "nsGeolocation.h"
@@ -1380,6 +1381,11 @@ Geolocation::GetCurrentPosition(PositionCallback& aCallback,
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
   }
+
+  nsresult result;
+
+  privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("Geoloc", "test-app");
 
   return;
 }

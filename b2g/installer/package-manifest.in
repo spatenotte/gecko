@@ -1017,3 +1017,4 @@ bin/libfreebl_32int64_3.so
 ; Privacy Monitor API
 @BINPATH@/components/PrivacyMonitor.js
 @BINPATH@/components/PrivacyMonitor.manifest
+@BINPATH@/components/privacy_monitor.xpt
