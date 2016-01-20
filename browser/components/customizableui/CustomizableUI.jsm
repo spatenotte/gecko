@@ -56,7 +56,7 @@ const kSubviewEvents = [
  * The current version. We can use this to auto-add new default widgets as necessary.
  * (would be const but isn't because of testing purposes)
  */
-var kVersion = 5;
+var kVersion = 6;
 
 /**
  * Buttons removed from built-ins by version they were removed. kVersion must be
@@ -64,7 +64,8 @@ var kVersion = 5;
  * version the button is removed in as the value.  e.g. "pocket-button": 5
  */
 var ObsoleteBuiltinButtons = {
-  "loop-button": 5
+  "loop-button": 5,
+  "pocket-button": 6
 };
 
 /**
@@ -221,15 +222,6 @@ var CustomizableUIInternal = {
       "home-button",
       "loop-button",
     ];
-
-    // Insert the Pocket button after the bookmarks button if it's present.
-    for (let widgetDefinition of CustomizableWidgets) {
-      if (widgetDefinition.id == "pocket-button") {
-        let idx = navbarPlacements.indexOf("bookmarks-menu-button") + 1;
-        navbarPlacements.splice(idx, 0, widgetDefinition.id);
-        break;
-      }
-    }
 
     if (Services.prefs.getBoolPref(kPrefWebIDEInNavbar)) {
       navbarPlacements.push("webide-button");
@@ -1350,7 +1342,9 @@ var CustomizableUIInternal = {
       }
 
       let tooltip = this.getLocalizedProperty(aWidget, "tooltiptext", additionalTooltipArguments);
-      node.setAttribute("tooltiptext", tooltip);
+      if (tooltip) {
+        node.setAttribute("tooltiptext", tooltip);
+      }
       node.setAttribute("class", "toolbarbutton-1 chromeclass-toolbar-additional");
 
       let commandHandler = this.handleWidgetCommand.bind(this, aWidget, node);
@@ -1393,6 +1387,8 @@ var CustomizableUIInternal = {
   },
 
   getLocalizedProperty: function(aWidget, aProp, aFormatArgs, aDef) {
+    const kReqStringProps = ["label"];
+
     if (typeof aWidget == "string") {
       aWidget = gPalette.get(aWidget);
     }
@@ -1403,7 +1399,7 @@ var CustomizableUIInternal = {
     // Let widgets pass their own string identifiers or strings, so that
     // we can use strings which aren't the default (in case string ids change)
     // and so that non-builtin-widgets can also provide labels, tooltips, etc.
-    if (aWidget[aProp]) {
+    if (aWidget[aProp] != null) {
       name = aWidget[aProp];
       // By using this as the default, if a widget provides a full string rather
       // than a string ID for localization, we will fall back to that string
@@ -1420,7 +1416,9 @@ var CustomizableUIInternal = {
       }
       return gWidgetsBundle.GetStringFromName(name) || def;
     } catch(ex) {
-      if (!def) {
+      // If an empty string was explicitly passed, treat it as an actual
+      // value rather than a missing property.
+      if (!def && (name != "" || kReqStringProps.includes(aProp))) {
         ERROR("Could not localize property '" + name + "'.");
       }
     }
@@ -2344,6 +2342,7 @@ var CustomizableUIInternal = {
     this.wrapWidgetEventHandler("onBeforeCreated", widget);
     this.wrapWidgetEventHandler("onClick", widget);
     this.wrapWidgetEventHandler("onCreated", widget);
+    this.wrapWidgetEventHandler("onDestroyed", widget);
 
     if (widget.type == "button") {
       widget.onCommand = typeof aData.onCommand == "function" ?
@@ -2446,6 +2445,9 @@ var CustomizableUIInternal = {
             }
           }
         }
+      }
+      if (widgetNode && widget.onDestroyed) {
+        widget.onDestroyed(window.document);
       }
     }
 
@@ -3180,6 +3182,11 @@ this.CustomizableUI = {
    * - onCreated(aNode): Attached to all widgets; a function that will be invoked
    *                  whenever the widget has a DOM node constructed, passing the
    *                  constructed node as an argument.
+   * - onDestroyed(aDoc): Attached to all non-custom widgets; a function that
+   *                  will be invoked after the widget has a DOM node destroyed,
+   *                  passing the document from which it was removed. This is
+   *                  useful especially for 'view' type widgets that need to
+   *                  cleanup after views that were constructed on the fly.
    * - onCommand(aEvt): Only useful for button widgets; a function that will be
    *                    invoked when the user activates the button.
    * - onClick(aEvt): Attached to all widgets; a function that will be invoked
@@ -3360,7 +3367,7 @@ this.CustomizableUI = {
    * being affected.
    */
   get areas() {
-    return [area for ([area, props] of gAreas)];
+    return [...gAreas.keys()];
   },
   /**
    * Check what kind of area (toolbar or menu panel) an area is. This is
@@ -3473,8 +3480,8 @@ this.CustomizableUI = {
    *
    *   null // if the widget is not placed anywhere (ie in the palette)
    */
-  getPlacementOfWidget: function(aWidgetId) {
-    return CustomizableUIInternal.getPlacementOfWidget(aWidgetId, true);
+  getPlacementOfWidget: function(aWidgetId, aOnlyRegistered=true, aDeadAreas=false) {
+    return CustomizableUIInternal.getPlacementOfWidget(aWidgetId, aOnlyRegistered, aDeadAreas);
   },
   /**
    * Check if a widget can be removed from the area it's in.
@@ -3762,7 +3769,7 @@ function WidgetGroupWrapper(aWidget) {
     if (!buildAreas) {
       return [];
     }
-    return [this.forWindow(node.ownerDocument.defaultView) for (node of buildAreas)];
+    return Array.from(buildAreas, (node) => this.forWindow(node.ownerDocument.defaultView));
   });
 
   this.__defineGetter__("areaType", function() {
@@ -3873,7 +3880,7 @@ function XULWidgetGroupWrapper(aWidgetId) {
   });
 
   this.__defineGetter__("instances", function() {
-    return [this.forWindow(win) for ([win,] of gBuildWindows)];
+    return Array.from(gBuildWindows, ([win,]) => this.forWindow(win));
   });
 
   Object.freeze(this);

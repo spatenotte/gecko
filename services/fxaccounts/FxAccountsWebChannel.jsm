@@ -138,7 +138,10 @@ this.FxAccountsWebChannel.prototype = {
      */
     let listener = (webChannelId, message, sendingContext) => {
       if (message) {
-        log.debug("FxAccountsWebChannel message received", message);
+        log.debug("FxAccountsWebChannel message received", message.command);
+        if (logPII) {
+          log.debug("FxAccountsWebChannel message details", message);
+        }
         let command = message.command;
         let data = message.data;
 
@@ -261,7 +264,9 @@ this.FxAccountsWebChannelHelpers.prototype = {
   logout(uid) {
     return fxAccounts.getSignedInUser().then(userData => {
       if (userData.uid === uid) {
-        return fxAccounts.signOut();
+        // true argument is `localOnly`, because server-side stuff
+        // has already been taken care of by the content server
+        return fxAccounts.signOut(true);
       }
     });
   },

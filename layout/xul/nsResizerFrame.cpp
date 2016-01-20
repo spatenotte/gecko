@@ -83,10 +83,10 @@ nsResizerFrame::HandleEvent(nsPresContext* aPresContext,
           switch (frameToResize->StylePosition()->mBoxSizing) {
             case StyleBoxSizing::Content:
               rect.Deflate(frameToResize->GetUsedPadding());
-              // fall through
+              MOZ_FALLTHROUGH;
             case StyleBoxSizing::Padding:
               rect.Deflate(frameToResize->GetUsedBorder());
-              // fall through
+              MOZ_FALLTHROUGH;
             case StyleBoxSizing::Border:
               // nothing
               break;
@@ -102,7 +102,7 @@ nsResizerFrame::HandleEvent(nsPresContext* aPresContext,
             break;
 
           doDefault = false;
-            
+
           // ask the widget implementation to begin a resize drag if it can
           Direction direction = GetDirection();
           nsresult rv = aEvent->widget->BeginResizeDrag(aEvent,
@@ -228,12 +228,15 @@ nsResizerFrame::HandleEvent(nsPresContext* aPresContext,
         nsRect rootScreenRect = rootFrame->GetScreenRectInAppUnits();
 
         nsPopupLevel popupLevel = menuPopupFrame->PopupLevel();
-        nsRect screenRect = menuPopupFrame->GetConstraintRect(frameRect, rootScreenRect, popupLevel);
-        // round using ToInsidePixels as it's better to be a pixel too small
-        // than be too large. If the popup is too large it could get flipped
-        // to the opposite side of the anchor point while resizing.
-        nsIntRect screenRectPixels = screenRect.ToInsidePixels(aPresContext->AppUnitsPerDevPixel());
-        rect.IntersectRect(rect, LayoutDeviceIntRect::FromUnknownRect(screenRectPixels));
+        int32_t appPerDev = aPresContext->AppUnitsPerDevPixel();
+        LayoutDeviceIntRect screenRect = menuPopupFrame->GetConstraintRect
+          (LayoutDeviceIntRect::FromAppUnitsToNearest(frameRect, appPerDev),
+           // round using ...ToInside as it's better to be a pixel too small
+           // than be too large. If the popup is too large it could get flipped
+           // to the opposite side of the anchor point while resizing.
+           LayoutDeviceIntRect::FromAppUnitsToInside(rootScreenRect, appPerDev),
+           popupLevel);
+        rect.IntersectRect(rect, screenRect);
       }
 
       if (contentToResize) {

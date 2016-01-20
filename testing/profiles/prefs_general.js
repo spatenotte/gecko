@@ -83,9 +83,9 @@ user_pref("geo.wifi.logging.enabled", true);
 // Make url-classifier updates so rare that they won't affect tests
 user_pref("urlclassifier.updateinterval", 172800);
 // Point the url-classifier to the local testing server for fast failures
+user_pref("browser.safebrowsing.downloads.remote.url", "http://%(server)s/safebrowsing-dummy/update");
 user_pref("browser.safebrowsing.provider.google.gethashURL", "http://%(server)s/safebrowsing-dummy/gethash");
 user_pref("browser.safebrowsing.provider.google.updateURL", "http://%(server)s/safebrowsing-dummy/update");
-user_pref("browser.safebrowsing.provider.google.appRepURL", "http://%(server)s/safebrowsing-dummy/update");
 user_pref("browser.safebrowsing.provider.mozilla.gethashURL", "http://%(server)s/safebrowsing-dummy/gethash");
 user_pref("browser.safebrowsing.provider.mozilla.updateURL", "http://%(server)s/safebrowsing-dummy/update");
 user_pref("privacy.trackingprotection.introURL", "http://%(server)s/trackingprotection/tour");
@@ -97,6 +97,8 @@ user_pref("extensions.hotfix.url", "http://%(server)s/extensions-dummy/hotfixURL
 user_pref("extensions.systemAddon.update.url", "http://%(server)s/dummy-system-addons.xml");
 // Turn off extension updates so they don't bother tests
 user_pref("extensions.update.enabled", false);
+// Bug 1235627 Turn off pocket add-on so it doesn't bother tests
+user_pref("extensions.pocket.enabled", false);
 // Make sure opening about:addons won't hit the network
 user_pref("extensions.webservice.discoverURL", "http://%(server)s/extensions-dummy/discoveryURL");
 // Make sure AddonRepository won't hit the network
@@ -159,6 +161,9 @@ user_pref("layout.css.object-fit-and-position.enabled", true);
 
 // Enable webkit prefixed CSS features for testing
 user_pref("layout.css.prefixes.webkit", true);
+
+// Enable -webkit-{min|max}-device-pixel-ratio media queries for testing
+user_pref("layout.css.prefixes.device-pixel-ratio-webkit", true);
 
 // Disable spammy layout warnings because they pollute test logs
 user_pref("layout.spammy_warnings.enabled", false);
@@ -225,9 +230,6 @@ user_pref('browser.contentHandlers.types.3.uri', 'http://test1.example.org/rss?u
 user_pref('browser.contentHandlers.types.4.uri', 'http://test1.example.org/rss?url=%%s')
 user_pref('browser.contentHandlers.types.5.uri', 'http://test1.example.org/rss?url=%%s')
 
-// Set dummy server for Android tiles testing.
-user_pref('browser.tiles.reportURL', 'http://%(server)s/tests/robocop/robocop_tiles.sjs')
-
 // We want to collect telemetry, but we don't want to send in the results.
 user_pref('toolkit.telemetry.server', 'https://%(server)s/telemetry-dummy/');
 // Our current tests expect the unified Telemetry feature to be opt-out,
@@ -251,6 +253,9 @@ user_pref("identity.fxaccounts.remote.signin.uri", "https://%(server)s/fxa-signi
 user_pref("identity.fxaccounts.settings.uri", "https://%(server)s/fxa-settings");
 user_pref('identity.fxaccounts.remote.webchannel.uri', 'https://%(server)s/');
 
+// We don't want browser tests to perform FxA device registration.
+user_pref('identity.fxaccounts.skipDeviceRegistration', true);
+
 // Increase the APZ content response timeout in tests to 1 minute.
 // This is to accommodate the fact that test environments tends to be slower
 // than production environments (with the b2g emulator being the slowest of them
@@ -260,7 +265,7 @@ user_pref('identity.fxaccounts.remote.webchannel.uri', 'https://%(server)s/');
 user_pref("apz.content_response_timeout", 60000);
 
 // Make sure SSL Error reports don't hit the network
-user_pref("security.ssl.errorReporting.url", "https://example.com/browser/browser/base/content/test/general/pinning_reports.sjs?succeed");
+user_pref("security.ssl.errorReporting.url", "https://example.com/browser/browser/base/content/test/general/ssl_error_reports.sjs?succeed");
 
 // Make sure Translation won't hit the network.
 user_pref("browser.translation.bing.authURL", "http://%(server)s/browser/browser/components/translation/test/bing.sjs");
@@ -282,7 +287,7 @@ user_pref("browser.newtabpage.directory.ping", "");
 user_pref("loop.debug.loglevel", "All");
 user_pref("loop.enabled", true);
 user_pref("loop.throttled", false);
-user_pref("loop.server", "http://%(server)s/browser/browser/extensions/loop/test/mochitest/loop_fxa.sjs?");
+user_pref("loop.server", "http://%(server)s/browser/browser/extensions/loop/chrome/test/mochitest/loop_fxa.sjs?");
 user_pref("loop.CSP","default-src 'self' about: file: chrome: data: wss://* http://* https://*");
 
 // Ensure UITour won't hit the network
@@ -308,7 +313,6 @@ user_pref("media.decoder.heuristic.dormant.timeout", 0);
 #endif
 
 // Don't prompt about e10s
-user_pref("browser.displayedE10SNotice", 5);
 user_pref("browser.displayedE10SPrompt.1", 5);
 // Don't use auto-enabled e10s
 user_pref("browser.tabs.remote.autostart.1", false);
@@ -339,3 +343,5 @@ user_pref("browser.urlbar.suggest.searches", false);
 user_pref("browser.urlbar.userMadeSearchSuggestionsChoice", true);
 
 user_pref("dom.audiochannel.mutedByDefault", false);
+
+user_pref("webextensions.tests", true);

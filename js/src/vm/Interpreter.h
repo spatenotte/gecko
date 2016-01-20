@@ -370,6 +370,10 @@ SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleValue
                  bool strict, HandleScript script, jsbytecode* pc);
 
 bool
+SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleValue value,
+                 HandleValue receiver, bool strict, HandleScript script, jsbytecode* pc);
+
+bool
 InitElementArray(JSContext* cx, jsbytecode* pc,
                  HandleObject obj, uint32_t index, HandleValue value);
 
@@ -444,6 +448,9 @@ InitGetterSetterOperation(JSContext* cx, jsbytecode* pc, HandleObject obj, Handl
 bool
 SpreadCallOperation(JSContext* cx, HandleScript script, jsbytecode* pc, HandleValue thisv,
                     HandleValue callee, HandleValue arr, HandleValue newTarget, MutableHandleValue res);
+
+bool
+OptimizeSpreadCall(JSContext* cx, HandleValue arg, bool* optimized);
 
 JSObject*
 NewObjectOperation(JSContext* cx, HandleScript script, jsbytecode* pc,

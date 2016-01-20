@@ -507,7 +507,8 @@ var gUnseekableTests = [
 ];
 
 var androidVersion = -1; // non-Android platforms
-if (manifestNavigator().userAgent.indexOf("Mobile") != -1) {
+if (manifestNavigator().userAgent.indexOf("Mobile") != -1 ||
+    manifestNavigator().userAgent.indexOf("Tablet") != -1) {
   // See nsSystemInfo.cpp, the getProperty('version') returns different value
   // on each platforms, so we need to distinguish the android and B2G platform.
   var versionString = manifestNavigator().userAgent.indexOf("Android") != -1 ?
@@ -1560,4 +1561,8 @@ function isSlowPlatform() {
   return SpecialPowers.Services.appinfo.name == "B2G" || getAndroidVersion() == 10;
 }
 
-SimpleTest.requestFlakyTimeout("untriaged");
+// Could be undefined in a page opened by the parent test page
+// like file_access_controls.html.
+if ("SimpleTest" in window) {
+  SimpleTest.requestFlakyTimeout("untriaged");
+}

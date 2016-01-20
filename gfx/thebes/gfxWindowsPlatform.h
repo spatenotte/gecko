@@ -150,6 +150,11 @@ public:
     void UpdateRenderMode();
 
     /**
+     * Forces all GPU resources to be recreated on the next frame.
+     */
+    void ForceDeviceReset(ForcedDeviceResetReason aReason);
+
+    /**
      * Verifies a D2D device is present and working, will attempt to create one
      * it is non-functional or non-existant.
      *
@@ -161,13 +166,6 @@ public:
 #ifdef CAIRO_HAS_D2D_SURFACE
     HRESULT CreateDevice(RefPtr<IDXGIAdapter1> &adapter1, int featureLevelIndex);
 #endif
-
-    /**
-     * Return the resolution scaling factor to convert between "logical" or
-     * "screen" pixels as used by Windows (dependent on the DPI scaling option
-     * in the Display control panel) and actual device pixels.
-     */
-    double GetDPIScale();
 
     nsresult GetFontList(nsIAtom *aLangGroup,
                          const nsACString& aGenericFamily,
@@ -213,7 +211,8 @@ public:
      */
     virtual bool IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags) override;
 
-    virtual bool DidRenderingDeviceReset(DeviceResetReason* aResetReason = nullptr) override;
+    bool DidRenderingDeviceReset(DeviceResetReason* aResetReason = nullptr) override;
+    bool UpdateForDeviceReset() override;
 
     mozilla::gfx::BackendType GetContentBackendFor(mozilla::layers::LayersBackend aLayers) override;
 

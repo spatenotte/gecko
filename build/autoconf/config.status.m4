@@ -100,10 +100,6 @@ dnl Picked from autoconf 2.13
 trap '' 1 2 15
 AC_CACHE_SAVE
 
-test "x$prefix" = xNONE && prefix=$ac_default_prefix
-# Let make expand exec_prefix.
-test "x$exec_prefix" = xNONE && exec_prefix='${prefix}'
-
 trap 'rm -f $CONFIG_STATUS conftest*; exit 1' 1 2 15
 : ${CONFIG_STATUS=./config.status}
 
@@ -235,7 +231,7 @@ define([MOZ_BUILD_BACKEND],
 BUILD_BACKENDS="RecursiveMake"
 
 MOZ_ARG_ENABLE_STRING(build-backend,
-[  --enable-build-backend={AndroidEclipse,CppEclipse,VisualStudio,FasterMake,CompileDB}
+[  --enable-build-backend={AndroidEclipse,CppEclipse,VisualStudio,FasterMake,CompileDB,ChromeMap}
                          Enable additional build backends],
 [ BUILD_BACKENDS="RecursiveMake `echo $enableval | sed 's/,/ /g'`"])
 

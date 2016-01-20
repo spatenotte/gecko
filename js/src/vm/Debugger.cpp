@@ -50,7 +50,6 @@ using mozilla::ArrayLength;
 using mozilla::DebugOnly;
 using mozilla::MakeScopeExit;
 using mozilla::Maybe;
-using mozilla::UniquePtr;
 
 
 /*** Forward declarations ************************************************************************/
@@ -248,6 +247,28 @@ class Debugger::FrameRange
     }
 };
 
+class AutoRestoreCompartmentDebugMode
+{
+    JSCompartment* comp_;
+    unsigned bits_;
+
+  public:
+    explicit AutoRestoreCompartmentDebugMode(JSCompartment* comp)
+      : comp_(comp), bits_(comp->debugModeBits)
+    {
+        MOZ_ASSERT(comp_);
+    }
+
+    ~AutoRestoreCompartmentDebugMode() {
+        if (comp_)
+            comp_->debugModeBits = bits_;
+    }
+
+    void release() {
+        comp_ = nullptr;
+    }
+};
+
 
 /*** Breakpoints *********************************************************************************/
 
@@ -377,10 +398,10 @@ Debugger::Debugger(JSContext* cx, NativeObject* dbg)
     objects(cx),
     environments(cx),
 #ifdef NIGHTLY_BUILD
-    traceLoggerLastDrainedId(0),
+    traceLoggerLastDrainedSize(0),
     traceLoggerLastDrainedIteration(0),
 #endif
-    traceLoggerScriptedCallsLastDrainedId(0),
+    traceLoggerScriptedCallsLastDrainedSize(0),
     traceLoggerScriptedCallsLastDrainedIteration(0)
 {
     assertSameCompartment(cx, dbg);
@@ -1661,7 +1682,7 @@ void
 Debugger::slowPathOnNewGlobalObject(JSContext* cx, Handle<GlobalObject*> global)
 {
     MOZ_ASSERT(!JS_CLIST_IS_EMPTY(&cx->runtime()->onNewGlobalObjectWatchers));
-    if (global->compartment()->options().invisibleToDebugger())
+    if (global->compartment()->creationOptions().invisibleToDebugger())
         return;
 
     /*
@@ -3144,7 +3165,7 @@ Debugger::addAllGlobalsAsDebuggees(JSContext* cx, unsigned argc, Value* vp)
     THIS_DEBUGGER(cx, argc, vp, "addAllGlobalsAsDebuggees", args, dbg);
     for (ZonesIter zone(cx->runtime(), SkipAtoms); !zone.done(); zone.next()) {
         for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
-            if (c == dbg->object->compartment() || c->options().invisibleToDebugger())
+            if (c == dbg->object->compartment() || c->creationOptions().invisibleToDebugger())
                 continue;
             c->scheduledForDestruction = false;
             GlobalObject* global = c->maybeGlobal();
@@ -3365,7 +3386,7 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
     // with certain testing aides we expose in the shell, so just make addDebuggee
     // throw in that case.
     JSCompartment* debuggeeCompartment = global->compartment();
-    if (debuggeeCompartment->options().invisibleToDebugger()) {
+    if (debuggeeCompartment->creationOptions().invisibleToDebugger()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
                              JSMSG_DEBUG_CANT_DEBUG_GLOBAL);
         return false;
@@ -3474,6 +3495,7 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
     });
 
     // (6)
+    AutoRestoreCompartmentDebugMode debugModeGuard(debuggeeCompartment);
     debuggeeCompartment->setIsDebuggee();
     debuggeeCompartment->updateDebuggerObservesAsmJS();
     debuggeeCompartment->updateDebuggerObservesCoverage();
@@ -3485,6 +3507,7 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
     zoneDebuggersGuard.release();
     debuggeeZonesGuard.release();
     allocationsTrackingGuard.release();
+    debugModeGuard.release();
     return true;
 }
 
@@ -4247,7 +4270,7 @@ Debugger::findAllGlobals(JSContext* cx, unsigned argc, Value* vp)
         JS::AutoCheckCannotGC nogc;
 
         for (CompartmentsIter c(cx->runtime(), SkipAtoms); !c.done(); c.next()) {
-            if (c->options().invisibleToDebugger())
+            if (c->creationOptions().invisibleToDebugger())
                 continue;
 
             c->scheduledForDestruction = false;
@@ -4301,7 +4324,7 @@ Debugger::makeGlobalObjectReference(JSContext* cx, unsigned argc, Value* vp)
     // then from it we can reach function objects, scripts, environments, etc.,
     // none of which we're ever supposed to see.
     JSCompartment* globalCompartment = global->compartment();
-    if (globalCompartment->options().invisibleToDebugger()) {
+    if (globalCompartment->creationOptions().invisibleToDebugger()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
                              JSMSG_DEBUG_INVISIBLE_COMPARTMENT);
         return false;
@@ -4402,9 +4425,9 @@ Debugger::drainTraceLogger(JSContext* cx, unsigned argc, Value* vp)
     size_t num;
     TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
     bool lostEvents = logger->lostEvents(dbg->traceLoggerLastDrainedIteration,
-                                         dbg->traceLoggerLastDrainedId);
+                                         dbg->traceLoggerLastDrainedSize);
     EventEntry* events = logger->getEventsStartingAt(&dbg->traceLoggerLastDrainedIteration,
-                                                     &dbg->traceLoggerLastDrainedId,
+                                                     &dbg->traceLoggerLastDrainedSize,
                                                      &num);
 
     RootedObject array(cx, NewDenseEmptyArray(cx));
@@ -4497,10 +4520,10 @@ Debugger::drainTraceLoggerScriptCalls(JSContext* cx, unsigned argc, Value* vp)
     size_t num;
     TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
     bool lostEvents = logger->lostEvents(dbg->traceLoggerScriptedCallsLastDrainedIteration,
-                                         dbg->traceLoggerScriptedCallsLastDrainedId);
+                                         dbg->traceLoggerScriptedCallsLastDrainedSize);
     EventEntry* events = logger->getEventsStartingAt(
                                          &dbg->traceLoggerScriptedCallsLastDrainedIteration,
-                                         &dbg->traceLoggerScriptedCallsLastDrainedId,
+                                         &dbg->traceLoggerScriptedCallsLastDrainedSize,
                                          &num);
 
     RootedObject array(cx, NewDenseEmptyArray(cx));
@@ -6320,7 +6343,7 @@ static bool
 DebuggerFrame_getCallee(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_FRAME(cx, argc, vp, "get callee", args, thisobj, frame);
-    RootedValue calleev(cx, frame.isNonEvalFunctionFrame() ? frame.calleev() : NullValue());
+    RootedValue calleev(cx, frame.isFunctionFrame() ? frame.calleev() : NullValue());
     if (!Debugger::fromChildJSObject(thisobj)->wrapDebuggeeValue(cx, &calleev))
         return false;
     args.rval().set(calleev);
@@ -6509,7 +6532,7 @@ DebuggerFrame_getScript(JSContext* cx, unsigned argc, Value* vp)
     Debugger* debug = Debugger::fromChildJSObject(thisobj);
 
     RootedObject scriptObject(cx);
-    if (frame.isFunctionFrame() && !frame.isEvalFrame()) {
+    if (frame.isFunctionFrame()) {
         RootedFunction callee(cx, frame.callee());
         if (callee->isInterpreted()) {
             RootedScript script(cx, callee->nonLazyScript());
@@ -6709,7 +6732,7 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
         script->setActiveEval();
     }
 
-    ExecuteType type = !frame ? EXECUTE_GLOBAL : EXECUTE_DEBUG;
+    ExecuteType type = !frame ? EXECUTE_GLOBAL_OR_MODULE : EXECUTE_DEBUG;
     return ExecuteKernel(cx, script, *env, NullValue(), type, frame, rval.address());
 }
 
@@ -7244,7 +7267,7 @@ DebuggerObject_getBoundArguments(JSContext* cx, unsigned argc, Value* vp)
     if (!boundArgs.resize(length))
         return false;
     for (size_t i = 0; i < length; i++) {
-        boundArgs[i].set(fun->getBoundFunctionArgument(i));
+        boundArgs[i].set(fun->getBoundFunctionArgument(cx, i));
         if (!dbg->wrapDebuggeeValue(cx, boundArgs[i]))
             return false;
     }
@@ -7802,7 +7825,7 @@ DebuggerObject_unwrap(JSContext* cx, unsigned argc, Value* vp)
     // invisible-to-Debugger global. (If our referent is a *wrapper* to such,
     // and the wrapper is in a visible compartment, that's fine.)
     JSCompartment* unwrappedCompartment = unwrapped->compartment();
-    if (unwrappedCompartment->options().invisibleToDebugger()) {
+    if (unwrappedCompartment->creationOptions().invisibleToDebugger()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
                              JSMSG_DEBUG_INVISIBLE_COMPARTMENT);
         return false;
@@ -8496,7 +8519,7 @@ GarbageCollectionEvent::Create(JSRuntime* rt, ::js::gcstats::Statistics& stats, 
             // reasons this data is stored and replicated on each slice. Each
             // slice used to have its own GCReason, but now they are all the
             // same.
-            data->reason = gcstats::ExplainReason(range.front().reason);
+            data->reason = gcreason::ExplainReason(range.front().reason);
             MOZ_ASSERT(data->reason);
         }
 

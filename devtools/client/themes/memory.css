@@ -90,6 +90,14 @@ html, body, #app, #memory-tool {
   margin-inline-end: 5px;
 }
 
+.devtools-toolbar > label {
+  margin-inline-end: 5px;
+}
+
+#select-view {
+  margin-inline-start: 5px;
+}
+
 #take-snapshot::before {
   background-image: url(images/command-screenshot.png);
 }
@@ -213,6 +221,12 @@ html, body, #app, #memory-tool {
    */
   flex: 1;
   background-color: var(--theme-toolbar-background);
+
+  /**
+   * By default, flex items have min-width: auto;
+   * (https://drafts.csswg.org/css-flexbox/#min-size-auto)
+   */
+  min-width: 0;
 }
 
 #heap-view > .heap-view-panel {
@@ -228,6 +242,12 @@ html, body, #app, #memory-tool {
    * Flexing to fill out remaining horizontal space. @see #heap-view.
    */
   flex: 1;
+
+  /**
+   * By default, flex items have min-width: auto;
+   * (https://drafts.csswg.org/css-flexbox/#min-size-auto)
+   */
+  min-width: 0;
 }
 
 #heap-view > .heap-view-panel > .snapshot-status,
@@ -333,10 +353,7 @@ html, body, #app, #memory-tool {
 }
 
 .heap-tree-item-count,
-.heap-tree-item-total-count {
-  width: 8%;
-}
-
+.heap-tree-item-total-count,
 .heap-tree-item-bytes,
 .heap-tree-item-total-bytes {
   width: 10%;
@@ -365,12 +382,20 @@ html, body, #app, #memory-tool {
 .heap-tree-item-name {
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.heap-tree-number {
+  padding-inline-start: 3px;
+}
+
+.heap-tree-percent {
+  padding-inline-start: 3px;
+  padding-inline-end: 3px;
 }
 
 .heap-tree-number,
 .heap-tree-percent {
-  padding-inline-end: 5px;
+  font-family: var(--monospace-font-family);
 }
 
 .heap-tree-number {
@@ -379,7 +404,7 @@ html, body, #app, #memory-tool {
 }
 
 .heap-tree-percent {
-  flex: 0 0 3.5em;
+  width: 2.5em;
 }
 
 .heap-tree-item.focused .heap-tree-number,
@@ -413,6 +438,14 @@ html, body, #app, #memory-tool {
 /**
  * Frame View components
  */
+
+.separator,
+.not-available,
+.heap-tree-item-address {
+  opacity: .5;
+  margin-left: .5em;
+  margin-right: .5em;
+}
 
 .focused .frame-link-filename,
 .focused .frame-link-column,

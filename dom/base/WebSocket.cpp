@@ -80,10 +80,7 @@ public:
   NS_DECL_NSIREQUEST
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIEVENTTARGET
-  // missing from NS_DECL_NSIEVENTTARGET because MSVC
-  nsresult Dispatch(nsIRunnable* aEvent, uint32_t aFlags) {
-    return Dispatch(nsCOMPtr<nsIRunnable>(aEvent).forget(), aFlags);
-  }
+  using nsIEventTarget::Dispatch;
 
   explicit WebSocketImpl(WebSocket* aWebSocket)
   : mWebSocket(aWebSocket)
@@ -1259,7 +1256,7 @@ WebSocket::Constructor(const GlobalObject& aGlobal,
     }
 
     unsigned lineno, column;
-    JS::AutoFilename file;
+    JS::UniqueChars file;
     if (!JS::DescribeScriptedCaller(aGlobal.Context(), &file, &lineno,
                                     &column)) {
       NS_WARNING("Failed to get line number and filename in workers.");
@@ -1494,7 +1491,7 @@ WebSocketImpl::Init(JSContext* aCx,
     MOZ_ASSERT(aCx);
 
     unsigned lineno, column;
-    JS::AutoFilename file;
+    JS::UniqueChars file;
     if (JS::DescribeScriptedCaller(aCx, &file, &lineno, &column)) {
       mScriptFile = file.get();
       mScriptLine = lineno;
@@ -1564,7 +1561,7 @@ WebSocketImpl::Init(JSContext* aCx,
   // to reflect that upgrade. Please note that we can not upgrade from ws:
   // to wss: before performing content policy checks because CSP needs to
   // send reports in case the scheme is about to be upgraded.
-  if (!mSecure && originDoc && originDoc->GetUpgradeInsecureRequests()) {
+  if (!mSecure && originDoc && originDoc->GetUpgradeInsecureRequests(false)) {
     // let's use the old specification before the upgrade for logging
     NS_ConvertUTF8toUTF16 reportSpec(mURI);
 
@@ -1910,9 +1907,11 @@ WebSocket::CreateAndDispatchCloseEvent(bool aWasClean,
   MOZ_ASSERT(mImpl);
   AssertIsOnTargetThread();
 
-  mImpl->mService->WebSocketClosed(mImpl->mChannel->Serial(),
-                                   mImpl->mInnerWindowID,
-                                   aWasClean, aCode, aReason);
+  if (mImpl->mChannel) {
+    mImpl->mService->WebSocketClosed(mImpl->mChannel->Serial(),
+                                     mImpl->mInnerWindowID,
+                                     aWasClean, aCode, aReason);
+  }
 
   nsresult rv = CheckInnerWindowCorrectness();
   if (NS_FAILED(rv)) {
@@ -2117,17 +2116,6 @@ public:
                                       EmptyCString());
     }
 
-    return true;
-  }
-
-  bool Suspend(JSContext* aCx) override
-  {
-    {
-      MutexAutoLock lock(mWebSocketImpl->mMutex);
-      mWebSocketImpl->mWorkerShuttingDown = true;
-    }
-
-    mWebSocketImpl->CloseConnection(nsIWebSocketChannel::CLOSE_GOING_AWAY);
     return true;
   }
 

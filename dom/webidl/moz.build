@@ -24,6 +24,7 @@ WEBIDL_FILES = [
     'Animatable.webidl',
     'Animation.webidl',
     'AnimationEffectReadOnly.webidl',
+    'AnimationEffectTimingReadOnly.webidl',
     'AnimationEvent.webidl',
     'AnimationTimeline.webidl',
     'AnonymousContent.webidl',
@@ -265,6 +266,7 @@ WEBIDL_FILES = [
     'IDBTransaction.webidl',
     'IDBVersionChangeEvent.webidl',
     'ImageBitmap.webidl',
+    'ImageBitmapRenderingContext.webidl',
     'ImageCapture.webidl',
     'ImageData.webidl',
     'ImageDocument.webidl',
@@ -816,7 +818,6 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'ProgressEvent.webidl',
     'RecordErrorEvent.webidl',
     'ScrollViewChangeEvent.webidl',
-    'SelectionStateChangedEvent.webidl',
     'StyleRuleChangeEvent.webidl',
     'StyleSheetApplicableStateChangeEvent.webidl',
     'StyleSheetChangeEvent.webidl',
@@ -838,6 +839,7 @@ if CONFIG['MOZ_WEBRTC']:
         'MediaStreamTrackEvent.webidl',
         'RTCDataChannelEvent.webidl',
         'RTCPeerConnectionIceEvent.webidl',
+        'RTCTrackEvent.webidl',
     ]
 
 if CONFIG['MOZ_WEBSPEECH']:

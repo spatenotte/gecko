@@ -15,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 
+import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -23,6 +24,7 @@ import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
+import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.SuggestClient;
@@ -36,6 +38,7 @@ import org.mozilla.gecko.db.BrowserContract.History;
 import org.mozilla.gecko.db.BrowserContract.URLColumns;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.SearchLoader.SearchCursorLoader;
+import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.toolbar.AutocompleteHandler;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.StringUtils;
@@ -157,6 +160,9 @@ public class BrowserSearch extends HomeFragment
     // Whether search suggestions are enabled or not
     private boolean mSuggestionsEnabled;
 
+    // Whether history suggestions are enabled or not
+    private boolean mSavedSearchesEnabled;
+
     // Callbacks used for the search loader
     private CursorLoaderCallbacks mCursorLoaderCallbacks;
 
@@ -264,6 +270,9 @@ public class BrowserSearch extends HomeFragment
     @Override
     public void onResume() {
         super.onResume();
+
+        final SharedPreferences prefs = GeckoSharedPrefs.forApp(getContext());
+        mSavedSearchesEnabled = prefs.getBoolean(GeckoPreferences.PREFS_HISTORY_SAVED_SEARCH, true);
 
         // Fetch engines if we need to.
         if (mSearchEngines.isEmpty() || !Locale.getDefault().equals(mLastLocale)) {
@@ -476,7 +485,7 @@ public class BrowserSearch extends HomeFragment
     LinkedHashSet<String> domains = null;
     private LinkedHashSet<String> getDomains() {
         if (domains == null) {
-            domains = new LinkedHashSet<String>();
+            domains = new LinkedHashSet<String>(500);
             BufferedReader buf = null;
             try {
                 buf = new BufferedReader(new InputStreamReader(getResources().openRawResource(R.raw.topdomains)));
@@ -502,10 +511,6 @@ public class BrowserSearch extends HomeFragment
     }
 
     private String searchDomains(String search) {
-        if (AppConstants.NIGHTLY_BUILD == false) {
-            return null;
-        }
-
         for (String domain : getDomains()) {
             if (domain.startsWith(search)) {
                 return domain;
@@ -588,7 +593,7 @@ public class BrowserSearch extends HomeFragment
     }
 
     private void filterSuggestions() {
-        if (mSuggestClient == null || !mSuggestionsEnabled) {
+        if (mSuggestClient == null || (!mSuggestionsEnabled && !mSavedSearchesEnabled)) {
             return;
         }
 
@@ -1115,18 +1120,22 @@ public class BrowserSearch extends HomeFragment
 
         @Override
         public void onLoadFinished(Loader<Cursor> loader, Cursor c) {
-            mAdapter.swapCursor(c);
+            if (mAdapter != null) {
+                mAdapter.swapCursor(c);
 
-            // We should handle autocompletion based on the search term
-            // associated with the loader that has just provided
-            // the results.
-            SearchCursorLoader searchLoader = (SearchCursorLoader) loader;
-            handleAutocomplete(searchLoader.getSearchTerm(), c);
+                // We should handle autocompletion based on the search term
+                // associated with the loader that has just provided
+                // the results.
+                SearchCursorLoader searchLoader = (SearchCursorLoader) loader;
+                handleAutocomplete(searchLoader.getSearchTerm(), c);
+            }
         }
 
         @Override
         public void onLoaderReset(Loader<Cursor> loader) {
-            mAdapter.swapCursor(null);
+            if (mAdapter != null) {
+                mAdapter.swapCursor(null);
+            }
         }
     }
 

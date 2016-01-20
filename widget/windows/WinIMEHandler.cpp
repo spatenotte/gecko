@@ -334,7 +334,16 @@ IMEHandler::GetUpdatePreference()
 
 #ifdef NS_ENABLE_TSF
   if (IsTSFAvailable()) {
-    return TSFTextStore::GetIMEUpdatePreference();
+    if (!sIsIMMEnabled) {
+      return TSFTextStore::GetIMEUpdatePreference();
+    }
+    // Even if TSF is available, the active IME may be an IMM-IME.
+    // Unfortunately, changing the result of GetUpdatePreference() while an
+    // editor has focus isn't supported by IMEContentObserver nor
+    // ContentCacheInParent.  Therefore, we need to request whole notifications
+    // which are necessary either IMMHandler or TSFTextStore.
+    return IMMHandler::GetIMEUpdatePreference() |
+             TSFTextStore::GetIMEUpdatePreference();
   }
 #endif //NS_ENABLE_TSF
 
@@ -937,6 +946,28 @@ IMEHandler::GetOnScreenKeyboardWindow()
     return osk;
   }
   return nullptr;
+}
+
+// static
+void
+IMEHandler::SetCandidateWindow(nsWindow* aWindow, CANDIDATEFORM* aForm)
+{
+  if (!sPluginHasFocus) {
+    return;
+  }
+
+  IMMHandler::SetCandidateWindow(aWindow, aForm);
+}
+
+// static
+void
+IMEHandler::DefaultProcOfPluginEvent(nsWindow* aWindow,
+                                     const NPEvent* aPluginEvent)
+{
+  if (!sPluginHasFocus) {
+    return;
+  }
+  IMMHandler::DefaultProcOfPluginEvent(aWindow, aPluginEvent);
 }
 
 } // namespace widget

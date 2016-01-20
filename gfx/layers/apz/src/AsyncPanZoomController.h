@@ -24,7 +24,6 @@
 #include "APZUtils.h"
 #include "Layers.h"                     // for Layer::ScrollDirection
 #include "LayersTypes.h"
-#include "TaskThrottler.h"
 #include "mozilla/gfx/Matrix.h"
 #include "nsRegion.h"
 
@@ -45,7 +44,7 @@ struct ScrollableLayerGuid;
 class CompositorParent;
 class GestureEventListener;
 class PCompositorParent;
-struct ViewTransform;
+struct AsyncTransform;
 class AsyncPanZoomAnimation;
 class FlingAnimation;
 class InputBlockState;
@@ -53,6 +52,7 @@ class TouchBlockState;
 class PanGestureBlockState;
 class OverscrollHandoffChain;
 class StateChangeNotificationBlocker;
+class CheckerboardEvent;
 
 /**
  * Controller for all panning and zooming logic. Any time a user input is
@@ -104,7 +104,6 @@ public:
                          APZCTreeManager* aTreeManager,
                          const RefPtr<InputQueue>& aInputQueue,
                          GeckoContentController* aController,
-                         TaskThrottler* aPaintThrottler,
                          GestureBehavior aGestures = DEFAULT_GESTURES);
 
   // --------------------------------------------------------------------------
@@ -168,14 +167,14 @@ public:
    * This function returns the async transform via the |aOutTransform|
    * out parameter.
    */
-  void SampleContentTransformForFrame(ViewTransform* aOutTransform,
+  void SampleContentTransformForFrame(AsyncTransform* aOutTransform,
                                       ParentLayerPoint& aScrollOffset);
 
   /**
    * Return a visual effect that reflects this apzc's
    * overscrolled state, if any.
    */
-  Matrix4x4 GetOverscrollTransform() const;
+  AsyncTransformComponentMatrix GetOverscrollTransform() const;
 
   /**
    * A shadow layer update has arrived. |aLayerMetrics| is the new FrameMetrics
@@ -184,12 +183,8 @@ public:
    * layers code indicating that the frame metrics being sent with this call are
    * the initial metrics and the initial paint of the frame has just happened.
    */
-  void NotifyLayersUpdated(const FrameMetrics& aLayerMetrics, bool aIsFirstPaint);
-
-  /**
-   * Flush any pending repaint request.
-   */
-  void FlushRepaintIfPending();
+  void NotifyLayersUpdated(const FrameMetrics& aLayerMetrics, bool aIsFirstPaint,
+                           bool aThisLayerTreeUpdated);
 
   /**
    * The platform implementation must set the compositor parent so that we can
@@ -225,13 +220,13 @@ public:
    * existing transform, it will make the layer appear with the desired pan/zoom
    * amount.
    */
-  ViewTransform GetCurrentAsyncTransform() const;
+  AsyncTransform GetCurrentAsyncTransform() const;
 
   /**
    * Returns the same transform as GetCurrentAsyncTransform(), but includes
    * any transform due to axis over-scroll.
    */
-  Matrix4x4 GetCurrentAsyncTransformWithOverscroll() const;
+  AsyncTransformComponentMatrix GetCurrentAsyncTransformWithOverscroll() const;
 
   /**
    * Returns the transform to take something from the coordinate space of the
@@ -269,8 +264,7 @@ public:
    */
   static const ScreenMargin CalculatePendingDisplayPort(
     const FrameMetrics& aFrameMetrics,
-    const ParentLayerPoint& aVelocity,
-    double aEstimatedPaintDuration);
+    const ParentLayerPoint& aVelocity);
 
   nsEventStatus HandleDragEvent(const MouseInput& aEvent,
                                 const AsyncDragMetrics& aDragMetrics);
@@ -583,26 +577,19 @@ protected:
   /**
    * Utility function to send updated FrameMetrics to Gecko so that it can paint
    * the displayport area. Calls into GeckoContentController to do the actual
-   * work. Note that only one paint request can be active at a time. If a paint
-   * request is made while a paint is currently happening, it gets queued up. If
-   * a new paint request arrives before a paint is completed, the old request
-   * gets discarded.
+   * work. This call will use the current metrics. If this function is called
+   * from a non-main thread, it will redispatch itself to the main thread, and
+   * use the latest metrics during the redispatch.
    */
   void RequestContentRepaint();
 
   /**
-   * Tell the paint throttler to request a content repaint with the given
-   * metrics.  (Helper function used by RequestContentRepaint.) If aThrottled
-   * is set to false, the repaint request is sent directly without going through
-   * the paint throttler. In particular, the GeckoContentController::RequestContentRepaint
-   * function will be invoked before this function returns.
+   * Send the provided metrics to Gecko to trigger a repaint. This function
+   * may filter duplicate calls with the same metrics. This function must be
+   * called on the main thread.
    */
-  void RequestContentRepaint(FrameMetrics& aFrameMetrics, bool aThrottled = true);
-
-  /**
-   * Actually send the next pending paint request to gecko.
-   */
-  void DispatchRepaintRequest(const FrameMetrics& aFrameMetrics);
+  void RequestContentRepaint(const FrameMetrics& aFrameMetrics,
+                             const ParentLayerPoint& aVelocity);
 
   /**
    * Gets the current frame metrics. This is *not* the Gecko copy stored in the
@@ -648,10 +635,12 @@ protected:
   // to a nearby snap position if appropriate. The current scroll position is
   // used as the final destination.
   void RequestSnap();
+  // Same as above, but takes into account the current velocity to find a
+  // predicted destination.
+  void RequestSnapToDestination();
 
   uint64_t mLayersId;
   RefPtr<CompositorParent> mCompositorParent;
-  RefPtr<TaskThrottler> mPaintThrottler;
 
   /* Access to the following two fields is protected by the mRefPtrMonitor,
      since they are accessed on the UI thread but can be cleared on the
@@ -699,15 +688,12 @@ private:
   // the Gecko state, it should be used as a basis for untransformation when
   // sending messages back to Gecko.
   FrameMetrics mLastContentPaintMetrics;
-  // The last metrics that we requested a paint for. These are used to make sure
-  // that we're not requesting a paint of the same thing that's already drawn.
-  // If we don't do this check, we don't get a ShadowLayersUpdated back.
+  // The last metrics used for a content repaint request.
   FrameMetrics mLastPaintRequestMetrics;
-  // The last metrics that we actually sent to Gecko. This allows us to transform
-  // inputs into a coordinate space that Gecko knows about. This assumes the pipe
-  // through which input events and repaint requests are sent to Gecko operates
-  // in a FIFO manner.
-  FrameMetrics mLastDispatchedPaintMetrics;
+  // The metrics that we expect content to have. This is updated when we
+  // request a content repaint, and when we receive a shadow layers update.
+  // This allows us to transform events into Gecko's coordinate space.
+  FrameMetrics mExpectedGeckoMetrics;
 
   AxisX mX;
   AxisY mY;
@@ -1108,6 +1094,17 @@ private:
   // Flag to track whether or not the APZ transform is not used. This
   // flag is recomputed for every composition frame.
   bool mAsyncTransformAppliedToContent;
+
+
+  /* ===================================================================
+   * The functions and members in this section are used for checkerboard
+   * recording.
+   */
+private:
+  // This is created when this APZC instance is first included as part of a
+  // composite. If a checkerboard event takes place, this is destroyed at the
+  // end of the event, and a new one is created on the next composite.
+  UniquePtr<CheckerboardEvent> mCheckerboardEvent;
 };
 
 } // namespace layers

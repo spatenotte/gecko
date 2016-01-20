@@ -42,12 +42,6 @@ var WCUL10n = new WebConsoleUtils.l10n(WEBCONSOLE_STRINGS_URI);
 
 DevToolsUtils.testing = true;
 
-function asyncTest(generator) {
-  return () => {
-    Task.spawn(generator).then(finishTest);
-  };
-}
-
 function loadTab(url) {
   let deferred = promise.defer();
 
@@ -339,8 +333,12 @@ registerCleanupFunction(function*() {
 
   dumpConsoles();
 
-  if (HUDService.getBrowserConsole()) {
-    HUDService.toggleBrowserConsole();
+  let browserConsole = HUDService.getBrowserConsole();
+  if (browserConsole) {
+    if (browserConsole.jsterm) {
+      browserConsole.jsterm.clearOutput(true);
+    }
+    yield HUDService.toggleBrowserConsole();
   }
 
   let target = TargetFactory.forTab(gBrowser.selectedTab);
@@ -1456,8 +1454,13 @@ function checkOutputForInputs(hud, inputTests) {
       }],
     });
 
+    let msg = [...result.matched][0];
+
+    if (entry.consoleLogClick) {
+      yield checkObjectClick(entry, msg);
+    }
+
     if (typeof entry.inspectorIcon == "boolean") {
-      let msg = [...result.matched][0];
       info("Checking Inspector Link: " + entry.input);
       yield checkLinkToInspector(entry.inspectorIcon, msg);
     }
@@ -1485,11 +1488,13 @@ function checkOutputForInputs(hud, inputTests) {
     hud.jsterm.clearOutput();
     hud.jsterm.execute(entry.input);
 
+    let evalOutput = entry.evalOutput || entry.output;
+
     let [result] = yield waitForMessages({
       webconsole: hud,
       messages: [{
-        name: "JS eval output: " + entry.output,
-        text: entry.output,
+        name: "JS eval output: " + entry.evalOutput,
+        text: entry.evalOutput,
         category: CATEGORY_OUTPUT,
       }],
     });
@@ -1506,8 +1511,13 @@ function checkOutputForInputs(hud, inputTests) {
 
   function* checkObjectClick(entry, msg) {
     info("Clicking: " + entry.input);
-    let body = msg.querySelector(".message-body a") ||
-               msg.querySelector(".message-body");
+    let body;
+    if (entry.getClickableNode) {
+      body = entry.getClickableNode(msg);
+    } else {
+      body = msg.querySelector(".message-body a") ||
+             msg.querySelector(".message-body");
+    }
     ok(body, "the message body");
 
     let deferredVariablesView = promise.defer();
@@ -1520,7 +1530,10 @@ function checkOutputForInputs(hud, inputTests) {
     container.addEventListener("TabOpen", entry._onTabOpen, true);
 
     body.scrollIntoView();
-    EventUtils.synthesizeMouse(body, 2, 2, {}, hud.iframeWindow);
+
+    if (!entry.suppressClick) {
+      EventUtils.synthesizeMouse(body, 2, 2, {}, hud.iframeWindow);
+    }
 
     if (entry.inspectable) {
       info("message body tagName '" + body.tagName + "' className '" +

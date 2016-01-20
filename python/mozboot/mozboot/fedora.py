@@ -32,8 +32,6 @@ class FedoraBootstrapper(BaseBootstrapper):
             'gcc-c++',
             'GConf2-devel',
             'glibc-static',
-            'gstreamer-devel',
-            'gstreamer-plugins-base-devel',
             'gtk2-devel',  # it's optional in Fedora 20's GNOME Software
                            # Development group.
             'libstdc++-static',
@@ -45,7 +43,6 @@ class FedoraBootstrapper(BaseBootstrapper):
         ]
 
         self.mobile_android_packages = [
-            'ant',
             'ncurses-devel.i686',
             'libstdc++.i686',
             'zlib-devel.i686',

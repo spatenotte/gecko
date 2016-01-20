@@ -141,6 +141,7 @@ namespace jit {
     _(JSOP_DELNAME)            \
     _(JSOP_GETIMPORT)          \
     _(JSOP_GETINTRINSIC)       \
+    _(JSOP_BINDVAR)            \
     _(JSOP_DEFVAR)             \
     _(JSOP_DEFCONST)           \
     _(JSOP_DEFLET)             \
@@ -166,6 +167,7 @@ namespace jit {
     _(JSOP_SPREADNEW)          \
     _(JSOP_SPREADEVAL)         \
     _(JSOP_STRICTSPREADEVAL)   \
+    _(JSOP_OPTIMIZE_SPREADCALL)\
     _(JSOP_IMPLICITTHIS)       \
     _(JSOP_GIMPLICITTHIS)      \
     _(JSOP_INSTANCEOF)         \

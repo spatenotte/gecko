@@ -88,7 +88,7 @@ CacheStorageService::MemoryPool::~MemoryPool()
   }
 }
 
-uint32_t const
+uint32_t
 CacheStorageService::MemoryPool::Limit() const
 {
   switch (mType) {
@@ -420,7 +420,7 @@ private:
         }
 
         mPass = ITERATE_METADATA;
-        // no break
+        MOZ_FALLTHROUGH;
 
       case ITERATE_METADATA:
         // Now grab the context iterator.
@@ -2115,7 +2115,9 @@ NS_IMETHODIMP
 CacheStorageService::IOThreadSuspender::Run()
 {
   MonitorAutoLock mon(mMon);
-  mon.Wait();
+  while (!mSignaled) {
+    mon.Wait();
+  }
   return NS_OK;
 }
 
@@ -2123,6 +2125,7 @@ void
 CacheStorageService::IOThreadSuspender::Notify()
 {
   MonitorAutoLock mon(mMon);
+  mSignaled = true;
   mon.Notify();
 }
 

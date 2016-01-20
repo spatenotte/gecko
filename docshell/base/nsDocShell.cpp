@@ -805,6 +805,7 @@ nsDocShell::nsDocShell()
   , mBlankTiming(false)
   , mFrameType(eFrameTypeRegular)
   , mOwnOrContainingAppId(nsIScriptSecurityManager::UNKNOWN_APP_ID)
+  , mUserContextId(nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID)
   , mParentCharsetSource(0)
   , mJSRunToCompletionDepth(0)
 {
@@ -4010,6 +4011,7 @@ nsDocShell::AddChild(nsIDocShellTreeItem* aChild)
   }
 
   aChild->SetTreeOwner(mTreeOwner);
+  childDocShell->SetUserContextId(mUserContextId);
 
   nsCOMPtr<nsIDocShell> childAsDocShell(do_QueryInterface(aChild));
   if (!childAsDocShell) {
@@ -5776,6 +5778,23 @@ nsDocShell::GetUnscaledDevicePixelsPerCSSPixel(double* aScale)
   nsCOMPtr<nsIBaseWindow> ownerWindow(do_QueryInterface(mTreeOwner));
   if (ownerWindow) {
     return ownerWindow->GetUnscaledDevicePixelsPerCSSPixel(aScale);
+  }
+
+  *aScale = 1.0;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetDevicePixelsPerDesktopPixel(double* aScale)
+{
+  if (mParentWidget) {
+    *aScale = mParentWidget->GetDesktopToDeviceScale().scale;
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIBaseWindow> ownerWindow(do_QueryInterface(mTreeOwner));
+  if (ownerWindow) {
+    return ownerWindow->GetDevicePixelsPerDesktopPixel(aScale);
   }
 
   *aScale = 1.0;
@@ -10043,9 +10062,11 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       nsCOMPtr<nsIInputStream> postData;
       nsCOMPtr<nsISupports> cacheKey;
 
+      bool scrollRestorationIsManual = false;
       if (mOSHE) {
         /* save current position of scroller(s) (bug 59774) */
         mOSHE->SetScrollPosition(cx, cy);
+        mOSHE->GetScrollRestorationIsManual(&scrollRestorationIsManual);
         // Get the postdata and page ident from the current page, if
         // the new load is being done via normal means.  Note that
         // "normal means" can be checked for just by checking for
@@ -10060,9 +10081,19 @@ nsDocShell::InternalLoad(nsIURI* aURI,
           // cache data, since the two SHEntries correspond to the
           // same document.
           if (mLSHE) {
+            if (!aSHEntry) {
+              // If we're not doing a history load, scroll restoration
+              // should be inherited from the previous session history entry.
+              mLSHE->SetScrollRestorationIsManual(scrollRestorationIsManual);
+            }
             mLSHE->AdoptBFCacheEntry(mOSHE);
           }
         }
+      }
+
+      // If we're doing a history load, use its scroll restoration state.
+      if (aSHEntry) {
+        aSHEntry->GetScrollRestorationIsManual(&scrollRestorationIsManual);
       }
 
       /* Assign mOSHE to mLSHE. This will either be a new entry created
@@ -10132,10 +10163,12 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       /* restore previous position of scroller(s), if we're moving
        * back in history (bug 59774)
        */
-      nscoord bx, by;
+      nscoord bx = 0;
+      nscoord by = 0;
       bool needsScrollPosUpdate = false;
       if (mOSHE && (aLoadType == LOAD_HISTORY ||
-                    aLoadType == LOAD_RELOAD_NORMAL)) {
+                    aLoadType == LOAD_RELOAD_NORMAL) &&
+          !scrollRestorationIsManual) {
         needsScrollPosUpdate = true;
         mOSHE->GetScrollPosition(&bx, &by);
       }
@@ -10951,9 +10984,15 @@ nsDocShell::DoChannelLoad(nsIChannel* aChannel,
       break;
     }
 
-    case LOAD_RELOAD_CHARSET_CHANGE:
-      loadFlags |= nsIRequest::LOAD_FROM_CACHE;
+    case LOAD_RELOAD_CHARSET_CHANGE: {
+      // Use SetAllowStaleCacheContent (not LOAD_FROM_CACHE flag) since we only want
+      // to force cache load for this channel, not the whole loadGroup.
+      nsCOMPtr<nsICacheInfoChannel> cachingChannel = do_QueryInterface(aChannel);
+      if (cachingChannel) {
+        cachingChannel->SetAllowStaleCacheContent(true);
+      }
       break;
+    }
 
     case LOAD_RELOAD_NORMAL:
     case LOAD_REFRESH:
@@ -11624,6 +11663,9 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
     GetCurScrollPos(ScrollOrientation_Y, &cy);
     mOSHE->SetScrollPosition(cx, cy);
 
+    bool scrollRestorationIsManual = false;
+    mOSHE->GetScrollRestorationIsManual(&scrollRestorationIsManual);
+
     // Since we're not changing which page we have loaded, pass
     // true for aCloneChildren.
     rv = AddToSessionHistory(newURI, nullptr, nullptr, true,
@@ -11631,6 +11673,10 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
     NS_ENSURE_SUCCESS(rv, rv);
 
     NS_ENSURE_TRUE(newSHEntry, NS_ERROR_FAILURE);
+
+    // Session history entries created by pushState inherit scroll restoration
+    // mode from the current entry.
+    newSHEntry->SetScrollRestorationIsManual(scrollRestorationIsManual);
 
     // Link the new SHEntry to the old SHEntry's BFCache entry, since the
     // two entries correspond to the same document.
@@ -11736,6 +11782,27 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
     FireDummyOnLocationChange();
   }
   document->SetStateObject(scContainer);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetCurrentScrollRestorationIsManual(bool* aIsManual)
+{
+  *aIsManual = false;
+  if (mOSHE) {
+    mOSHE->GetScrollRestorationIsManual(aIsManual);
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetCurrentScrollRestorationIsManual(bool aIsManual)
+{
+  if (mOSHE) {
+    mOSHE->SetScrollRestorationIsManual(aIsManual);
+  }
 
   return NS_OK;
 }
@@ -12140,10 +12207,21 @@ nsDocShell::PersistLayoutHistoryState()
   nsresult rv = NS_OK;
 
   if (mOSHE) {
+    bool scrollRestorationIsManual = false;
+    mOSHE->GetScrollRestorationIsManual(&scrollRestorationIsManual);
+
     nsCOMPtr<nsIPresShell> shell = GetPresShell();
+    nsCOMPtr<nsILayoutHistoryState> layoutState;
     if (shell) {
-      nsCOMPtr<nsILayoutHistoryState> layoutState;
       rv = shell->CaptureHistoryState(getter_AddRefs(layoutState));
+    } else if (scrollRestorationIsManual) {
+      // Even if we don't have layout anymore, we may want to reset the current
+      // scroll state in layout history.
+      GetLayoutHistoryState(getter_AddRefs(layoutState));
+    }
+
+    if (scrollRestorationIsManual && layoutState) {
+      layoutState->ResetScrollState();
     }
   }
 
@@ -13787,6 +13865,17 @@ NS_IMETHODIMP
 nsDocShell::SetUserContextId(uint32_t aUserContextId)
 {
   mUserContextId = aUserContextId;
+
+  nsTObserverArray<nsDocLoader*>::ForwardIterator iter(mChildList);
+  while (iter.HasMore()) {
+    nsCOMPtr<nsIDocShell> docshell = do_QueryObject(iter.GetNext());
+    if (!docshell || docshell->ItemType() != ItemType()) {
+      continue;
+    }
+
+    docshell->SetUserContextId(aUserContextId);
+  }
+
   return NS_OK;
 }
 
@@ -14003,7 +14092,7 @@ nsDocShell::NotifyJSRunToCompletionStart(const char* aReason,
     RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
     if (timelines && timelines->HasConsumer(this)) {
       timelines->AddMarkerForDocShell(this, Move(
-        MakeUnique<JavascriptTimelineMarker>(
+        mozilla::MakeUnique<JavascriptTimelineMarker>(
           aReason, aFunctionName, aFilename, aLineNumber, MarkerTracingType::START,
           aAsyncStack, aAsyncCause)));
     }
@@ -14133,55 +14222,8 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNonSubresourceReques
   return NS_OK;
 }
 
-namespace {
-
-class FetchEventDispatcher final : public nsIFetchEventDispatcher
-{
-public:
-  FetchEventDispatcher(nsIInterceptedChannel* aChannel,
-                       nsIRunnable* aContinueRunnable)
-    : mChannel(aChannel)
-    , mContinueRunnable(aContinueRunnable)
-  {
-  }
-
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIFETCHEVENTDISPATCHER
-
-private:
-  ~FetchEventDispatcher()
-  {
-  }
-
-  nsCOMPtr<nsIInterceptedChannel> mChannel;
-  nsCOMPtr<nsIRunnable> mContinueRunnable;
-};
-
-NS_IMPL_ISUPPORTS(FetchEventDispatcher, nsIFetchEventDispatcher)
-
 NS_IMETHODIMP
-FetchEventDispatcher::Dispatch()
-{
-  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-  if (!swm) {
-    mChannel->Cancel(NS_ERROR_INTERCEPTION_FAILED);
-    return NS_OK;
-  }
-
-  ErrorResult error;
-  swm->DispatchPreparedFetchEvent(mChannel, mContinueRunnable, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return error.StealNSResult();
-  }
-
-  return NS_OK;
-}
-
-}
-
-NS_IMETHODIMP
-nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel,
-                               nsIFetchEventDispatcher** aFetchDispatcher)
+nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel)
 {
   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
@@ -14218,17 +14260,11 @@ nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel,
   attrs.InheritFromDocShellToDoc(GetOriginAttributes(), uri);
 
   ErrorResult error;
-  nsCOMPtr<nsIRunnable> runnable =
-    swm->PrepareFetchEvent(attrs, doc, mInterceptedDocumentId, aChannel,
-                           isReload, isSubresourceLoad, error);
+  swm->DispatchFetchEvent(attrs, doc, mInterceptedDocumentId, aChannel,
+                          isReload, isSubresourceLoad, error);
   if (NS_WARN_IF(error.Failed())) {
     return error.StealNSResult();
   }
-
-  MOZ_ASSERT(runnable);
-  RefPtr<FetchEventDispatcher> dispatcher =
-    new FetchEventDispatcher(aChannel, runnable);
-  dispatcher.forget(aFetchDispatcher);
 
   return NS_OK;
 }

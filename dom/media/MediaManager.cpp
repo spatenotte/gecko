@@ -78,6 +78,9 @@
 #endif
 #if defined (XP_WIN)
 #include "mozilla/WindowsVersion.h"
+#include <winsock2.h>
+#include <iphlpapi.h>
+#include <tchar.h>
 #endif
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
@@ -700,7 +703,7 @@ public:
   // single-source trackunion like we have here, the TrackUnion will assign trackids
   // that match the source's trackids, so we can avoid needing a mapping function.
   // XXX This will not handle more complex cases well.
-  virtual void StopTrack(TrackID aTrackID) override
+  void StopTrack(TrackID aTrackID) override
   {
     if (GetSourceStream()) {
       GetSourceStream()->EndTrack(aTrackID);
@@ -716,7 +719,7 @@ public:
     }
   }
 
-  virtual already_AddRefed<Promise>
+  already_AddRefed<Promise>
   ApplyConstraintsToTrack(TrackID aTrackID,
                           const MediaTrackConstraints& aConstraints,
                           ErrorResult &aRv) override
@@ -778,7 +781,7 @@ public:
 #endif
 
   // Allow getUserMedia to pass input data directly to PeerConnection/MediaPipeline
-  virtual bool AddDirectListener(MediaStreamDirectListener *aListener) override
+  bool AddDirectListener(MediaStreamDirectListener *aListener) override
   {
     if (GetSourceStream()) {
       GetSourceStream()->AddDirectListener(aListener);
@@ -787,7 +790,7 @@ public:
     return false;
   }
 
-  virtual void
+  void
   AudioConfig(bool aEchoOn, uint32_t aEcho,
               bool aAgcOn, uint32_t aAgc,
               bool aNoiseOn, uint32_t aNoise,
@@ -802,19 +805,19 @@ public:
     mPlayoutDelay = aPlayoutDelay;
   }
 
-  virtual void RemoveDirectListener(MediaStreamDirectListener *aListener) override
+  void RemoveDirectListener(MediaStreamDirectListener *aListener) override
   {
     if (GetSourceStream()) {
       GetSourceStream()->RemoveDirectListener(aListener);
     }
   }
 
-  virtual DOMLocalMediaStream* AsDOMLocalMediaStream() override
+  DOMLocalMediaStream* AsDOMLocalMediaStream() override
   {
     return this;
   }
 
-  virtual MediaEngineSource* GetMediaEngine(TrackID aTrackID) override
+  MediaEngineSource* GetMediaEngine(TrackID aTrackID) override
   {
     // MediaEngine supports only one video and on video track now and TrackID is
     // fixed in MediaEngine.
@@ -917,7 +920,7 @@ public:
                             DOMMediaStream* aStream)
       : mWindowID(aWindowID), mOnSuccess(aSuccess), mManager(aManager),
         mStream(aStream) {}
-    virtual void NotifyTracksAvailable(DOMMediaStream* aStream) override
+    void NotifyTracksAvailable(DOMMediaStream* aStream) override
     {
       // We're in the main thread, so no worries here.
       if (!(mManager->IsWindowStillActive(mWindowID))) {
@@ -1022,10 +1025,14 @@ public:
                                                            msg);
 
       if (mAudioDevice) {
-        domStream->CreateOwnDOMTrack(kAudioTrack, MediaSegment::AUDIO);
+        nsString audioDeviceName;
+        mAudioDevice->GetName(audioDeviceName);
+        domStream->CreateOwnDOMTrack(kAudioTrack, MediaSegment::AUDIO, audioDeviceName);
       }
       if (mVideoDevice) {
-        domStream->CreateOwnDOMTrack(kVideoTrack, MediaSegment::VIDEO);
+        nsString videoDeviceName;
+        mVideoDevice->GetName(videoDeviceName);
+        domStream->CreateOwnDOMTrack(kVideoTrack, MediaSegment::VIDEO, videoDeviceName);
       }
 
       nsCOMPtr<nsIPrincipal> principal;
@@ -1640,6 +1647,28 @@ MediaManager::GetNonE10sParent()
   return mNonE10sParent;
 }
 
+/* static */ void
+MediaManager::StartupInit()
+{
+#ifdef WIN32
+  if (IsVistaOrLater() && !IsWin8OrLater()) {
+    // Bug 1107702 - Older Windows fail in GetAdaptersInfo (and others) if the
+    // first(?) call occurs after the process size is over 2GB (kb/2588507).
+    // Attempt to 'prime' the pump by making a call at startup.
+    unsigned long out_buf_len = sizeof(IP_ADAPTER_INFO);
+    PIP_ADAPTER_INFO pAdapterInfo = (IP_ADAPTER_INFO *) moz_xmalloc(out_buf_len);
+    if (GetAdaptersInfo(pAdapterInfo, &out_buf_len) == ERROR_BUFFER_OVERFLOW) {
+      free(pAdapterInfo);
+      pAdapterInfo = (IP_ADAPTER_INFO *) moz_xmalloc(out_buf_len);
+      GetAdaptersInfo(pAdapterInfo, &out_buf_len);
+    }
+    if (pAdapterInfo) {
+      free(pAdapterInfo);
+    }
+  }
+#endif
+}
+
 /* static */
 void
 MediaManager::PostTask(const tracked_objects::Location& from_here, Task* task)
@@ -1900,8 +1929,7 @@ MediaManager::GetUserMedia(nsPIDOMWindow* aWindow,
           nsPIDOMWindow *outer = aWindow->GetOuterWindow();
           vc.mBrowserWindow.Construct(outer->WindowID());
         }
-        // | Fall through
-        // V
+        MOZ_FALLTHROUGH;
       case dom::MediaSourceEnum::Screen:
       case dom::MediaSourceEnum::Application:
       case dom::MediaSourceEnum::Window:
@@ -2395,7 +2423,8 @@ MediaManager::GetUserMediaDevices(nsPIDOMWindow* aWindow,
                                   const MediaStreamConstraints& aConstraints,
                                   nsIGetUserMediaDevicesSuccessCallback* aOnSuccess,
                                   nsIDOMGetUserMediaErrorCallback* aOnFailure,
-                                  uint64_t aWindowId)
+                                  uint64_t aWindowId,
+                                  const nsAString& aCallID)
 {
   MOZ_ASSERT(NS_IsMainThread());
   nsCOMPtr<nsIGetUserMediaDevicesSuccessCallback> onSuccess(aOnSuccess);
@@ -2413,10 +2442,12 @@ MediaManager::GetUserMediaDevices(nsPIDOMWindow* aWindow,
 
   for (auto& callID : *callIDs) {
     GetUserMediaTask* task;
-    if (mActiveCallbacks.Get(callID, &task)) {
-      nsCOMPtr<nsIWritableVariant> array = MediaManager_ToJSArray(*task->mSourceSet);
-      onSuccess->OnSuccess(array);
-      return NS_OK;
+    if (!aCallID.Length() || aCallID == callID) {
+      if (mActiveCallbacks.Get(callID, &task)) {
+        nsCOMPtr<nsIWritableVariant> array = MediaManager_ToJSArray(*task->mSourceSet);
+        onSuccess->OnSuccess(array);
+        return NS_OK;
+      }
     }
   }
   return NS_ERROR_UNEXPECTED;
@@ -2636,8 +2667,8 @@ MediaManager::Shutdown()
       : mManager(aManager)
       , mReply(aReply) {}
   private:
-    virtual void
-    Run()
+    void
+    Run() override
     {
       LOG(("MediaManager Thread Shutdown"));
       MOZ_ASSERT(MediaManager::IsInMediaThread());

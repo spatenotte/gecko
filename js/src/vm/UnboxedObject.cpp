@@ -19,7 +19,6 @@
 using mozilla::ArrayLength;
 using mozilla::DebugOnly;
 using mozilla::PodCopy;
-using mozilla::UniquePtr;
 
 using namespace js;
 
@@ -103,6 +102,11 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 #else
     propertiesReg = IntArgReg0;
     newKindReg = IntArgReg1;
+#endif
+
+#ifdef JS_CODEGEN_ARM64
+    // ARM64 communicates stack address via sp, but uses a pseudo-sp for addressing.
+    masm.initStackPtr();
 #endif
 
     MOZ_ASSERT(propertiesReg.volatile_());
@@ -342,6 +346,11 @@ UnboxedPlainObject::ensureExpando(JSContext* cx, Handle<UnboxedPlainObject*> obj
         NewObjectWithGivenProto<UnboxedExpandoObject>(cx, nullptr, gc::AllocKind::OBJECT4);
     if (!expando)
         return nullptr;
+
+    // Don't track property types for expando objects. This allows Baseline
+    // and Ion AddSlot ICs to guard on the unboxed group without guarding on
+    // the expando group.
+    MarkObjectGroupUnknownProperties(cx, expando->group());
 
     // If the expando is tenured then the original object must also be tenured.
     // Otherwise barriers triggered on the original object for writes to the
@@ -793,10 +802,7 @@ UnboxedPlainObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleValue
     if (UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando()) {
         if (expando->containsShapeOrElement(cx, id)) {
             RootedObject nexpando(cx, expando);
-            RootedValue nreceiver(cx, receiver);
-            if (receiver.isObject() && &receiver.toObject() == obj)
-                nreceiver.setObject(*expando);
-            return GetProperty(cx, nexpando, nreceiver, id, vp);
+            return GetProperty(cx, nexpando, receiver, id, vp);
         }
     }
 
@@ -834,10 +840,7 @@ UnboxedPlainObject::obj_setProperty(JSContext* cx, HandleObject obj, HandleId id
             AddTypePropertyId(cx, obj, id, v);
 
             RootedObject nexpando(cx, expando);
-            RootedValue nreceiver(cx, (receiver.isObject() && obj == &receiver.toObject())
-                                      ? ObjectValue(*expando)
-                                      : receiver);
-            return SetProperty(cx, nexpando, id, v, nreceiver, result);
+            return SetProperty(cx, nexpando, id, v, receiver, result);
         }
     }
 

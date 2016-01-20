@@ -361,9 +361,15 @@ MediaStreamGraphImpl::UpdateStreamOrder()
     }
   }
 
+  bool switching = false;
+  {
+    MonitorAutoLock mon(mMonitor);
+    switching = CurrentDriver()->Switching();
+  }
+
   if (audioTrackPresent && mRealtime &&
       !CurrentDriver()->AsAudioCallbackDriver() &&
-      !CurrentDriver()->Switching()) {
+      !switching) {
     MonitorAutoLock mon(mMonitor);
     if (mLifecycleState == LIFECYCLE_RUNNING) {
       AudioCallbackDriver* driver = new AudioCallbackDriver(this);
@@ -621,8 +627,15 @@ MediaStreamGraphImpl::CreateOrDestroyAudioStreams(MediaStream* aStream)
       audioOutputStream->mLastTickWritten = 0;
       audioOutputStream->mTrackID = tracks->GetID();
 
+      bool switching = false;
+
+      {
+        MonitorAutoLock lock(mMonitor);
+        switching = CurrentDriver()->Switching();
+      }
+
       if (!CurrentDriver()->AsAudioCallbackDriver() &&
-          !CurrentDriver()->Switching()) {
+          !switching) {
         MonitorAutoLock mon(mMonitor);
         if (mLifecycleState == LIFECYCLE_RUNNING) {
           AudioCallbackDriver* driver = new AudioCallbackDriver(this);
@@ -1164,8 +1177,13 @@ MediaStreamGraphImpl::Process()
 
   // If we are switching away from an AudioCallbackDriver, we don't need the
   // mixer anymore.
+  bool switching = false;
+  {
+    MonitorAutoLock lock(mMonitor);
+    switching = CurrentDriver()->Switching();
+  }
   if (CurrentDriver()->AsAudioCallbackDriver() &&
-      CurrentDriver()->Switching()) {
+      switching) {
     bool isStarted;
     {
       MonitorAutoLock mon(mMonitor);
@@ -1365,11 +1383,11 @@ private:
 class CreateMessage : public ControlMessage {
 public:
   explicit CreateMessage(MediaStream* aStream) : ControlMessage(aStream) {}
-  virtual void Run() override
+  void Run() override
   {
     mStream->GraphImpl()->AddStreamGraphThread(mStream);
   }
-  virtual void RunDuringShutdown() override
+  void RunDuringShutdown() override
   {
     // Make sure to run this message during shutdown too, to make sure
     // that we balance the number of streams registered with the graph
@@ -1779,14 +1797,14 @@ MediaStream::Destroy()
   class Message : public ControlMessage {
   public:
     explicit Message(MediaStream* aStream) : ControlMessage(aStream) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->RemoveAllListenersImpl();
       auto graph = mStream->GraphImpl();
       mStream->DestroyImpl();
       graph->RemoveStreamGraphThread(mStream);
     }
-    virtual void RunDuringShutdown()
+    void RunDuringShutdown() override
     { Run(); }
   };
   mWrapper = nullptr;
@@ -1803,7 +1821,7 @@ MediaStream::AddAudioOutput(void* aKey)
   class Message : public ControlMessage {
   public:
     Message(MediaStream* aStream, void* aKey) : ControlMessage(aStream), mKey(aKey) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->AddAudioOutputImpl(mKey);
     }
@@ -1831,7 +1849,7 @@ MediaStream::SetAudioOutputVolume(void* aKey, float aVolume)
   public:
     Message(MediaStream* aStream, void* aKey, float aVolume) :
       ControlMessage(aStream), mKey(aKey), mVolume(aVolume) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->SetAudioOutputVolumeImpl(mKey, mVolume);
     }
@@ -1870,7 +1888,7 @@ MediaStream::RemoveAudioOutput(void* aKey)
   public:
     Message(MediaStream* aStream, void* aKey) :
       ControlMessage(aStream), mKey(aKey) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->RemoveAudioOutputImpl(mKey);
     }
@@ -1906,7 +1924,7 @@ MediaStream::AddVideoOutput(VideoFrameContainer* aContainer)
   public:
     Message(MediaStream* aStream, VideoFrameContainer* aContainer) :
       ControlMessage(aStream), mContainer(aContainer) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->AddVideoOutputImpl(mContainer.forget());
     }
@@ -1922,7 +1940,7 @@ MediaStream::RemoveVideoOutput(VideoFrameContainer* aContainer)
   public:
     Message(MediaStream* aStream, VideoFrameContainer* aContainer) :
       ControlMessage(aStream), mContainer(aContainer) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->RemoveVideoOutputImpl(mContainer);
     }
@@ -1938,7 +1956,7 @@ MediaStream::Suspend()
   public:
     explicit Message(MediaStream* aStream) :
       ControlMessage(aStream) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->GraphImpl()->IncrementSuspendCount(mStream);
     }
@@ -1959,7 +1977,7 @@ MediaStream::Resume()
   public:
     explicit Message(MediaStream* aStream) :
       ControlMessage(aStream) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->GraphImpl()->DecrementSuspendCount(mStream);
     }
@@ -1994,7 +2012,7 @@ MediaStream::AddListener(MediaStreamListener* aListener)
   public:
     Message(MediaStream* aStream, MediaStreamListener* aListener) :
       ControlMessage(aStream), mListener(aListener) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->AddListenerImpl(mListener.forget());
     }
@@ -2019,7 +2037,7 @@ MediaStream::RemoveListener(MediaStreamListener* aListener)
   public:
     Message(MediaStream* aStream, MediaStreamListener* aListener) :
       ControlMessage(aStream), mListener(aListener) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->RemoveListenerImpl(mListener);
     }
@@ -2052,12 +2070,12 @@ MediaStream::RunAfterPendingUpdates(already_AddRefed<nsIRunnable> aRunnable)
                      already_AddRefed<nsIRunnable> aRunnable)
       : ControlMessage(aStream)
       , mRunnable(aRunnable) {}
-    virtual void Run() override
+    void Run() override
     {
       mStream->Graph()->
         DispatchToMainThreadAfterStreamStateUpdate(mRunnable.forget());
     }
-    virtual void RunDuringShutdown() override
+    void RunDuringShutdown() override
     {
       // Don't run mRunnable now as it may call AppendMessage() which would
       // assume that there are no remaining controlMessagesToRunDuringShutdown.
@@ -2090,7 +2108,7 @@ MediaStream::SetTrackEnabled(TrackID aTrackID, bool aEnabled)
   public:
     Message(MediaStream* aStream, TrackID aTrackID, bool aEnabled) :
       ControlMessage(aStream), mTrackID(aTrackID), mEnabled(aEnabled) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->SetTrackEnabledImpl(mTrackID, mEnabled);
     }
@@ -2298,7 +2316,7 @@ SourceMediaStream::NotifyListenersEvent(MediaStreamListener::MediaStreamGraphEve
   public:
     Message(SourceMediaStream* aStream, MediaStreamListener::MediaStreamGraphEvent aEvent) :
       ControlMessage(aStream), mEvent(aEvent) {}
-    virtual void Run()
+    void Run() override
       {
         mStream->AsSourceStream()->NotifyListenersEventImpl(mEvent);
       }
@@ -2463,14 +2481,14 @@ MediaInputPort::Destroy()
   public:
     explicit Message(MediaInputPort* aPort)
       : ControlMessage(nullptr), mPort(aPort) {}
-    virtual void Run()
+    void Run() override
     {
       mPort->Disconnect();
       --mPort->GraphImpl()->mPortCount;
       mPort->SetGraphImpl(nullptr);
       NS_RELEASE(mPort);
     }
-    virtual void RunDuringShutdown()
+    void RunDuringShutdown() override
     {
       Run();
     }
@@ -2512,11 +2530,11 @@ MediaInputPort::BlockTrackId(TrackID aTrackId)
     explicit Message(MediaInputPort* aPort, TrackID aTrackId)
       : ControlMessage(aPort->GetDestination()),
         mPort(aPort), mTrackId(aTrackId) {}
-    virtual void Run()
+    void Run() override
     {
       mPort->BlockTrackIdImpl(mTrackId);
     }
-    virtual void RunDuringShutdown()
+    void RunDuringShutdown() override
     {
       Run();
     }
@@ -2540,20 +2558,21 @@ ProcessedMediaStream::AllocateInputPort(MediaStream* aStream, TrackID aTrackID,
     explicit Message(MediaInputPort* aPort)
       : ControlMessage(aPort->GetDestination()),
         mPort(aPort) {}
-    virtual void Run()
+    void Run() override
     {
       mPort->Init();
       // The graph holds its reference implicitly
       mPort->GraphImpl()->SetStreamOrderDirty();
       Unused << mPort.forget();
     }
-    virtual void RunDuringShutdown()
+    void RunDuringShutdown() override
     {
       Run();
     }
     RefPtr<MediaInputPort> mPort;
   };
 
+  MOZ_ASSERT(aStream->GraphImpl() == GraphImpl());
   MOZ_ASSERT(aTrackID != TRACK_NONE && aTrackID != TRACK_INVALID,
              "Only TRACK_ANY and explicit ID are allowed");
   RefPtr<MediaInputPort> port = new MediaInputPort(aStream, aTrackID, this,
@@ -2570,7 +2589,7 @@ ProcessedMediaStream::Finish()
   public:
     explicit Message(ProcessedMediaStream* aStream)
       : ControlMessage(aStream) {}
-    virtual void Run()
+    void Run() override
     {
       mStream->GraphImpl()->FinishStream(mStream);
     }
@@ -2585,7 +2604,7 @@ ProcessedMediaStream::SetAutofinish(bool aAutofinish)
   public:
     Message(ProcessedMediaStream* aStream, bool aAutofinish)
       : ControlMessage(aStream), mAutofinish(aAutofinish) {}
-    virtual void Run()
+    void Run() override
     {
       static_cast<ProcessedMediaStream*>(mStream)->SetAutofinishImpl(mAutofinish);
     }
@@ -2709,7 +2728,7 @@ MediaStreamGraph::GetInstance(MediaStreamGraph::GraphDriverType aGraphDriverRequ
 
     STREAM_LOG(LogLevel::Debug,
         ("Starting up MediaStreamGraph %p for channel %s",
-         graph, AudioChannelValues::strings[channel]));
+         graph, AudioChannelValues::strings[channel].value));
   }
 
   return graph;
@@ -2900,7 +2919,7 @@ MediaStreamGraph::NotifyWhenGraphStarted(AudioNodeStream* aStream)
       : ControlMessage(aStream)
     {
     }
-    virtual void Run()
+    void Run() override
     {
       // This runs on the graph thread, so when this runs, and the current
       // driver is an AudioCallbackDriver, we know the audio hardware is
@@ -2917,7 +2936,7 @@ MediaStreamGraph::NotifyWhenGraphStarted(AudioNodeStream* aStream)
         NS_DispatchToMainThread(event.forget());
       }
     }
-    virtual void RunDuringShutdown()
+    void RunDuringShutdown() override
     {
     }
   };
@@ -3023,6 +3042,16 @@ MediaStreamGraphImpl::ApplyAudioContextOperationImpl(
 
   SuspendOrResumeStreams(aOperation, aStreams);
 
+  bool switching = false;
+  GraphDriver* nextDriver = nullptr;
+  {
+    MonitorAutoLock lock(mMonitor);
+    switching = CurrentDriver()->Switching();
+    if (switching) {
+      nextDriver = CurrentDriver()->NextDriver();
+    }
+  }
+
   // If we have suspended the last AudioContext, and we don't have other
   // streams that have audio, this graph will automatically switch to a
   // SystemCallbackDriver, because it can't find a MediaStream that has an audio
@@ -3032,12 +3061,13 @@ MediaStreamGraphImpl::ApplyAudioContextOperationImpl(
   if (aOperation == AudioContextOperation::Resume) {
     if (!CurrentDriver()->AsAudioCallbackDriver()) {
       AudioCallbackDriver* driver;
-      if (CurrentDriver()->Switching()) {
-        MOZ_ASSERT(CurrentDriver()->NextDriver()->AsAudioCallbackDriver());
-        driver = CurrentDriver()->NextDriver()->AsAudioCallbackDriver();
+      if (switching) {
+        MOZ_ASSERT(nextDriver->AsAudioCallbackDriver());
+        driver = nextDriver->AsAudioCallbackDriver();
       } else {
         driver = new AudioCallbackDriver(this);
         mMixer.AddCallback(driver);
+        MonitorAutoLock lock(mMonitor);
         CurrentDriver()->SwitchAtNextIteration(driver);
       }
       driver->EnqueueStreamAndPromiseForOperation(aDestinationStream,
@@ -3071,19 +3101,20 @@ MediaStreamGraphImpl::ApplyAudioContextOperationImpl(
                                             aOperation);
 
       SystemClockDriver* driver;
-      if (CurrentDriver()->NextDriver()) {
-        MOZ_ASSERT(!CurrentDriver()->NextDriver()->AsAudioCallbackDriver());
+      if (nextDriver) {
+        MOZ_ASSERT(!nextDriver->AsAudioCallbackDriver());
       } else {
         driver = new SystemClockDriver(this);
         mMixer.RemoveCallback(CurrentDriver()->AsAudioCallbackDriver());
+        MonitorAutoLock lock(mMonitor);
         CurrentDriver()->SwitchAtNextIteration(driver);
       }
       // We are closing or suspending an AudioContext, but we just got resumed.
       // Queue the operation on the next driver so that the ordering is
       // preserved.
-    } else if (!audioTrackPresent && CurrentDriver()->Switching()) {
-      MOZ_ASSERT(CurrentDriver()->NextDriver()->AsAudioCallbackDriver());
-      CurrentDriver()->NextDriver()->AsAudioCallbackDriver()->
+    } else if (!audioTrackPresent && switching) {
+      MOZ_ASSERT(nextDriver->AsAudioCallbackDriver());
+      nextDriver->AsAudioCallbackDriver()->
         EnqueueStreamAndPromiseForOperation(aDestinationStream, aPromise,
                                             aOperation);
     } else {
@@ -3113,12 +3144,12 @@ MediaStreamGraph::ApplyAudioContextOperation(MediaStream* aDestinationStream,
       , mPromise(aPromise)
     {
     }
-    virtual void Run()
+    void Run() override
     {
       mStream->GraphImpl()->ApplyAudioContextOperationImpl(mStream,
         mStreams, mAudioContextOperation, mPromise);
     }
-    virtual void RunDuringShutdown()
+    void RunDuringShutdown() override
     {
       MOZ_ASSERT(false, "We should be reviving the graph?");
     }

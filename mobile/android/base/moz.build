@@ -31,13 +31,14 @@ constants_jar.extra_jars = [
     CONFIG['ANDROID_SUPPORT_ANNOTATIONS_JAR_LIB'],
     CONFIG['ANDROID_SUPPORT_V4_AAR_LIB'],
     CONFIG['ANDROID_SUPPORT_V4_AAR_INTERNAL_LIB'],
+    CONFIG['ANDROID_APPCOMPAT_V7_AAR_LIB'],
 ]
 
 if CONFIG['MOZ_INSTALL_TRACKING']:
     constants_jar.sources += ['java/org/mozilla/gecko/' + x for x in [
         'adjust/AdjustHelper.java',
     ]]
-    constants_jar.extra_jars = [
+    constants_jar.extra_jars += [
         'gecko-thirdparty-adjust_sdk.jar',
     ]
 else:
@@ -118,6 +119,7 @@ gujar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'util/PrefUtils.java',
     'util/ProxySelector.java',
     'util/RawResource.java',
+    'util/ScreenshotObserver.java',
     'util/StringUtils.java',
     'util/ThreadUtils.java',
     'util/UIAsyncTask.java',
@@ -200,7 +202,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'animation/ViewHelper.java',
     'ANRReporter.java',
     'AppNotificationClient.java',
-    'Assert.java',
     'BaseGeckoInterface.java',
     'BrowserApp.java',
     'BrowserLocaleManager.java',
@@ -246,11 +247,14 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'distribution/Distribution.java',
     'distribution/ReferrerDescriptor.java',
     'distribution/ReferrerReceiver.java',
+    'dlc/BaseAction.java',
     'dlc/catalog/DownloadContent.java',
     'dlc/catalog/DownloadContentBootstrap.java',
     'dlc/catalog/DownloadContentCatalog.java',
-    'dlc/DownloadContentHelper.java',
+    'dlc/DownloadAction.java',
     'dlc/DownloadContentService.java',
+    'dlc/StudyAction.java',
+    'dlc/VerifyAction.java',
     'DoorHangerPopup.java',
     'DownloadsIntegration.java',
     'DynamicToolbar.java',
@@ -347,8 +351,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'gfx/VirtualLayer.java',
     'GlobalHistory.java',
     'GuestSession.java',
-    'health/BrowserHealthRecorder.java',
-    'health/BrowserHealthReporter.java',
     'health/HealthRecorder.java',
     'health/SessionInformation.java',
     'health/StubbedHealthRecorder.java',
@@ -452,6 +454,9 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'overlays/ui/SendTabList.java',
     'overlays/ui/SendTabTargetSelectedListener.java',
     'overlays/ui/ShareDialog.java',
+    'permissions/PermissionBlock.java',
+    'permissions/Permissions.java',
+    'permissions/PermissionsHelper.java',
     'preferences/AlignRightLinkPreference.java',
     'preferences/AndroidImport.java',
     'preferences/AndroidImportPreference.java',
@@ -506,6 +511,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'SharedPreferencesHelper.java',
     'SiteIdentity.java',
     'SmsManager.java',
+    'SnackbarHelper.java',
     'sqlite/ByteBufferInputStream.java',
     'sqlite/MatrixBlobCursor.java',
     'sqlite/SQLiteBridge.java',
@@ -537,8 +543,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'TextSelection.java',
     'TextSelectionHandle.java',
     'ThumbnailHelper.java',
-    'tiles/Tile.java',
-    'tiles/TilesRecorder.java',
     'toolbar/AutocompleteHandler.java',
     'toolbar/BackButton.java',
     'toolbar/BrowserToolbar.java',
@@ -885,7 +889,7 @@ ANDROID_ASSETS_DIRS += [
 for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT', 'MOZ_DEBUG',
             'MOZ_ANDROID_SEARCH_ACTIVITY', 'MOZ_NATIVE_DEVICES', 'MOZ_ANDROID_MLS_STUMBLER',
             'MOZ_ANDROID_DOWNLOADS_INTEGRATION', 'MOZ_INSTALL_TRACKING',
-            'MOZ_ANDROID_GCM', 'MOZ_ANDROID_TAB_QUEUE'):
+            'MOZ_ANDROID_GCM'):
     if CONFIG[var]:
         DEFINES[var] = 1
 

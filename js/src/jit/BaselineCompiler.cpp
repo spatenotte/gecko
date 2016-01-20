@@ -7,7 +7,6 @@
 #include "jit/BaselineCompiler.h"
 
 #include "mozilla/Casting.h"
-#include "mozilla/UniquePtr.h"
 
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
@@ -21,11 +20,14 @@
 #endif
 #include "jit/SharedICHelpers.h"
 #include "jit/VMFunctions.h"
+#include "js/UniquePtr.h"
+#include "vm/Interpreter.h"
 #include "vm/ScopeObject.h"
 #include "vm/TraceLogging.h"
 
 #include "jsscriptinlines.h"
 
+#include "jit/BaselineFrameInfo-inl.h"
 #include "jit/MacroAssembler-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -194,7 +196,7 @@ BaselineCompiler::compile()
     // Note: There is an extra entry in the bytecode type map for the search hint, see below.
     size_t bytecodeTypeMapEntries = script->nTypeSets() + 1;
 
-    mozilla::UniquePtr<BaselineScript, JS::DeletePolicy<BaselineScript> > baselineScript(
+    UniquePtr<BaselineScript> baselineScript(
         BaselineScript::New(script, prologueOffset_.offset(),
                             epilogueOffset_.offset(),
                             profilerEnterFrameToggleOffset_.offset(),
@@ -238,13 +240,11 @@ BaselineCompiler::compile()
 
     // All barriers are emitted off-by-default, toggle them on if needed.
     if (cx->zone()->needsIncrementalBarrier())
-        baselineScript->toggleBarriers(true);
+        baselineScript->toggleBarriers(true, DontReprotect);
 
     // If profiler instrumentation is enabled, toggle instrumentation on.
     if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(cx->runtime()))
         baselineScript->toggleProfilerInstrumentation(true);
-
-    AutoWritableJitCode awjc(code);
 
     // Patch IC loads using IC entries.
     for (size_t i = 0; i < icLoadLabels_.length(); i++) {
@@ -357,13 +357,7 @@ BaselineCompiler::emitPrologue()
     // is passed in R1, so we have to be careful not to clobber it.
 
     // Initialize BaselineFrame::flags.
-    uint32_t flags = 0;
-    if (script->isForEval())
-        flags |= BaselineFrame::EVAL;
-    masm.store32(Imm32(flags), frame.addressOfFlags());
-
-    if (script->isForEval())
-        masm.storePtr(ImmGCPtr(script), frame.addressOfEvalScript());
+    masm.store32(Imm32(0), frame.addressOfFlags());
 
     // Handle scope chain pre-initialization (in case GC gets run
     // during stack check).  For global and eval scripts, the scope
@@ -1492,7 +1486,8 @@ static const VMFunction DeepCloneObjectLiteralInfo =
 bool
 BaselineCompiler::emit_JSOP_OBJECT()
 {
-    if (JS::CompartmentOptionsRef(cx).cloneSingletons()) {
+    JSCompartment* comp = cx->compartment();
+    if (comp->creationOptions().cloneSingletons()) {
         RootedObject obj(cx, script->getObject(GET_UINT32_INDEX(pc)));
         if (!obj)
             return false;
@@ -1511,7 +1506,7 @@ BaselineCompiler::emit_JSOP_OBJECT()
         return true;
     }
 
-    JS::CompartmentOptionsRef(cx).setSingletonsAsValues();
+    comp->behaviors().setSingletonsAsValues();
     frame.push(ObjectValue(*script->getObject(pc)));
     return true;
 }
@@ -2242,11 +2237,11 @@ BaselineCompiler::emit_JSOP_BINDGNAME()
                 frame.push(ObjectValue(*globalLexical));
                 return true;
             }
-        }
-
-        // We can bind name to the global object if the property exists on the
-        // global and is non-configurable, as then it cannot be shadowed.
-        if (Shape* shape = script->global().lookup(cx, name)) {
+        } else if (Shape* shape = script->global().lookup(cx, name)) {
+            // If the property does not currently exist on the global lexical
+            // scope, we can bind name to the global object if the property
+            // exists on the global and is non-configurable, as then it cannot
+            // be shadowed.
             if (!shape->configurable()) {
                 frame.push(ObjectValue(script->global()));
                 return true;
@@ -2257,6 +2252,26 @@ BaselineCompiler::emit_JSOP_BINDGNAME()
     }
 
     return emit_JSOP_BINDNAME();
+}
+
+typedef JSObject* (*BindVarFn)(JSContext*, HandleObject);
+static const VMFunction BindVarInfo = FunctionInfo<BindVarFn>(jit::BindVar);
+
+bool
+BaselineCompiler::emit_JSOP_BINDVAR()
+{
+    frame.syncStack(0);
+    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+
+    prepareVMCall();
+    pushArg(R0.scratchReg());
+
+    if (!callVM(BindVarInfo))
+        return false;
+
+    masm.tagValue(JSVAL_TYPE_OBJECT, ReturnReg, R0);
+    frame.push(R0);
+    return true;
 }
 
 bool
@@ -3168,6 +3183,27 @@ bool
 BaselineCompiler::emit_JSOP_STRICTSPREADEVAL()
 {
     return emitSpreadCall();
+}
+
+typedef bool (*OptimizeSpreadCallFn)(JSContext*, HandleValue, bool*);
+static const VMFunction OptimizeSpreadCallInfo =
+    FunctionInfo<OptimizeSpreadCallFn>(OptimizeSpreadCall);
+
+bool
+BaselineCompiler::emit_JSOP_OPTIMIZE_SPREADCALL()
+{
+    frame.syncStack(0);
+    masm.loadValue(frame.addressOfStackValue(frame.peek(-1)), R0);
+
+    prepareVMCall();
+    pushArg(R0);
+
+    if (!callVM(OptimizeSpreadCallInfo))
+        return false;
+
+    masm.boxNonDouble(JSVAL_TYPE_BOOLEAN, ReturnReg, R0);
+    frame.push(R0);
+    return true;
 }
 
 typedef bool (*ImplicitThisFn)(JSContext*, HandleObject, HandlePropertyName,

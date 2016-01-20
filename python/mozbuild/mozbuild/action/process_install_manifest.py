@@ -16,6 +16,7 @@ from mozpack.files import (
     FileFinder,
 )
 from mozpack.manifests import InstallManifest
+from mozbuild.util import DefinesAction
 
 
 COMPLETE = 'From {dest}: Kept {existing} existing; Added/updated {updated}; ' \
@@ -39,11 +40,9 @@ def process_manifest(destdir, paths, track=None,
             finder = FileFinder(destdir, find_executables=False,
                                 find_dotfiles=True)
             for dest in manifest._dests:
-                if '*' in dest:
-                    for p, f in finder.find(dest):
-                        remove_unaccounted.add(p, dummy_file)
-                else:
-                    remove_unaccounted.add(dest, dummy_file)
+                for p, f in finder.find(dest):
+                    remove_unaccounted.add(p, dummy_file)
+
         else:
             # If tracking is enabled and there is no file, we don't want to
             # be removing anything.
@@ -66,22 +65,6 @@ def process_manifest(destdir, paths, track=None,
         manifest.write(path=track)
 
     return result
-
-
-class DefinesAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string):
-        defines = getattr(namespace, self.dest)
-        if defines is None:
-            defines = {}
-        values = values.split('=', 1)
-        if len(values) == 1:
-            name, value = values[0], 1
-        else:
-            name, value = values
-            if value.isdigit():
-                value = int(value)
-        defines[name] = value
-        setattr(namespace, self.dest, defines)
 
 
 def main(argv):

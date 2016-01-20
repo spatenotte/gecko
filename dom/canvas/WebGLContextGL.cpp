@@ -537,6 +537,11 @@ WebGLContext::FramebufferTexture2D(GLenum target,
     if (!ValidateFramebufferTarget(target, "framebufferTexture2D"))
         return;
 
+    if (level < 0) {
+        ErrorInvalidValue("framebufferTexture2D: level must not be negative.");
+        return;
+    }
+
     if (!IsWebGL2() && level != 0) {
         ErrorInvalidValue("framebufferTexture2D: level must be 0.");
         return;
@@ -731,7 +736,7 @@ WebGLContext::GetFramebufferAttachmentParameter(JSContext* cx,
     }
 
     switch (attachment) {
-    case LOCAL_GL_COLOR:
+    case LOCAL_GL_BACK:
     case LOCAL_GL_DEPTH:
     case LOCAL_GL_STENCIL:
         break;
@@ -755,12 +760,12 @@ WebGLContext::GetFramebufferAttachmentParameter(JSContext* cx,
     case LOCAL_GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE:
     case LOCAL_GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE:
     case LOCAL_GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE:
-        if (attachment == LOCAL_GL_COLOR)
+        if (attachment == LOCAL_GL_BACK)
             return JS::NumberValue(8);
         return JS::NumberValue(0);
 
     case LOCAL_GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE:
-        if (attachment == LOCAL_GL_COLOR)
+        if (attachment == LOCAL_GL_BACK)
             return JS::NumberValue(mOptions.alpha ? 8 : 0);
         return JS::NumberValue(0);
 
@@ -2356,35 +2361,6 @@ WebGLContext::RestoreContext()
         return ErrorInvalidOperation("restoreContext: Context cannot be restored.");
 
     ForceRestoreContext();
-}
-
-WebGLTexelFormat
-GetWebGLTexelFormat(TexInternalFormat effectiveInternalFormat)
-{
-    switch (effectiveInternalFormat.get()) {
-        case LOCAL_GL_RGBA8:                  return WebGLTexelFormat::RGBA8;
-        case LOCAL_GL_SRGB8_ALPHA8:           return WebGLTexelFormat::RGBA8;
-        case LOCAL_GL_RGB8:                   return WebGLTexelFormat::RGB8;
-        case LOCAL_GL_SRGB8:                  return WebGLTexelFormat::RGB8;
-        case LOCAL_GL_ALPHA8:                 return WebGLTexelFormat::A8;
-        case LOCAL_GL_LUMINANCE8:             return WebGLTexelFormat::R8;
-        case LOCAL_GL_LUMINANCE8_ALPHA8:      return WebGLTexelFormat::RA8;
-        case LOCAL_GL_RGBA32F:                return WebGLTexelFormat::RGBA32F;
-        case LOCAL_GL_RGB32F:                 return WebGLTexelFormat::RGB32F;
-        case LOCAL_GL_ALPHA32F_EXT:           return WebGLTexelFormat::A32F;
-        case LOCAL_GL_LUMINANCE32F_EXT:       return WebGLTexelFormat::R32F;
-        case LOCAL_GL_LUMINANCE_ALPHA32F_EXT: return WebGLTexelFormat::RA32F;
-        case LOCAL_GL_RGBA16F:                return WebGLTexelFormat::RGBA16F;
-        case LOCAL_GL_RGB16F:                 return WebGLTexelFormat::RGB16F;
-        case LOCAL_GL_ALPHA16F_EXT:           return WebGLTexelFormat::A16F;
-        case LOCAL_GL_LUMINANCE16F_EXT:       return WebGLTexelFormat::R16F;
-        case LOCAL_GL_LUMINANCE_ALPHA16F_EXT: return WebGLTexelFormat::RA16F;
-        case LOCAL_GL_RGBA4:                  return WebGLTexelFormat::RGBA4444;
-        case LOCAL_GL_RGB5_A1:                return WebGLTexelFormat::RGBA5551;
-        case LOCAL_GL_RGB565:                 return WebGLTexelFormat::RGB565;
-        default:
-            return WebGLTexelFormat::FormatNotSupportingAnyConversion;
-    }
 }
 
 void

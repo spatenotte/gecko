@@ -43,7 +43,7 @@ namespace mozilla {
 namespace dom {
 
 NS_IMPL_ISUPPORTS(FetchDriver,
-                  nsIStreamListener, nsIInterfaceRequestor,
+                  nsIStreamListener, nsIChannelEventSink, nsIInterfaceRequestor,
                   nsIThreadRetargetableStreamListener)
 
 FetchDriver::FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal,
@@ -130,6 +130,15 @@ FetchDriver::HttpFetch()
     return NS_ERROR_DOM_BAD_URI;
   }
 
+  // non-GET requests aren't allowed for blob.
+  if (IsBlobURI(uri)) {
+    nsAutoCString method;
+    mRequest->GetMethod(method);
+    if (!method.EqualsLiteral("GET")) {
+      return NS_ERROR_DOM_NETWORK_ERR;
+    }
+  }
+
   // Step 2 deals with letting ServiceWorkers intercept requests. This is
   // handled by Necko after the channel is opened.
   // FIXME(nsm): Bug 1119026: The channel's skip service worker flag should be
@@ -161,7 +170,8 @@ FetchDriver::HttpFetch()
   nsSecurityFlags secFlags = nsILoadInfo::SEC_ABOUT_BLANK_INHERITS;
   if (mRequest->Mode() == RequestMode::Cors) {
     secFlags |= nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS;
-  } else if (mRequest->Mode() == RequestMode::Same_origin) {
+  } else if (mRequest->Mode() == RequestMode::Same_origin ||
+             mRequest->Mode() == RequestMode::Navigate) {
     secFlags |= nsILoadInfo::SEC_REQUIRE_SAME_ORIGIN_DATA_INHERITS;
   } else if (mRequest->Mode() == RequestMode::No_cors) {
     secFlags |= nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS;
@@ -221,6 +231,17 @@ FetchDriver::HttpFetch()
 
   mLoadGroup = nullptr;
 
+  // Insert ourselves into the notification callbacks chain so we can set
+  // headers on redirects.
+#ifdef DEBUG
+  {
+    nsCOMPtr<nsIInterfaceRequestor> notificationCallbacks;
+    chan->GetNotificationCallbacks(getter_AddRefs(notificationCallbacks));
+    MOZ_ASSERT(!notificationCallbacks);
+  }
+#endif
+  chan->SetNotificationCallbacks(this);
+
   // FIXME(nsm): Bug 1120715.
   // Step 3.4 "If request's cache mode is default and request's header list
   // contains a header named `If-Modified-Since`, `If-None-Match`,
@@ -240,25 +261,7 @@ FetchDriver::HttpFetch()
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Set the same headers.
-    nsAutoTArray<InternalHeaders::Entry, 5> headers;
-    mRequest->Headers()->GetEntries(headers);
-    bool hasAccept = false;
-    for (uint32_t i = 0; i < headers.Length(); ++i) {
-      if (!hasAccept && headers[i].mName.EqualsLiteral("accept")) {
-        hasAccept = true;
-      }
-      if (headers[i].mValue.IsEmpty()) {
-        httpChan->SetEmptyRequestHeader(headers[i].mName);
-      } else {
-        httpChan->SetRequestHeader(headers[i].mName, headers[i].mValue, false /* merge */);
-      }
-    }
-
-    if (!hasAccept) {
-      httpChan->SetRequestHeader(NS_LITERAL_CSTRING("accept"),
-                                 NS_LITERAL_CSTRING("*/*"),
-                                 false /* merge */);
-    }
+    SetRequestHeaders(httpChan);
 
     // Step 2. Set the referrer.
     nsAutoString referrer;
@@ -291,16 +294,6 @@ FetchDriver::HttpFetch()
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
-    // Step 3 "If HTTPRequest's force Origin header flag is set..."
-    if (mRequest->ForceOriginHeader()) {
-      nsAutoString origin;
-      rv = nsContentUtils::GetUTFOrigin(mPrincipal, origin);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      httpChan->SetRequestHeader(NS_LITERAL_CSTRING("origin"),
-                                 NS_ConvertUTF16toUTF8(origin),
-                                 false /* merge */);
-    }
     // Bug 1120722 - Authorization will be handled later.
     // Auth may require prompting, we don't support it yet.
     // The next patch in this same bug prevents this from aborting the request.
@@ -675,6 +668,21 @@ FetchDriver::OnStopRequest(nsIRequest* aRequest,
 }
 
 NS_IMETHODIMP
+FetchDriver::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
+                                    nsIChannel* aNewChannel,
+                                    uint32_t aFlags,
+                                    nsIAsyncVerifyRedirectCallback *aCallback)
+{
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aNewChannel);
+  if (httpChannel) {
+    SetRequestHeaders(httpChannel);
+  }
+
+  aCallback->OnRedirectVerifyCallback(NS_OK);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 FetchDriver::CheckListenerChain()
 {
   return NS_OK;
@@ -683,6 +691,11 @@ FetchDriver::CheckListenerChain()
 NS_IMETHODIMP
 FetchDriver::GetInterface(const nsIID& aIID, void **aResult)
 {
+  if (aIID.Equals(NS_GET_IID(nsIChannelEventSink))) {
+    *aResult = static_cast<nsIChannelEventSink*>(this);
+    NS_ADDREF_THIS();
+    return NS_OK;
+  }
   if (aIID.Equals(NS_GET_IID(nsIStreamListener))) {
     *aResult = static_cast<nsIStreamListener*>(this);
     NS_ADDREF_THIS();
@@ -703,6 +716,41 @@ FetchDriver::SetDocument(nsIDocument* aDocument)
   // Cannot set document after Fetch() has been called.
   MOZ_ASSERT(!mFetchCalled);
   mDocument = aDocument;
+}
+
+void
+FetchDriver::SetRequestHeaders(nsIHttpChannel* aChannel) const
+{
+  MOZ_ASSERT(aChannel);
+
+  nsAutoTArray<InternalHeaders::Entry, 5> headers;
+  mRequest->Headers()->GetEntries(headers);
+  bool hasAccept = false;
+  for (uint32_t i = 0; i < headers.Length(); ++i) {
+    if (!hasAccept && headers[i].mName.EqualsLiteral("accept")) {
+      hasAccept = true;
+    }
+    if (headers[i].mValue.IsEmpty()) {
+      aChannel->SetEmptyRequestHeader(headers[i].mName);
+    } else {
+      aChannel->SetRequestHeader(headers[i].mName, headers[i].mValue, false /* merge */);
+    }
+  }
+
+  if (!hasAccept) {
+    aChannel->SetRequestHeader(NS_LITERAL_CSTRING("accept"),
+                               NS_LITERAL_CSTRING("*/*"),
+                               false /* merge */);
+  }
+
+  if (mRequest->ForceOriginHeader()) {
+    nsAutoString origin;
+    if (NS_SUCCEEDED(nsContentUtils::GetUTFOrigin(mPrincipal, origin))) {
+      aChannel->SetRequestHeader(NS_LITERAL_CSTRING("origin"),
+                                 NS_ConvertUTF16toUTF8(origin),
+                                 false /* merge */);
+    }
+  }
 }
 
 } // namespace dom
