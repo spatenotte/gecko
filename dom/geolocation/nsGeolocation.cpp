@@ -1382,11 +1382,6 @@ Geolocation::GetCurrentPosition(PositionCallback& aCallback,
     aRv.Throw(rv);
   }
 
-  nsresult result;
-
-  privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("Geoloc", "test-app");
-
   return;
 }
 
@@ -1439,6 +1434,12 @@ Geolocation::GetCurrentPosition(GeoPositionCallback& callback,
 nsresult
 Geolocation::GetCurrentPositionReady(nsGeolocationRequest* aRequest)
 {
+
+  nsresult result;
+
+  privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("test-app", "geolocation");
+
   if (mOwner) {
     if (!RegisterRequestWithPrompt(aRequest)) {
       return NS_ERROR_NOT_AVAILABLE;
@@ -1453,8 +1454,6 @@ Geolocation::GetCurrentPositionReady(nsGeolocationRequest* aRequest)
 
   nsCOMPtr<nsIRunnable> ev = new RequestAllowEvent(true, aRequest);
   NS_DispatchToMainThread(ev);
-
-
 
   return NS_OK;
 }

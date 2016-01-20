@@ -2,5 +2,5 @@
 NavigatorProperty="privacyMonitor"]
 interface PrivacyMonitor{
   	void notifyListener(DOMString appName, DOMString permission);
-  	DOMString getAppName(object request);
+  	DOMString getAppName();
 };

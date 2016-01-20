@@ -4,7 +4,7 @@
 
 "use strict";
 
-const DEBUG = true;
+const DEBUG = false;
 function debug(s) { dump("-*- ContactManager: " + s + "\n"); }
 
 const Cc = Components.classes;
@@ -23,7 +23,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
 
-var privacyMonitor = Cc["@mozilla.org/privacy-monitor;1"].getService().wrappedJSObject;
+var privacyMonitor = Cc["@mozilla.org/privacy-monitor;1"].getService();
 
 const CONTACTS_SENDMORE_MINIMUM = 5;
 
@@ -568,12 +568,11 @@ ContactManager.prototype = {
   }
   let type = "contacts-" + access;
 
-  let principal = this._window.document.nodePrincipal;
-  let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(principal.appId);
+  let name = privacyMonitor.getAppName(null);
 
-  debug("App name : " + app.name + ", permission: " + type + " , manifest URL: " + app.manifestURL);
+  debug("App name : " + name + ", permission: " + type);
 
-  privacyMonitor.notifyListener(app.name, type);
+  privacyMonitor.notifyListener(name, type);
 },
 
   classID: Components.ID("{8beb3a66-d70a-4111-b216-b8e995ad3aff}"),
