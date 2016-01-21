@@ -23,7 +23,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
 
-var privacyMonitor = Cc["@mozilla.org/privacy-monitor;1"].getService();
+var privacyMonitor = Cc["@mozilla.org/privacy-monitor;1"].createInstance();
 
 const CONTACTS_SENDMORE_MINIMUM = 5;
 
@@ -568,7 +568,7 @@ ContactManager.prototype = {
   }
   let type = "contacts-" + access;
 
-  let name = privacyMonitor.getAppName(null);
+  let name = privacyMonitor.getAppName();
 
   debug("App name : " + name + ", permission: " + type);
 

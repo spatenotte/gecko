@@ -1564,7 +1564,7 @@ Geolocation::GetCurrentPositionReady(nsGeolocationRequest* aRequest)
   nsresult result;
 
   privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("test-app", "geolocation");
+  privacyMonitor->NotifyListener("geolocation");
 
   if (mOwner) {
     if (!RegisterRequestWithPrompt(aRequest)) {
