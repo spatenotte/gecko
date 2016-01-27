@@ -7,7 +7,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 const manifestURL = Services.io.newURI("app://test-app.gaiamobile.org/manifest.webapp", null, null);
-//const pageURL = Services.io.newURI("/", null, null);
+const pageURL = Services.io.newURI("app://test-app.gaiamobile.org/index.html", null, null);
 
 XPCOMUtils.defineLazyGetter(this, "messenger", function() {
   return Cc["@mozilla.org/system-message-internal;1"]
@@ -18,7 +18,7 @@ var contentWindow = Components.classes["@mozilla.org/embedcomp/window-watcher;1"
                    .getService(Components.interfaces.nsIWindowWatcher);
 
 function debug(str) {
-  dump("-*- Permission WebIDL: " + str + "\n");
+  dump("-*- PrivacyMonitor: " + str + "\n");
 }
 
 function PrivacyMonitor() {
@@ -37,22 +37,21 @@ PrivacyMonitor.prototype = {
                                     flags: Ci.nsIClassInfo.DOM_OBJECT}),
 
   notifyListener: function(permission) {
-    debug("Sending Async Message");
-
-    //debug("Permission: " + JSON.stringify(permission));
+    debug("Permission: " + JSON.stringify(permission));
 
     let appName = this.getAppName();
 
     let message = {name: appName, permission: permission};
-    messenger.broadcastMessage("privacy-request-notification", message);
+    debug("Sending Async Message");
+    //messenger.broadcastMessage("privacy-request-notification", message);
+    messenger.sendMessage("privacy-request-notification", message, pageURL, manifestURL);
   },
 
   getAppName: function() {
     let principal = contentWindow.activeWindow.document.nodePrincipal;
     let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(principal.appId);
 
-    debug("App name: " + app.name);
-    debug("manifest URL: " + app.manifestURL);
+    debug("App name: " + app.name + ", manifest URL: " + app.manifestURL);
     return app.name;
   }
 };

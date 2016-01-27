@@ -22,7 +22,7 @@ this.EXPORTED_SYMBOLS = ["SystemMessagePermissionsChecker",
                          "SystemMessagePermissionsTable"];
 
 function debug(aStr) {
-  // dump("SystemMessagePermissionsChecker.jsm: " + aStr + "\n");
+  dump("SystemMessagePermissionsChecker.jsm: " + aStr + "\n");
 }
 
 // This table maps system message to permission(s), indicating only
@@ -139,7 +139,7 @@ this.SystemMessagePermissionsTable = {
   },
   "audiochannel-interruption-begin" : {},
   "audiochannel-interruption-ended" : {},
-  "privacy-request-notification": {}
+  "privacy-request-notification" : {}
 };
 
 
@@ -183,6 +183,7 @@ this.SystemMessagePermissionsChecker = {
       }
       object[permName] = appendAccessToPermName(permName, access);
     }
+
     return object
   },
 

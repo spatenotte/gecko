@@ -53,7 +53,6 @@ function debug(aMsg) {
   dump("-- SystemMessageInternal " + Date.now() + " : " + aMsg + "\n");
 }
 
-
 var defaultMessageConfigurator = {
   get mustShowRunningApp() {
     return false;
@@ -192,6 +191,7 @@ SystemMessageInternal.prototype = {
   },
 
   sendMessage: function(aType, aMessage, aPageURI, aManifestURI, aExtra) {
+  	debug("Entered sendMessage: " + aType + ", " + JSON.stringify(aMessage));
     return new Promise((aResolve, aReject) => {
       this.sendMessageInternal(aType, aMessage, aPageURI, aManifestURI, aExtra,
                                aResolve, aReject);
@@ -214,6 +214,7 @@ SystemMessageInternal.prototype = {
       return;
     }
 
+    debug("Sending message: " + aType + ", " + JSON.stringify(aMessage));
     // Give this message an ID so that we can identify the message and
     // clean it up from the pending message queue when apps receive it.
     let messageID = gUUIDGenerator.generateUUID().toString();
@@ -266,15 +267,19 @@ SystemMessageInternal.prototype = {
   },
 
   broadcastMessage: function(aType, aMessage, aExtra) {
+  	debug("Entered broadcastMessage: " + aType + ", " + JSON.stringify(aMessage));
     // Buffer system messages until the webapps' registration is ready,
     // so that we can know the correct pages registered to be broadcasted.
     if (!this._webappsRegistryReady) {
+    	debug("Entered not webappsRegistryReady: " + JSON.stringify(aMessage));
       this._bufferedSysMsgs.push({ how: "broadcast",
                                    type: aType,
                                    msg: aMessage,
                                    extra: aExtra });
       return Promise.resolve();
     }
+
+    debug("Skipped webappsRegistryReady: " + JSON.stringify(aMessage));
 
     // Give this message an ID so that we can identify the message and
     // clean it up from the pending message queue when apps receive it.

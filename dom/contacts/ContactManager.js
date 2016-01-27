@@ -568,11 +568,7 @@ ContactManager.prototype = {
   }
   let type = "contacts-" + access;
 
-  let name = privacyMonitor.getAppName();
-
-  debug("App name : " + name + ", permission: " + type);
-
-  privacyMonitor.notifyListener(name, type);
+  privacyMonitor.notifyListener("contacts");
 },
 
   classID: Components.ID("{8beb3a66-d70a-4111-b216-b8e995ad3aff}"),
