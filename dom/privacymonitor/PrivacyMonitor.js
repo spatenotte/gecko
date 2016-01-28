@@ -52,6 +52,7 @@ PrivacyMonitor.prototype = {
     let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(principal.appId);
 
     debug("App name: " + app.name + ", manifest URL: " + app.manifestURL);
+    debug("Page URL: " + principal.URI.spec);
     return app.name;
   }
 };
