@@ -92,6 +92,10 @@ EXPORTS.gfxipc += [
     'ipc/ShadowLayerUtils.h',
 ]
 
+EXPORTS.mozilla.dom += [
+    'apz/util/CheckerboardReportService.h',
+]
+
 EXPORTS.mozilla.layers += [
     'apz/public/GeckoContentController.h',
     # exporting things from apz/src is temporary until we extract a
@@ -206,6 +210,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'opengl/GLManager.h',
     ]
     EXPORTS += [
+        'MacIOSurfaceHelpers.h',
         'MacIOSurfaceImage.h',
     ]
     UNIFIED_SOURCES += [
@@ -213,6 +218,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     ]
     SOURCES += [
         'ipc/ShadowLayerUtilsMac.cpp',
+        'MacIOSurfaceHelpers.cpp',
         'MacIOSurfaceImage.cpp',
     ]
 
@@ -254,6 +260,7 @@ UNIFIED_SOURCES += [
     'apz/src/InputBlockState.cpp',
     'apz/src/InputQueue.cpp',
     'apz/src/OverscrollHandoffState.cpp',
+    'apz/src/PotentialCheckerboardDurationTracker.cpp',
     'apz/src/TouchCounter.cpp',
     'apz/src/WheelScrollAnimation.cpp',
     'apz/testutil/APZTestData.cpp',
@@ -261,6 +268,7 @@ UNIFIED_SOURCES += [
     'apz/util/APZCCallbackHelper.cpp',
     'apz/util/APZEventState.cpp',
     'apz/util/APZThreadUtils.cpp',
+    'apz/util/CheckerboardReportService.cpp',
     'apz/util/ChromeProcessController.cpp',
     'apz/util/DoubleTapToZoom.cpp',
     'apz/util/InputAPZContext.cpp',

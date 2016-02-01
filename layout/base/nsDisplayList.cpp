@@ -540,8 +540,7 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
     // EffectCompositor needs to know that we refused to run this animation
     // asynchronously so that it will not throttle the main thread
     // animation.
-    aFrame->Properties().Set(nsIFrame::RefusedAsyncAnimationProperty(),
-                            reinterpret_cast<void*>(intptr_t(true)));
+    aFrame->Properties().Set(nsIFrame::RefusedAsyncAnimationProperty(), true);
 
     // We need to schedule another refresh driver run so that EffectCompositor
     // gets a chance to unthrottle the animation.
@@ -1451,9 +1450,9 @@ TreatAsOpaque(nsDisplayItem* aItem, nsDisplayListBuilder* aBuilder)
     return opaque;
   }
   nsRegion opaqueClipped;
-  nsRegionRectIterator iter(opaque);
-  for (const nsRect* r = iter.Next(); r; r = iter.Next()) {
-    opaqueClipped.Or(opaqueClipped, aItem->GetClip().ApproximateIntersectInward(*r));
+  for (auto iter = opaque.RectIter(); !iter.Done(); iter.Next()) {
+    opaqueClipped.Or(opaqueClipped,
+                     aItem->GetClip().ApproximateIntersectInward(iter.Get()));
   }
   return opaqueClipped;
 }
@@ -1856,7 +1855,7 @@ struct FramesWithDepth
   {}
 
   bool operator<(const FramesWithDepth& aOther) const {
-    if (mDepth != aOther.mDepth) {
+    if (!FuzzyEqual(mDepth, aOther.mDepth, 0.1f)) {
       // We want to sort so that the shallowest item (highest depth value) is first
       return mDepth > aOther.mDepth;
     }
@@ -1919,13 +1918,16 @@ void nsDisplayList::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
     bool snap;
     nsRect r = item->GetBounds(aBuilder, &snap).Intersect(aRect);
     auto itemType = item->GetType();
-    bool alwaysIntersect =
+    bool same3DContext =
       (itemType == nsDisplayItem::TYPE_TRANSFORM &&
        static_cast<nsDisplayTransform*>(item)->IsParticipating3DContext()) ||
       (itemType == nsDisplayItem::TYPE_PERSPECTIVE &&
        static_cast<nsDisplayPerspective*>(item)->Frame()->Extend3DContext());
-    if (alwaysIntersect &&
+    if (same3DContext &&
         !static_cast<nsDisplayTransform*>(item)->IsLeafOf3DContext()) {
+      if (!item->GetClip().MayIntersect(aRect)) {
+        continue;
+      }
       nsAutoTArray<nsIFrame*, 1> neverUsed;
       // Start gethering leaves of the 3D rendering context, and
       // append leaves at the end of mItemBuffer.  Leaves are
@@ -1936,7 +1938,7 @@ void nsDisplayList::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
       i = aState->mItemBuffer.Length();
       continue;
     }
-    if (alwaysIntersect || item->GetClip().MayIntersect(r)) {
+    if (same3DContext || item->GetClip().MayIntersect(r)) {
       nsAutoTArray<nsIFrame*, 16> outFrames;
       item->HitTest(aBuilder, aRect, aState, &outFrames);
 
@@ -2127,18 +2129,23 @@ nsDisplayItem::MaxActiveLayers()
   return sMaxLayers;
 }
 
-int32_t
-nsDisplayItem::ZIndex() const
+static int32_t ZIndexForFrame(nsIFrame* aFrame)
 {
-  if (!mFrame->IsAbsPosContaininingBlock() && !mFrame->IsFlexOrGridItem())
+  if (!aFrame->IsAbsPosContaininingBlock() && !aFrame->IsFlexOrGridItem())
     return 0;
 
-  const nsStylePosition* position = mFrame->StylePosition();
+  const nsStylePosition* position = aFrame->StylePosition();
   if (position->mZIndex.GetUnit() == eStyleUnit_Integer)
     return position->mZIndex.GetIntValue();
 
   // sort the auto and 0 elements together
   return 0;
+}
+
+int32_t
+nsDisplayItem::ZIndex() const
+{
+  return ZIndexForFrame(mFrame);
 }
 
 bool
@@ -2242,7 +2249,6 @@ nsDisplayBackgroundImage::nsDisplayBackgroundImage(nsDisplayListBuilder* aBuilde
                                                    const nsStyleBackground* aBackgroundStyle)
   : nsDisplayImageContainer(aBuilder, aFrame)
   , mBackgroundStyle(aBackgroundStyle)
-  , mAnimatedGeometryRootForScrollMetadata(mAnimatedGeometryRoot)
   , mLayer(aLayer)
 {
   MOZ_COUNT_CTOR(nsDisplayBackgroundImage);
@@ -2264,11 +2270,11 @@ nsDisplayBackgroundImage::GetDestAreaInternal(nsDisplayListBuilder* aBuilder)
   nsPresContext* presContext = mFrame->PresContext();
   uint32_t flags = aBuilder->GetBackgroundPaintFlags();
   nsRect borderArea = nsRect(ToReferenceFrame(), mFrame->GetSize());
-  const nsStyleBackground::Layer &layer = mBackgroundStyle->mLayers[mLayer];
+  const nsStyleImageLayers::Layer& layer = mBackgroundStyle->mImage.mLayers[mLayer];
 
   nsBackgroundLayerState state =
-    nsCSSRendering::PrepareBackgroundLayer(presContext, mFrame, flags,
-                                           borderArea, borderArea, layer);
+    nsCSSRendering::PrepareImageLayer(presContext, mFrame, flags,
+                                      borderArea, borderArea, layer);
   return state.mDestArea;
 }
 
@@ -2305,13 +2311,13 @@ static nsStyleContext* GetBackgroundStyleContext(nsIFrame* aFrame)
 /* static */ void
 SetBackgroundClipRegion(DisplayListClipState::AutoSaveRestore& aClipState,
                         nsIFrame* aFrame, const nsPoint& aToReferenceFrame,
-                        const nsStyleBackground::Layer& aLayer,
+                        const nsStyleImageLayers::Layer& aLayer,
                         bool aWillPaintBorder)
 {
   nsRect borderBox = nsRect(aToReferenceFrame, aFrame->GetSize());
 
-  nsCSSRendering::BackgroundClipState clip;
-  nsCSSRendering::GetBackgroundClip(aLayer, aFrame, *aFrame->StyleBorder(),
+  nsCSSRendering::ImageLayerClipState clip;
+  nsCSSRendering::GetImageLayerClip(aLayer, aFrame, *aFrame->StyleBorder(),
                                     borderBox, borderBox, aWillPaintBorder,
                                     aFrame->PresContext()->AppUnitsPerDevPixel(),
                                     &clip);
@@ -2411,25 +2417,31 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
 
   // Passing bg == nullptr in this macro will result in one iteration with
   // i = 0.
-  NS_FOR_VISIBLE_BACKGROUND_LAYERS_BACK_TO_FRONT(i, bg) {
-    if (bg->mLayers[i].mImage.IsEmpty()) {
+  NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, bg->mImage) {
+    if (bg->mImage.mLayers[i].mImage.IsEmpty()) {
       continue;
     }
 
-    if (bg->mLayers[i].mBlendMode != NS_STYLE_BLEND_NORMAL) {
+    if (bg->mImage.mLayers[i].mBlendMode != NS_STYLE_BLEND_NORMAL) {
       needBlendContainer = true;
     }
 
     DisplayListClipState::AutoSaveRestore clipState(aBuilder);
     if (!aBuilder->IsForEventDelivery()) {
-      const nsStyleBackground::Layer& layer = bg->mLayers[i];
+      const nsStyleImageLayers::Layer& layer = bg->mImage.mLayers[i];
       SetBackgroundClipRegion(clipState, aFrame, toRef,
                               layer, willPaintBorder);
     }
 
     nsDisplayBackgroundImage* bgItem =
       new (aBuilder) nsDisplayBackgroundImage(aBuilder, aFrame, i, bg);
-    bgItemList.AppendNewToTop(bgItem);
+
+    if (bgItem->ShouldFixToViewport(aBuilder)) {
+      bgItemList.AppendNewToTop(
+        nsDisplayFixedPosition::CreateForFixedBackground(aBuilder, aFrame, bgItem, i));
+    } else {
+      bgItemList.AppendNewToTop(bgItem);
+    }
   }
 
   if (needBlendContainer) {
@@ -2480,19 +2492,19 @@ nsDisplayBackgroundImage::IsSingleFixedPositionImage(nsDisplayListBuilder* aBuil
   if (!mBackgroundStyle)
     return false;
 
-  if (mBackgroundStyle->mLayers.Length() != 1)
+  if (mBackgroundStyle->mImage.mLayers.Length() != 1)
     return false;
 
   nsPresContext* presContext = mFrame->PresContext();
   uint32_t flags = aBuilder->GetBackgroundPaintFlags();
   nsRect borderArea = nsRect(ToReferenceFrame(), mFrame->GetSize());
-  const nsStyleBackground::Layer &layer = mBackgroundStyle->mLayers[mLayer];
+  const nsStyleImageLayers::Layer &layer = mBackgroundStyle->mImage.mLayers[mLayer];
 
-  if (layer.mAttachment != NS_STYLE_BG_ATTACHMENT_FIXED)
+  if (layer.mAttachment != NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED)
     return false;
 
   nsBackgroundLayerState state =
-    nsCSSRendering::PrepareBackgroundLayer(presContext, mFrame, flags,
+    nsCSSRendering::PrepareImageLayer(presContext, mFrame, flags,
                                            borderArea, aClipRect, layer);
   nsImageRenderer* imageRenderer = &state.mImageRenderer;
   // We only care about images here, not gradients.
@@ -2508,8 +2520,8 @@ nsDisplayBackgroundImage::IsSingleFixedPositionImage(nsDisplayListBuilder* aBuil
 bool
 nsDisplayBackgroundImage::IsNonEmptyFixedImage() const
 {
-  return mBackgroundStyle->mLayers[mLayer].mAttachment == NS_STYLE_BG_ATTACHMENT_FIXED &&
-         !mBackgroundStyle->mLayers[mLayer].mImage.IsEmpty();
+  return mBackgroundStyle->mImage.mLayers[mLayer].mAttachment == NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED &&
+         !mBackgroundStyle->mImage.mLayers[mLayer].mImage.IsEmpty();
 }
 
 bool
@@ -2538,10 +2550,10 @@ nsDisplayBackgroundImage::CanOptimizeToImageLayer(LayerManager* aManager,
   nsPresContext* presContext = mFrame->PresContext();
   uint32_t flags = aBuilder->GetBackgroundPaintFlags();
   nsRect borderArea = nsRect(ToReferenceFrame(), mFrame->GetSize());
-  const nsStyleBackground::Layer &layer = mBackgroundStyle->mLayers[mLayer];
+  const nsStyleImageLayers::Layer &layer = mBackgroundStyle->mImage.mLayers[mLayer];
 
   nsBackgroundLayerState state =
-    nsCSSRendering::PrepareBackgroundLayer(presContext, mFrame, flags,
+    nsCSSRendering::PrepareImageLayer(presContext, mFrame, flags,
                                            borderArea, borderArea, layer);
   nsImageRenderer* imageRenderer = &state.mImageRenderer;
   // We only care about images here, not gradients.
@@ -2562,8 +2574,8 @@ nsDisplayBackgroundImage::CanOptimizeToImageLayer(LayerManager* aManager,
   // For 'contain' and 'cover', we allow any pixel of the image to be sampled
   // because there isn't going to be any spriting/atlasing going on.
   bool allowPartialImages =
-    (layer.mSize.mWidthType == nsStyleBackground::Size::eContain ||
-     layer.mSize.mWidthType == nsStyleBackground::Size::eCover);
+    (layer.mSize.mWidthType == nsStyleImageLayers::Size::eContain ||
+     layer.mSize.mWidthType == nsStyleImageLayers::Size::eCover);
   if (!allowPartialImages && !state.mFillArea.Contains(state.mDestArea)) {
     return false;
   }
@@ -2617,7 +2629,7 @@ nsDisplayBackgroundImage::ShouldCreateOwnLayer(nsDisplayListBuilder* aBuilder,
   }
 
   if (nsLayoutUtils::AnimatedImageLayersEnabled() && mBackgroundStyle) {
-    const nsStyleBackground::Layer &layer = mBackgroundStyle->mLayers[mLayer];
+    const nsStyleImageLayers::Layer &layer = mBackgroundStyle->mImage.mLayers[mLayer];
     const nsStyleImage* image = &layer.mImage;
     if (image->GetType() == eStyleImageType_Image) {
       imgIRequest* imgreq = image->GetImageData();
@@ -2776,13 +2788,13 @@ nsDisplayBackgroundImage::GetInsideClipRegion(nsDisplayItem* aItem,
     clipRect = canvasFrame->CanvasArea() + aItem->ToReferenceFrame();
   } else {
     switch (aClip) {
-    case NS_STYLE_BG_CLIP_BORDER:
+    case NS_STYLE_IMAGELAYER_CLIP_BORDER:
       clipRect = nsRect(aItem->ToReferenceFrame(), frame->GetSize());
       break;
-    case NS_STYLE_BG_CLIP_PADDING:
+    case NS_STYLE_IMAGELAYER_CLIP_PADDING:
       clipRect = frame->GetPaddingRect() - frame->GetPosition() + aItem->ToReferenceFrame();
       break;
-    case NS_STYLE_BG_CLIP_CONTENT:
+    case NS_STYLE_IMAGELAYER_CLIP_CONTENT:
       clipRect = frame->GetContentRectRelativeToSelf() + aItem->ToReferenceFrame();
       break;
     default:
@@ -2813,7 +2825,7 @@ nsDisplayBackgroundImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
   if (mFrame->StyleBorder()->mBoxDecorationBreak ==
         NS_STYLE_BOX_DECORATION_BREAK_CLONE ||
       (!mFrame->GetPrevContinuation() && !mFrame->GetNextContinuation())) {
-    const nsStyleBackground::Layer& layer = mBackgroundStyle->mLayers[mLayer];
+    const nsStyleImageLayers::Layer& layer = mBackgroundStyle->mImage.mLayers[mLayer];
     if (layer.mImage.IsOpaque() && layer.mBlendMode == NS_STYLE_BLEND_NORMAL) {
       result = GetInsideClipRegion(this, layer.mClip, mBounds);
     }
@@ -2838,10 +2850,10 @@ nsDisplayBackgroundImage::GetPositioningArea()
     return nsRect();
   }
   nsIFrame* attachedToFrame;
-  return nsCSSRendering::ComputeBackgroundPositioningArea(
+  return nsCSSRendering::ComputeImageLayerPositioningArea(
       mFrame->PresContext(), mFrame,
       nsRect(ToReferenceFrame(), mFrame->GetSize()),
-      mBackgroundStyle->mLayers[mLayer],
+      mBackgroundStyle->mImage.mLayers[mLayer],
       &attachedToFrame) + ToReferenceFrame();
 }
 
@@ -2858,7 +2870,7 @@ nsDisplayBackgroundImage::RenderingMightDependOnPositioningAreaSizeChange()
     return true;
   }
 
-  const nsStyleBackground::Layer &layer = mBackgroundStyle->mLayers[mLayer];
+  const nsStyleImageLayers::Layer &layer = mBackgroundStyle->mImage.mLayers[mLayer];
   if (layer.RenderingMightDependOnPositioningAreaSizeChange()) {
     return true;
   }
@@ -2934,7 +2946,7 @@ void nsDisplayBackgroundImage::ComputeInvalidationRegion(nsDisplayListBuilder* a
     return;
   }
   if (aBuilder->ShouldSyncDecodeImages()) {
-    const nsStyleImage& image = mBackgroundStyle->mLayers[mLayer].mImage;
+    const nsStyleImage& image = mBackgroundStyle->mImage.mLayers[mLayer].mImage;
     if (image.GetType() == eStyleImageType_Image &&
         geometry->ShouldInvalidateToSyncDecodeImages()) {
       aInvalidRegion->Or(*aInvalidRegion, bounds);
@@ -2980,7 +2992,7 @@ nsDisplayBackgroundImage::GetBoundsInternal(nsDisplayListBuilder* aBuilder) {
       clipRect = clipRect.Union(rootRect + aBuilder->ToReferenceFrame(mFrame));
     }
   }
-  const nsStyleBackground::Layer& layer = mBackgroundStyle->mLayers[mLayer];
+  const nsStyleImageLayers::Layer& layer = mBackgroundStyle->mImage.mLayers[mLayer];
   return nsCSSRendering::GetBackgroundLayerRect(presContext, mFrame,
                                                 borderBox, clipRect, layer,
                                                 aBuilder->GetBackgroundPaintFlags());
@@ -2991,6 +3003,13 @@ nsDisplayBackgroundImage::GetPerFrameKey()
 {
   return (mLayer << nsDisplayItem::TYPE_BITS) |
     nsDisplayItem::GetPerFrameKey();
+}
+
+void
+nsDisplayBackgroundImage::MarkBoundsAsVisible(nsDisplayListBuilder* aBuilder)
+{
+  bool snap;
+  mVisibleRect = GetBounds(aBuilder, &snap);
 }
 
 nsDisplayThemedBackground::nsDisplayThemedBackground(nsDisplayListBuilder* aBuilder,
@@ -3221,7 +3240,7 @@ nsDisplayBackgroundColor::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
 
   *aSnap = true;
 
-  const nsStyleBackground::Layer& bottomLayer = mBackgroundStyle->BottomLayer();
+  const nsStyleImageLayers::Layer& bottomLayer = mBackgroundStyle->BottomLayer();
   nsRect borderBox = nsRect(ToReferenceFrame(), mFrame->GetSize());
   return nsDisplayBackgroundImage::GetInsideClipRegion(this, bottomLayer.mClip,
                                                        borderBox);
@@ -3616,24 +3635,25 @@ ComputeDisjointRectangles(const nsRegion& aRegion,
                           nsTArray<nsRect>* aRects) {
   nscoord accumulationMargin = nsPresContext::CSSPixelsToAppUnits(25);
   nsRect accumulated;
-  nsRegionRectIterator iter(aRegion);
-  while (true) {
-    const nsRect* r = iter.Next();
-    if (r && !accumulated.IsEmpty() &&
-        accumulated.YMost() >= r->y - accumulationMargin) {
-      accumulated.UnionRect(accumulated, *r);
+
+  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+    const nsRect& r = iter.Get();
+    if (accumulated.IsEmpty()) {
+      accumulated = r;
       continue;
     }
 
-    if (!accumulated.IsEmpty()) {
+    if (accumulated.YMost() >= r.y - accumulationMargin) {
+      accumulated.UnionRect(accumulated, r);
+    } else {
       aRects->AppendElement(accumulated);
-      accumulated.SetEmpty();
+      accumulated = r;
     }
+  }
 
-    if (!r)
-      break;
-
-    accumulated = *r;
+  // Finish the in-flight rectangle, if there is one.
+  if (!accumulated.IsEmpty()) {
+    aRects->AppendElement(accumulated);
   }
 }
 
@@ -4621,6 +4641,117 @@ nsDisplayResolution::BuildLayer(nsDisplayListBuilder* aBuilder,
   return layer.forget();
 }
 
+nsDisplayFixedPosition::nsDisplayFixedPosition(nsDisplayListBuilder* aBuilder,
+                                               nsIFrame* aFrame,
+                                               nsDisplayList* aList)
+  : nsDisplayOwnLayer(aBuilder, aFrame, aList)
+  , mIndex(0)
+  , mIsFixedBackground(false)
+{
+  MOZ_COUNT_CTOR(nsDisplayFixedPosition);
+  Init(aBuilder);
+}
+
+nsDisplayFixedPosition::nsDisplayFixedPosition(nsDisplayListBuilder* aBuilder,
+                                               nsIFrame* aFrame,
+                                               nsDisplayList* aList,
+                                               uint32_t aIndex)
+  : nsDisplayOwnLayer(aBuilder, aFrame, aList)
+  , mIndex(aIndex)
+  , mIsFixedBackground(true)
+{
+  MOZ_COUNT_CTOR(nsDisplayFixedPosition);
+  Init(aBuilder);
+}
+
+void
+nsDisplayFixedPosition::Init(nsDisplayListBuilder* aBuilder)
+{
+  bool snap;
+  mVisibleRect = GetBounds(aBuilder, &snap);
+  mAnimatedGeometryRootForScrollMetadata = mAnimatedGeometryRoot;
+  if (ShouldFixToViewport(aBuilder)) {
+    mAnimatedGeometryRoot = aBuilder->FindAnimatedGeometryRootFor(this);
+  }
+}
+
+/* static */ nsDisplayFixedPosition*
+nsDisplayFixedPosition::CreateForFixedBackground(nsDisplayListBuilder* aBuilder,
+                                                 nsIFrame* aFrame,
+                                                 nsDisplayBackgroundImage* aImage,
+                                                 uint32_t aIndex)
+{
+  // Clear clipping on the child item, since we will apply it to the
+  // fixed position item as well.
+  aImage->SetClip(aBuilder, DisplayItemClip());
+  aImage->SetScrollClip(nullptr);
+  aImage->MarkBoundsAsVisible(aBuilder);
+
+  nsDisplayList temp;
+  temp.AppendToTop(aImage);
+
+  return new (aBuilder) nsDisplayFixedPosition(aBuilder, aFrame, &temp, aIndex + 1);
+}
+
+
+#ifdef NS_BUILD_REFCNT_LOGGING
+nsDisplayFixedPosition::~nsDisplayFixedPosition() {
+  MOZ_COUNT_DTOR(nsDisplayFixedPosition);
+}
+#endif
+
+already_AddRefed<Layer>
+nsDisplayFixedPosition::BuildLayer(nsDisplayListBuilder* aBuilder,
+                                   LayerManager* aManager,
+                                   const ContainerLayerParameters& aContainerParameters) {
+  RefPtr<Layer> layer =
+    nsDisplayOwnLayer::BuildLayer(aBuilder, aManager, aContainerParameters);
+
+  layer->SetIsFixedPosition(true);
+
+  nsPresContext* presContext = Frame()->PresContext();
+  nsIFrame* fixedFrame = mIsFixedBackground ? presContext->PresShell()->GetRootFrame() : Frame();
+
+  const nsIFrame* viewportFrame = fixedFrame->GetParent();
+  // anchorRect will be in the container's coordinate system (aLayer's parent layer).
+  // This is the same as the display items' reference frame.
+  nsRect anchorRect;
+  if (viewportFrame) {
+    // Fixed position frames are reflowed into the scroll-port size if one has
+    // been set.
+    if (presContext->PresShell()->IsScrollPositionClampingScrollPortSizeSet()) {
+      anchorRect.SizeTo(presContext->PresShell()->GetScrollPositionClampingScrollPortSize());
+    } else {
+      anchorRect.SizeTo(viewportFrame->GetSize());
+    }
+  } else {
+    // A display item directly attached to the viewport.
+    // For background-attachment:fixed items, the anchor point is always the
+    // top-left of the viewport currently.
+    viewportFrame = fixedFrame;
+  }
+  // The anchorRect top-left is always the viewport top-left.
+  anchorRect.MoveTo(viewportFrame->GetOffsetToCrossDoc(ReferenceFrame()));
+
+  nsLayoutUtils::SetFixedPositionLayerData(layer,
+      viewportFrame, anchorRect, fixedFrame, presContext, aContainerParameters, !mIsFixedBackground);
+
+  return layer.forget();
+}
+
+bool nsDisplayFixedPosition::TryMerge(nsDisplayItem* aItem) {
+  if (aItem->GetType() != TYPE_FIXED_POSITION)
+    return false;
+  // Items with the same fixed position frame can be merged.
+  nsDisplayFixedPosition* other = static_cast<nsDisplayFixedPosition*>(aItem);
+  if (other->mFrame != mFrame)
+    return false;
+  if (aItem->GetClip() != GetClip())
+    return false;
+  MergeFromTrackingMergedFrames(other);
+  return true;
+}
+
 nsDisplayStickyPosition::nsDisplayStickyPosition(nsDisplayListBuilder* aBuilder,
                                                  nsIFrame* aFrame,
                                                  nsDisplayList* aList)
@@ -4919,6 +5050,8 @@ nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder,
   : nsDisplayItem(aBuilder, aFrame)
   , mStoredList(aBuilder, aFrame, aList)
   , mTransformGetter(aTransformGetter)
+  , mAnimatedGeometryRootForChildren(mAnimatedGeometryRoot)
+  , mAnimatedGeometryRootForScrollMetadata(mAnimatedGeometryRoot)
   , mChildrenVisibleRect(aChildrenVisibleRect)
   , mIndex(aIndex)
   , mNoExtendContext(false)
@@ -4933,7 +5066,6 @@ nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder,
 void
 nsDisplayTransform::SetReferenceFrameToAncestor(nsDisplayListBuilder* aBuilder)
 {
-  mAnimatedGeometryRootForChildren = mAnimatedGeometryRoot;
   if (mFrame == aBuilder->RootReferenceFrame()) {
     return;
   }
@@ -4955,7 +5087,15 @@ nsDisplayTransform::SetReferenceFrameToAncestor(nsDisplayListBuilder* aBuilder)
     // frame, which is our AGR, not the parent AGR.
     mAnimatedGeometryRoot = mAnimatedGeometryRootForChildren;
   } else if (mAnimatedGeometryRoot->mParentAGR) {
-    mAnimatedGeometryRoot = mAnimatedGeometryRoot->mParentAGR;
+    mAnimatedGeometryRootForScrollMetadata = mAnimatedGeometryRoot->mParentAGR;
+    if (!MayBeAnimated(aBuilder)) {
+      // If we're an animated transform then we want the same AGR as our children
+      // so that FrameLayerBuilder knows that this layer moves with the transform
+      // and won't compute occlusions. If we're not animated then use our parent
+      // AGR so that inactive transform layers can go in the same PaintedLayer as
+      // surrounding content.
+      mAnimatedGeometryRoot = mAnimatedGeometryRoot->mParentAGR;
+    }
   }
   mVisibleRect = aBuilder->GetDirtyRect() + mToReferenceFrame;
 }
@@ -4987,6 +5127,8 @@ nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder,
   : nsDisplayItem(aBuilder, aFrame)
   , mStoredList(aBuilder, aFrame, aList)
   , mTransformGetter(nullptr)
+  , mAnimatedGeometryRootForChildren(mAnimatedGeometryRoot)
+  , mAnimatedGeometryRootForScrollMetadata(mAnimatedGeometryRoot)
   , mChildrenVisibleRect(aChildrenVisibleRect)
   , mIndex(aIndex)
   , mNoExtendContext(false)
@@ -5007,6 +5149,8 @@ nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder,
   : nsDisplayItem(aBuilder, aFrame)
   , mStoredList(aBuilder, aFrame, aItem)
   , mTransformGetter(nullptr)
+  , mAnimatedGeometryRootForChildren(mAnimatedGeometryRoot)
+  , mAnimatedGeometryRootForScrollMetadata(mAnimatedGeometryRoot)
   , mChildrenVisibleRect(aChildrenVisibleRect)
   , mIndex(aIndex)
   , mNoExtendContext(false)
@@ -5028,6 +5172,8 @@ nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder,
   , mStoredList(aBuilder, aFrame, aList)
   , mTransform(aTransform)
   , mTransformGetter(nullptr)
+  , mAnimatedGeometryRootForChildren(mAnimatedGeometryRoot)
+  , mAnimatedGeometryRootForScrollMetadata(mAnimatedGeometryRoot)
   , mChildrenVisibleRect(aChildrenVisibleRect)
   , mIndex(aIndex)
   , mNoExtendContext(false)
@@ -5646,14 +5792,34 @@ already_AddRefed<Layer> nsDisplayTransform::BuildLayer(nsDisplayListBuilder *aBu
                                                            this, mFrame,
                                                            eCSSProperty_transform);
   if (ShouldPrerender(aBuilder)) {
-    container->SetUserData(nsIFrame::LayerIsPrerenderedDataKey(),
-                           /*the value is irrelevant*/nullptr);
+    if (MayBeAnimated(aBuilder)) {
+      // Only allow async updates to the transform if we're an animated layer, since that's what
+      // triggers us to set the correct AGR in the constructor and makes sure FrameLayerBuilder
+      // won't compute occlusions for this layer.
+      container->SetUserData(nsIFrame::LayerIsPrerenderedDataKey(),
+                             /*the value is irrelevant*/nullptr);
+    }
     container->SetContentFlags(container->GetContentFlags() | Layer::CONTENT_MAY_CHANGE_TRANSFORM);
   } else {
     container->RemoveUserData(nsIFrame::LayerIsPrerenderedDataKey());
     container->SetContentFlags(container->GetContentFlags() & ~Layer::CONTENT_MAY_CHANGE_TRANSFORM);
   }
   return container.forget();
+}
+
+bool
+nsDisplayTransform::MayBeAnimated(nsDisplayListBuilder* aBuilder)
+{
+  // Here we check if the *post-transform* bounds of this item are big enough
+  // to justify an active layer.
+  if (ActiveLayerTracker::IsStyleAnimated(aBuilder, mFrame, eCSSProperty_transform) &&
+      !IsItemTooSmallForActiveLayer(this))
+    return true;
+  if (EffectCompositor::HasAnimationsForCompositor(mFrame,
+                                                   eCSSProperty_transform)) {
+    return true;
+  }
+  return false;
 }
 
 nsDisplayItem::LayerState
@@ -5667,13 +5833,7 @@ nsDisplayTransform::GetLayerState(nsDisplayListBuilder* aBuilder,
       mIsTransformSeparator) {
     return LAYER_ACTIVE_FORCE;
   }
-  // Here we check if the *post-transform* bounds of this item are big enough
-  // to justify an active layer.
-  if (ActiveLayerTracker::IsStyleAnimated(aBuilder, mFrame, eCSSProperty_transform) &&
-      !IsItemTooSmallForActiveLayer(this))
-    return LAYER_ACTIVE;
-  if (EffectCompositor::HasAnimationsForCompositor(mFrame,
-                                                   eCSSProperty_transform)) {
+  if (MayBeAnimated(aBuilder)) {
     return LAYER_ACTIVE;
   }
 
@@ -6187,6 +6347,12 @@ nsDisplayPerspective::GetLayerState(nsDisplayListBuilder* aBuilder,
   return LAYER_ACTIVE_FORCE;
 }
 
+int32_t
+nsDisplayPerspective::ZIndex() const
+{
+  return ZIndexForFrame(mTransformFrame);
+}
+
 nsDisplayItemGeometry*
 nsCharClipDisplayItem::AllocateGeometry(nsDisplayListBuilder* aBuilder)
 {
@@ -6274,8 +6440,10 @@ nsDisplaySVGEffects::PaintAsLayer(nsDisplayListBuilder* aBuilder,
                                   nsRenderingContext* aCtx,
                                   LayerManager* aManager)
 {
+  nsRect borderArea = nsRect(ToReferenceFrame(), mFrame->GetSize());
   nsSVGIntegrationUtils::PaintFramesWithEffects(*aCtx->ThebesContext(), mFrame,
                                                 mVisibleRect,
+                                                borderArea,
                                                 aBuilder, aManager);
 }
 
@@ -6316,7 +6484,6 @@ nsDisplaySVGEffects::BuildLayer(nsDisplayListBuilder* aBuilder,
 
   bool isOK = effectProperties.HasNoFilterOrHasValidFilter();
   effectProperties.GetClipPathFrame(&isOK);
-  effectProperties.GetMaskFrame(&isOK);
 
   if (!isOK) {
     return nullptr;

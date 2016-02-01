@@ -23,10 +23,12 @@
 #include "jsscript.h"
 
 #include "gc/Marking.h"
+#include "gc/Policy.h"
 #include "gc/Rooting.h"
 #include "js/Vector.h"
 #include "vm/Debugger.h"
 #include "vm/SavedFrame.h"
+#include "vm/SPSProfiler.h"
 #include "vm/StringBuffer.h"
 #include "vm/Time.h"
 #include "vm/WrapperObject.h"
@@ -486,7 +488,8 @@ SavedFrame::create(JSContext* cx)
         return nullptr;
     assertSameCompartment(cx, proto);
 
-    RootedObject frameObj(cx, NewObjectWithGivenProto(cx, &SavedFrame::class_, proto));
+    RootedObject frameObj(cx, NewObjectWithGivenProto(cx, &SavedFrame::class_, proto,
+                                                      TenuredObject));
     if (!frameObj)
         return nullptr;
 
@@ -1009,6 +1012,7 @@ SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame, unsi
         return true;
     }
 
+    AutoSPSEntry psuedoFrame(cx->runtime(), "js::SavedStacks::saveCurrentStack");
     FrameIter iter(cx, FrameIter::ALL_CONTEXTS, FrameIter::GO_THROUGH_SAVED);
     return insertFrames(cx, iter, frame, maxFrameCount);
 }
@@ -1063,7 +1067,8 @@ SavedStacks::clear()
 size_t
 SavedStacks::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
 {
-    return frames.sizeOfExcludingThis(mallocSizeOf);
+    return frames.sizeOfExcludingThis(mallocSizeOf) +
+           pcLocationMap.sizeOfExcludingThis(mallocSizeOf);
 }
 
 bool

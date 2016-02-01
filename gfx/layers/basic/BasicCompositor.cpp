@@ -549,6 +549,9 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
   } else {
     // StartRemoteDrawingInRegion can mutate mInvalidRegion.
     mDrawTarget = mWidget->StartRemoteDrawingInRegion(mInvalidRegion);
+    if (!mDrawTarget) {
+      return;
+    }
     mInvalidRect = mInvalidRegion.GetBounds();
     if (mInvalidRect.IsEmpty()) {
       mWidget->EndRemoteDrawingInRegion(mDrawTarget, mInvalidRegion);
@@ -623,11 +626,11 @@ BasicCompositor::EndFrame()
   // The source DrawTarget is clipped to the invalidation region, so we have
   // to copy the individual rectangles in the region or else we'll draw blank
   // pixels.
-  LayoutDeviceIntRegion::RectIterator iter(mInvalidRegion);
-  for (const LayoutDeviceIntRect *r = iter.Next(); r; r = iter.Next()) {
+  for (auto iter = mInvalidRegion.RectIter(); !iter.Done(); iter.Next()) {
+    const LayoutDeviceIntRect& r = iter.Get();
     dest->CopySurface(source,
-                      IntRect(r->x - mInvalidRect.x, r->y - mInvalidRect.y, r->width, r->height),
-                      IntPoint(r->x - offset.x, r->y - offset.y));
+                      IntRect(r.x - mInvalidRect.x, r.y - mInvalidRect.y, r.width, r.height),
+                      IntPoint(r.x - offset.x, r.y - offset.y));
   }
   if (!mTarget) {
     mWidget->EndRemoteDrawingInRegion(mDrawTarget, mInvalidRegion);

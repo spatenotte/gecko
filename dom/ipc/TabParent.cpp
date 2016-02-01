@@ -376,7 +376,7 @@ void
 TabParent::AddWindowListeners()
 {
   if (mFrameElement && mFrameElement->OwnerDoc()) {
-    if (nsCOMPtr<nsPIDOMWindow> window = mFrameElement->OwnerDoc()->GetWindow()) {
+    if (nsCOMPtr<nsPIDOMWindowOuter> window = mFrameElement->OwnerDoc()->GetWindow()) {
       nsCOMPtr<EventTarget> eventTarget = window->GetTopWindowRoot();
       if (eventTarget) {
         eventTarget->AddEventListener(NS_LITERAL_STRING("MozUpdateWindowPos"),
@@ -399,7 +399,7 @@ void
 TabParent::RemoveWindowListeners()
 {
   if (mFrameElement && mFrameElement->OwnerDoc()->GetWindow()) {
-    nsCOMPtr<nsPIDOMWindow> window = mFrameElement->OwnerDoc()->GetWindow();
+    nsCOMPtr<nsPIDOMWindowOuter> window = mFrameElement->OwnerDoc()->GetWindow();
     nsCOMPtr<EventTarget> eventTarget = window->GetTopWindowRoot();
     if (eventTarget) {
       eventTarget->RemoveEventListener(NS_LITERAL_STRING("MozUpdateWindowPos"),
@@ -1128,7 +1128,7 @@ TabParent::Deactivate()
 }
 
 NS_IMETHODIMP
-TabParent::Init(nsIDOMWindow *window)
+TabParent::Init(mozIDOMWindowProxy *window)
 {
   return NS_OK;
 }
@@ -1450,7 +1450,7 @@ bool TabParent::RecvDispatchWheelEvent(const mozilla::WidgetWheelEvent& aEvent)
   localEvent.widget = widget;
   localEvent.refPoint -= GetChildProcessOffset();
 
-  widget->DispatchAPZAwareEvent(&localEvent);
+  widget->DispatchInputEvent(&localEvent);
   return true;
 }
 
@@ -1999,7 +1999,7 @@ TabParent::RecvNotifyIMETextChange(const ContentCache& aContentCache,
   nsIMEUpdatePreference updatePreference = widget->GetIMEUpdatePreference();
   NS_ASSERTION(updatePreference.WantTextChange(),
                "Don't call Send/RecvNotifyIMETextChange without NOTIFY_TEXT_CHANGE");
-  MOZ_ASSERT(!aIMENotification.mTextChangeData.mCausedByComposition ||
+  MOZ_ASSERT(!aIMENotification.mTextChangeData.mCausedOnlyByComposition ||
                updatePreference.WantChangesCausedByComposition(),
     "The widget doesn't want text change notification caused by composition");
 #endif
@@ -2598,10 +2598,10 @@ TabParent::GetAuthPrompt(uint32_t aPromptReason, const nsIID& iid,
     do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDOMWindow> window;
+  nsCOMPtr<nsPIDOMWindowOuter> window;
   nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
   if (frame)
-    window = do_QueryInterface(frame->OwnerDoc()->GetWindow());
+    window = frame->OwnerDoc()->GetWindow();
 
   // Get an auth prompter for our window so that the parenting
   // of the dialogs works as it should when using tabs.
@@ -2798,10 +2798,11 @@ TabParent::RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
 bool
 TabParent::RecvZoomToRect(const uint32_t& aPresShellId,
                           const ViewID& aViewId,
-                          const CSSRect& aRect)
+                          const CSSRect& aRect,
+                          const uint32_t& aFlags)
 {
   if (RenderFrameParent* rfp = GetRenderFrame()) {
-    rfp->ZoomToRect(aPresShellId, aViewId, aRect);
+    rfp->ZoomToRect(aPresShellId, aViewId, aRect, aFlags);
   }
   return true;
 }
@@ -3241,8 +3242,8 @@ public:
   {
     return QueryInterface(uuid, result);
   }
-  NS_IMETHOD GetAssociatedWindow(nsIDOMWindow**) NO_IMPL
-  NS_IMETHOD GetTopWindow(nsIDOMWindow**) NO_IMPL
+  NS_IMETHOD GetAssociatedWindow(mozIDOMWindowProxy**) NO_IMPL
+  NS_IMETHOD GetTopWindow(mozIDOMWindowProxy**) NO_IMPL
   NS_IMETHOD GetTopFrameElement(nsIDOMElement** aElement) override
   {
     nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(mElement);
@@ -3448,7 +3449,7 @@ TabParent::GetShowInfo()
 }
 
 void
-TabParent::AudioChannelChangeNotification(nsPIDOMWindow* aWindow,
+TabParent::AudioChannelChangeNotification(nsPIDOMWindowOuter* aWindow,
                                           AudioChannel aAudioChannel,
                                           float aVolume,
                                           bool aMuted)
@@ -3457,7 +3458,7 @@ TabParent::AudioChannelChangeNotification(nsPIDOMWindow* aWindow,
     return;
   }
 
-  nsCOMPtr<nsPIDOMWindow> window = mFrameElement->OwnerDoc()->GetWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> window = mFrameElement->OwnerDoc()->GetWindow();
   while (window) {
     if (window == aWindow) {
       Unused << SendAudioChannelChangeNotification(static_cast<uint32_t>(aAudioChannel),
@@ -3465,7 +3466,7 @@ TabParent::AudioChannelChangeNotification(nsPIDOMWindow* aWindow,
       break;
     }
 
-    nsCOMPtr<nsPIDOMWindow> win = window->GetScriptableParent();
+    nsCOMPtr<nsPIDOMWindowOuter> win = window->GetScriptableParent();
     if (window == win) {
       break;
     }

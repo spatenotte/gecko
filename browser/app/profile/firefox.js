@@ -1119,6 +1119,9 @@ pref("toolkit.crashreporter.infoURL",
 // base URL for web-based support pages
 pref("app.support.baseURL", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/");
 
+// a11y conflicts with e10s support page
+pref("app.support.e10sAccessibilityUrl", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/accessibility-ppt");
+
 // base url for web-based feedback pages
 #ifdef MOZ_DEV_EDITION
 pref("app.feedback.baseURL", "https://input.mozilla.org/%LOCALE%/feedback/firefoxdev/%VERSION%/");
@@ -1309,6 +1312,12 @@ pref("services.sync.prefs.sync.signon.rememberSignons", true);
 pref("services.sync.prefs.sync.spellchecker.dictionary", true);
 pref("services.sync.prefs.sync.xpinstall.whitelist.required", true);
 
+#ifdef NIGHTLY_BUILD
+pref("services.sync.syncedTabsUIRefresh", true);
+#else
+pref("services.sync.syncedTabsUIRefresh", false);
+#endif
+
 // Developer edition preferences
 #ifdef MOZ_DEV_EDITION
 sticky_pref("lightweightThemes.selectedThemeID", "firefox-devedition@mozilla.org");
@@ -1394,8 +1403,9 @@ pref("dom.identity.enabled", false);
 // Block insecure active content on https pages
 pref("security.mixed_content.block_active_content", true);
 
-// Show degraded UI for http pages with password fields
-#ifdef NIGHTLY_BUILD
+// Show degraded UI for http pages with password fields.
+// Only for Nightly and Dev Edition for not, not for beta or release.
+#ifndef RELEASE_BUILD
 pref("security.insecure_password.ui.enabled", true);
 #else
 pref("security.insecure_password.ui.enabled", false);
@@ -1404,6 +1414,8 @@ pref("security.insecure_password.ui.enabled", false);
 // 1 = allow MITM for certificate pinning checks.
 pref("security.cert_pinning.enforcement_level", 1);
 
+// NB: Changes to this pref affect CERT_CHAIN_SHA1_POLICY_STATUS telemetry.
+// See the comment in CertVerifier.cpp.
 // 0 = allow SHA-1
 pref("security.pki.sha1_enforcement_level", 0);
 
@@ -1448,14 +1460,14 @@ pref("browser.uiCustomization.debug", false);
 pref("browser.uiCustomization.state", "");
 
 // The remote content URL shown for FxA signup. Must use HTTPS.
-pref("identity.fxaccounts.remote.signup.uri", "https://accounts.firefox.com/signup?service=sync&context=fx_desktop_v2");
+pref("identity.fxaccounts.remote.signup.uri", "https://accounts.firefox.com/signup?service=sync&context=fx_desktop_v3");
 
 // The URL where remote content that forces re-authentication for Firefox Accounts
 // should be fetched.  Must use HTTPS.
-pref("identity.fxaccounts.remote.force_auth.uri", "https://accounts.firefox.com/force_auth?service=sync&context=fx_desktop_v2");
+pref("identity.fxaccounts.remote.force_auth.uri", "https://accounts.firefox.com/force_auth?service=sync&context=fx_desktop_v3");
 
 // The remote content URL shown for signin in. Must use HTTPS.
-pref("identity.fxaccounts.remote.signin.uri", "https://accounts.firefox.com/signin?service=sync&context=fx_desktop_v2");
+pref("identity.fxaccounts.remote.signin.uri", "https://accounts.firefox.com/signin?service=sync&context=fx_desktop_v3");
 
 // The remote content URL where FxAccountsWebChannel messages originate.
 pref("identity.fxaccounts.remote.webchannel.uri", "https://accounts.firefox.com/");
@@ -1463,7 +1475,7 @@ pref("identity.fxaccounts.remote.webchannel.uri", "https://accounts.firefox.com/
 // The URL we take the user to when they opt to "manage" their Firefox Account.
 // Note that this will always need to be in the same TLD as the
 // "identity.fxaccounts.remote.signup.uri" pref.
-pref("identity.fxaccounts.settings.uri", "https://accounts.firefox.com/settings");
+pref("identity.fxaccounts.settings.uri", "https://accounts.firefox.com/settings?service=sync&context=fx_desktop_v3");
 
 // The remote URL of the FxA Profile Server
 pref("identity.fxaccounts.remote.profile.uri", "https://profile.accounts.firefox.com/v1");
@@ -1534,8 +1546,6 @@ pref("browser.translation.engine", "bing");
 // Telemetry settings.
 // Determines if Telemetry pings can be archived locally.
 pref("toolkit.telemetry.archive.enabled", true);
-// Whether we enable opt-out Telemetry for a sample of the release population.
-pref("toolkit.telemetry.optoutSample", true);
 
 // Telemetry experiments settings.
 pref("experiments.enabled", true);
@@ -1586,6 +1596,9 @@ pref("browser.defaultbrowser.notificationbar", false);
 // the hang monitor.
 pref("dom.ipc.cpow.timeout", 500);
 
+// Causes access on unsafe CPOWs from browser code to throw by default.
+pref("dom.ipc.cpows.forbid-unsafe-from-browser", true);
+
 // Enable e10s hang monitoring (slow script checking and plugin hang
 // detection).
 pref("dom.ipc.processHangMonitor", true);
@@ -1628,3 +1641,5 @@ pref("media.webspeech.synth.enabled", true);
 #endif
 
 pref("browser.esedbreader.loglevel", "Error");
+
+pref("browser.laterrun.enabled", false);

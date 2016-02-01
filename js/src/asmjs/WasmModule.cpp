@@ -351,8 +351,8 @@ Import::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 }
 
 CodeRange::CodeRange(Kind kind, Offsets offsets)
-  : nameIndex_(0),
-    lineNumber_(0),
+  : funcIndex_(0),
+    funcLineOrBytecode_(0),
     begin_(offsets.begin),
     profilingReturn_(0),
     end_(offsets.end)
@@ -365,8 +365,8 @@ CodeRange::CodeRange(Kind kind, Offsets offsets)
 }
 
 CodeRange::CodeRange(Kind kind, ProfilingOffsets offsets)
-  : nameIndex_(0),
-    lineNumber_(0),
+  : funcIndex_(0),
+    funcLineOrBytecode_(0),
     begin_(offsets.begin),
     profilingReturn_(offsets.profilingReturn),
     end_(offsets.end)
@@ -379,9 +379,9 @@ CodeRange::CodeRange(Kind kind, ProfilingOffsets offsets)
     MOZ_ASSERT(u.kind_ == ImportJitExit || u.kind_ == ImportInterpExit || u.kind_ == Interrupt);
 }
 
-CodeRange::CodeRange(uint32_t nameIndex, uint32_t lineNumber, FuncOffsets offsets)
-  : nameIndex_(nameIndex),
-    lineNumber_(lineNumber)
+CodeRange::CodeRange(uint32_t funcIndex, uint32_t funcLineOrBytecode, FuncOffsets offsets)
+  : funcIndex_(funcIndex),
+    funcLineOrBytecode_(funcLineOrBytecode)
 {
     PodZero(&u);  // zero padding for Valgrind
     u.kind_ = Function;
@@ -401,69 +401,60 @@ CodeRange::CodeRange(uint32_t nameIndex, uint32_t lineNumber, FuncOffsets offset
     end_ = offsets.end;
 }
 
-static inline size_t StringLength(const char *s) { return s ? strlen(s) : 0; }
-static inline size_t StringLength(const char16_t *s) { return s ? js_strlen(s) : 0; }
-
-template <class CharT>
-size_t
-CacheableUniquePtr<CharT>::serializedSize() const
+static size_t
+NullableStringLength(const char* chars)
 {
-    return sizeof(uint32_t) + StringLength(this->get()) * sizeof(CharT);
+    return chars ? strlen(chars) : 0;
 }
 
-template <class CharT>
-uint8_t*
-CacheableUniquePtr<CharT>::serialize(uint8_t* cursor) const
+size_t
+CacheableChars::serializedSize() const
 {
-    uint32_t length = StringLength(this->get());
+    return sizeof(uint32_t) + NullableStringLength(get());
+}
+
+uint8_t*
+CacheableChars::serialize(uint8_t* cursor) const
+{
+    uint32_t length = NullableStringLength(get());
     cursor = WriteBytes(cursor, &length, sizeof(uint32_t));
-    cursor = WriteBytes(cursor, this->get(), length * sizeof(CharT));
+    cursor = WriteBytes(cursor, get(), length);
     return cursor;
 }
 
-template <class CharT>
 const uint8_t*
-CacheableUniquePtr<CharT>::deserialize(ExclusiveContext* cx, const uint8_t* cursor)
+CacheableChars::deserialize(ExclusiveContext* cx, const uint8_t* cursor)
 {
     uint32_t length;
     cursor = ReadBytes(cursor, &length, sizeof(uint32_t));
 
-    this->reset(cx->pod_calloc<CharT>(length + 1));
-    if (!this->get())
+    reset(cx->pod_calloc<char>(length + 1));
+    if (!get())
         return nullptr;
 
-    cursor = ReadBytes(cursor, this->get(), length * sizeof(CharT));
+    cursor = ReadBytes(cursor, get(), length);
     return cursor;
 }
 
-template <class CharT>
 bool
-CacheableUniquePtr<CharT>::clone(JSContext* cx, CacheableUniquePtr* out) const
+CacheableChars::clone(JSContext* cx, CacheableChars* out) const
 {
-    uint32_t length = StringLength(this->get());
+    uint32_t length = NullableStringLength(get());
 
-    UPtr chars(cx->pod_calloc<CharT>(length + 1));
+    UniqueChars chars(cx->pod_calloc<char>(length + 1));
     if (!chars)
         return false;
 
-    PodCopy(chars.get(), this->get(), length);
+    PodCopy(chars.get(), get(), length);
 
     *out = Move(chars);
     return true;
 }
 
-template <class CharT>
 size_t
-CacheableUniquePtr<CharT>::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
+CacheableChars::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 {
-    return mallocSizeOf(this->get());
-}
-
-namespace js {
-namespace wasm {
-template struct CacheableUniquePtr<char>;
-template struct CacheableUniquePtr<char16_t>;
-}
+    return mallocSizeOf(get());
 }
 
 size_t
@@ -518,9 +509,8 @@ ModuleData::serializedSize() const
            SerializedPodVectorSize(heapAccesses) +
            SerializedPodVectorSize(codeRanges) +
            SerializedPodVectorSize(callSites) +
-           SerializedVectorSize(funcNames) +
-           filename.serializedSize() +
-           displayURL.serializedSize();
+           SerializedVectorSize(prettyFuncNames) +
+           filename.serializedSize();
 }
 
 uint8_t*
@@ -533,9 +523,8 @@ ModuleData::serialize(uint8_t* cursor) const
     cursor = SerializePodVector(cursor, heapAccesses);
     cursor = SerializePodVector(cursor, codeRanges);
     cursor = SerializePodVector(cursor, callSites);
-    cursor = SerializeVector(cursor, funcNames);
+    cursor = SerializeVector(cursor, prettyFuncNames);
     cursor = filename.serialize(cursor);
-    cursor = displayURL.serialize(cursor);
     return cursor;
 }
 
@@ -554,9 +543,8 @@ ModuleData::deserialize(ExclusiveContext* cx, const uint8_t* cursor)
     (cursor = DeserializePodVector(cx, cursor, &heapAccesses)) &&
     (cursor = DeserializePodVector(cx, cursor, &codeRanges)) &&
     (cursor = DeserializePodVector(cx, cursor, &callSites)) &&
-    (cursor = DeserializeVector(cx, cursor, &funcNames)) &&
-    (cursor = filename.deserialize(cx, cursor)) &&
-    (cursor = displayURL.deserialize(cx, cursor));
+    (cursor = DeserializeVector(cx, cursor, &prettyFuncNames)) &&
+    (cursor = filename.deserialize(cx, cursor));
     return cursor;
 }
 
@@ -575,9 +563,8 @@ ModuleData::clone(JSContext* cx, ModuleData* out) const
            ClonePodVector(cx, heapAccesses, &out->heapAccesses) &&
            ClonePodVector(cx, codeRanges, &out->codeRanges) &&
            ClonePodVector(cx, callSites, &out->callSites) &&
-           CloneVector(cx, funcNames, &out->funcNames) &&
-           filename.clone(cx, &out->filename) &&
-           displayURL.clone(cx, &out->displayURL);
+           CloneVector(cx, prettyFuncNames, &out->prettyFuncNames) &&
+           filename.clone(cx, &out->filename);
 }
 
 size_t
@@ -589,9 +576,8 @@ ModuleData::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
            heapAccesses.sizeOfExcludingThis(mallocSizeOf) +
            codeRanges.sizeOfExcludingThis(mallocSizeOf) +
            callSites.sizeOfExcludingThis(mallocSizeOf) +
-           funcNames.sizeOfExcludingThis(mallocSizeOf) +
-           filename.sizeOfExcludingThis(mallocSizeOf) +
-           displayURL.sizeOfExcludingThis(mallocSizeOf);
+           prettyFuncNames.sizeOfExcludingThis(mallocSizeOf) +
+           filename.sizeOfExcludingThis(mallocSizeOf);
 }
 
 uint8_t*
@@ -694,41 +680,50 @@ Module::despecializeFromHeap(ArrayBufferObjectMaybeShared* heap)
     rawHeapPtr() = nullptr;
 }
 
-void
+bool
 Module::sendCodeRangesToProfiler(JSContext* cx)
 {
+    bool enabled = false;
 #ifdef JS_ION_PERF
-    if (PerfFuncEnabled()) {
-        for (const CodeRange& codeRange : module_->codeRanges) {
-            if (!codeRange.isFunction())
-                continue;
-
-            uintptr_t start = uintptr_t(code() + codeRange.begin());
-            uintptr_t end = uintptr_t(code() + codeRange.end());
-            uintptr_t size = end - start;
-            const char* file = module_->filename.get();
-            unsigned line = codeRange.funcLineNumber();
-            unsigned column = 0;
-            const char* name = module_->funcNames[codeRange.funcNameIndex()].get();
-
-            writePerfSpewerAsmJSFunctionMap(start, size, file, line, column, name);
-        }
-    }
+    enabled |= PerfFuncEnabled();
 #endif
 #ifdef MOZ_VTUNE
-    if (IsVTuneProfilingActive()) {
-        for (const CodeRange& codeRange : module_->codeRanges) {
-            if (!codeRange.isFunction())
-                continue;
+    enabled |= IsVTuneProfilingActive();
+#endif
+    if (!enabled)
+        return true;
 
-            uintptr_t start = uintptr_t(code() + codeRange.begin());
-            uintptr_t end = uintptr_t(code() + codeRange.end());
-            uintptr_t size = end - start;
-            const char* name = module_->funcNames[codeRange.funcNameIndex()].get();
+    for (const CodeRange& codeRange : module_->codeRanges) {
+        if (!codeRange.isFunction())
+            continue;
 
+        uintptr_t start = uintptr_t(code() + codeRange.begin());
+        uintptr_t end = uintptr_t(code() + codeRange.end());
+        uintptr_t size = end - start;
+
+        UniqueChars owner;
+        const char* name = getFuncName(cx, codeRange.funcIndex(), &owner);
+        if (!name)
+            return false;
+
+        // Avoid "unused" warnings
+        (void)start;
+        (void)size;
+        (void)name;
+
+#ifdef JS_ION_PERF
+        if (PerfFuncEnabled()) {
+            const char* file = module_->filename.get();
+            unsigned line = codeRange.funcLineOrBytecode();
+            unsigned column = 0;
+            writePerfSpewerAsmJSFunctionMap(start, size, file, line, column, name);
+        }
+#endif
+#ifdef MOZ_VTUNE
+        if (IsVTuneProfilingActive()) {
             unsigned method_id = iJIT_GetNewMethodID();
             if (method_id == 0)
-                return;
+                return true;
             iJIT_Method_Load method;
             method.method_id = method_id;
             method.method_name = const_cast<char*>(name);
@@ -741,8 +736,10 @@ Module::sendCodeRangesToProfiler(JSContext* cx)
             method.source_file_name = nullptr;
             iJIT_NotifyEvent(iJVM_EVENT_TYPE_METHOD_LOAD_FINISHED, (void*)&method);
         }
-    }
 #endif
+    }
+
+    return true;
 }
 
 bool
@@ -759,21 +756,29 @@ Module::setProfilingEnabled(JSContext* cx, bool enabled)
     // do it now since, once we start sampling, we'll be in a signal-handing
     // context where we cannot malloc.
     if (enabled) {
-        if (!funcLabels_.resize(module_->funcNames.length())) {
+        if (!funcLabels_.resize(module_->numFuncs)) {
             ReportOutOfMemory(cx);
             return false;
         }
         for (const CodeRange& codeRange : module_->codeRanges) {
             if (!codeRange.isFunction())
                 continue;
-            unsigned lineno = codeRange.funcLineNumber();
-            const char* name = module_->funcNames[codeRange.funcNameIndex()].get();
-            UniqueChars label(JS_smprintf("%s (%s:%u)", name, module_->filename.get(), lineno));
+
+            UniqueChars owner;
+            const char* funcName = getFuncName(cx, codeRange.funcIndex(), &owner);
+            if (!funcName)
+                return false;
+
+            UniqueChars label(JS_smprintf("%s (%s:%u)",
+                                          funcName,
+                                          module_->filename.get(),
+                                          codeRange.funcLineOrBytecode()));
             if (!label) {
                 ReportOutOfMemory(cx);
                 return false;
             }
-            funcLabels_[codeRange.funcNameIndex()] = Move(label);
+
+            funcLabels_[codeRange.funcIndex()] = Move(label);
         }
     } else {
         funcLabels_.clear();
@@ -825,7 +830,6 @@ Module::clone(JSContext* cx, const StaticLinkData& link, Module* out) const
     // constructed. This function should clone the rest.
     MOZ_ASSERT(out->module_);
 
-    out->isAsmJS_ = isAsmJS_;
     out->profilingEnabled_ = profilingEnabled_;
 
     if (!CloneVector(cx, funcLabels_, &out->funcLabels_))
@@ -854,9 +858,8 @@ Module::clone(JSContext* cx, const StaticLinkData& link, Module* out) const
 }
 
 
-Module::Module(UniqueModuleData module, AsmJSBool isAsmJS)
+Module::Module(UniqueModuleData module)
   : module_(Move(module)),
-    isAsmJS_(bool(isAsmJS)),
     staticallyLinked_(false),
     interrupt_(nullptr),
     outOfBounds_(nullptr),
@@ -876,7 +879,7 @@ Module::~Module()
     }
 }
 
-void
+/* virtual */ void
 Module::trace(JSTracer* trc)
 {
     for (const Import& import : imports()) {
@@ -886,6 +889,34 @@ Module::trace(JSTracer* trc)
 
     if (heap_)
         TraceEdge(trc, &heap_, "wasm buffer");
+}
+
+/* virtual */ void
+Module::addSizeOfMisc(MallocSizeOf mallocSizeOf, size_t* code, size_t* data)
+{
+    *code += codeBytes();
+    *data += mallocSizeOf(this) +
+             globalBytes() +
+             mallocSizeOf(module_.get()) +
+             module_->sizeOfExcludingThis(mallocSizeOf) +
+             funcPtrTables_.sizeOfExcludingThis(mallocSizeOf) +
+             SizeOfVectorExcludingThis(funcLabels_, mallocSizeOf);
+}
+
+/* virtual */ bool
+Module::mutedErrors() const
+{
+    // WebAssembly code is always CORS-same-origin and so errors are never
+    // muted. For asm.js, muting depends on the ScriptSource containing the
+    // asm.js so this function is overridden by AsmJSModule.
+    return false;
+}
+
+/* virtual */ const char16_t*
+Module::displayURL() const
+{
+    // WebAssembly code does not have `//# sourceURL`.
+    return nullptr;
 }
 
 bool
@@ -1035,10 +1066,99 @@ Module::staticallyLink(ExclusiveContext* cx, const StaticLinkData& linkData)
     return true;
 }
 
-bool
-Module::dynamicallyLink(JSContext* cx, Handle<ArrayBufferObjectMaybeShared*> heap,
-                        Handle<FunctionVector> importArgs)
+static bool
+WasmCall(JSContext* cx, unsigned argc, Value* vp)
 {
+    CallArgs args = CallArgsFromVp(argc, vp);
+    RootedFunction callee(cx, &args.callee().as<JSFunction>());
+
+    Module& module = ExportedFunctionToModuleObject(callee)->module();
+    uint32_t exportIndex = ExportedFunctionToIndex(callee);
+
+    return module.callExport(cx, exportIndex, args);
+}
+
+static JSFunction*
+NewExportedFunction(JSContext* cx, Handle<WasmModuleObject*> moduleObj, const ExportMap& exportMap,
+                    uint32_t exportIndex)
+{
+    unsigned numArgs = moduleObj->module().exports()[exportIndex].sig().args().length();
+
+    const char* chars = exportMap.exportNames[exportIndex].get();
+    RootedAtom name(cx, AtomizeUTF8Chars(cx, chars, strlen(chars)));
+    if (!name)
+        return nullptr;
+
+    JSFunction* fun = NewNativeConstructor(cx, WasmCall, numArgs, name,
+                                           gc::AllocKind::FUNCTION_EXTENDED, GenericObject,
+                                           JSFunction::ASMJS_CTOR);
+    if (!fun)
+        return nullptr;
+
+    fun->setExtendedSlot(FunctionExtended::WASM_MODULE_SLOT, ObjectValue(*moduleObj));
+    fun->setExtendedSlot(FunctionExtended::WASM_EXPORT_INDEX_SLOT, Int32Value(exportIndex));
+    return fun;
+}
+
+static bool
+CreateExportObject(JSContext* cx, Handle<WasmModuleObject*> moduleObj, const ExportMap& exportMap,
+                   const ExportVector& exports, MutableHandleObject exportObj)
+{
+    MOZ_ASSERT(exportMap.exportNames.length() == exports.length());
+    MOZ_ASSERT(exportMap.fieldNames.length() == exportMap.fieldsToExports.length());
+
+    for (size_t fieldIndex = 0; fieldIndex < exportMap.fieldNames.length(); fieldIndex++) {
+        const char* fieldName = exportMap.fieldNames[fieldIndex].get();
+        if (!*fieldName) {
+            MOZ_ASSERT(!exportObj);
+            uint32_t exportIndex = exportMap.fieldsToExports[fieldIndex];
+            exportObj.set(NewExportedFunction(cx, moduleObj, exportMap, exportIndex));
+            if (!exportObj)
+                return false;
+            break;
+        }
+    }
+
+    Rooted<ValueVector> vals(cx, ValueVector(cx));
+    for (size_t exportIndex = 0; exportIndex < exports.length(); exportIndex++) {
+        JSFunction* fun = NewExportedFunction(cx, moduleObj, exportMap, exportIndex);
+        if (!fun || !vals.append(ObjectValue(*fun)))
+            return false;
+    }
+
+    if (!exportObj) {
+        exportObj.set(JS_NewPlainObject(cx));
+        if (!exportObj)
+            return false;
+    }
+
+    for (size_t fieldIndex = 0; fieldIndex < exportMap.fieldNames.length(); fieldIndex++) {
+        const char* fieldName = exportMap.fieldNames[fieldIndex].get();
+        if (!*fieldName)
+            continue;
+
+        JSAtom* atom = AtomizeUTF8Chars(cx, fieldName, strlen(fieldName));
+        if (!atom)
+            return false;
+
+        RootedId id(cx, AtomToId(atom));
+        HandleValue val = vals[exportMap.fieldsToExports[fieldIndex]];
+        if (!JS_DefinePropertyById(cx, exportObj, id, val, JSPROP_ENUMERATE))
+            return false;
+    }
+
+    return true;
+}
+
+bool
+Module::dynamicallyLink(JSContext* cx,
+                        Handle<WasmModuleObject*> moduleObj,
+                        Handle<ArrayBufferObjectMaybeShared*> heap,
+                        Handle<FunctionVector> importArgs,
+                        const ExportMap& exportMap,
+                        MutableHandleObject exportObj)
+{
+    MOZ_ASSERT(this == &moduleObj->module());
     MOZ_ASSERT(staticallyLinked_);
     MOZ_ASSERT(!dynamicallyLinked_);
     dynamicallyLinked_ = true;
@@ -1070,94 +1190,10 @@ Module::dynamicallyLink(JSContext* cx, Handle<ArrayBufferObjectMaybeShared*> hea
         return false;
     }
 
-    sendCodeRangesToProfiler(cx);
-    return true;
-}
+    if (!sendCodeRangesToProfiler(cx))
+        return false;
 
-static bool
-WasmCall(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    RootedFunction callee(cx, &args.callee().as<JSFunction>());
-
-    Module& module = ExportedFunctionToModuleObject(callee)->module();
-    uint32_t exportIndex = ExportedFunctionToIndex(callee);
-
-    return module.callExport(cx, exportIndex, args);
-}
-
-static JSFunction*
-NewExportedFunction(JSContext* cx, Handle<WasmModuleObject*> moduleObj, const ExportMap& map,
-                    uint32_t exportIndex)
-{
-    unsigned numArgs = moduleObj->module().exports()[exportIndex].sig().args().length();
-
-    const char* chars = map.exportNames[exportIndex].get();
-    RootedAtom name(cx, AtomizeUTF8Chars(cx, chars, strlen(chars)));
-    if (!name)
-        return nullptr;
-
-    JSFunction* fun = NewNativeConstructor(cx, WasmCall, numArgs, name,
-                                           gc::AllocKind::FUNCTION_EXTENDED, GenericObject,
-                                           JSFunction::ASMJS_CTOR);
-    if (!fun)
-        return nullptr;
-
-    fun->setExtendedSlot(FunctionExtended::WASM_MODULE_SLOT, ObjectValue(*moduleObj));
-    fun->setExtendedSlot(FunctionExtended::WASM_EXPORT_INDEX_SLOT, Int32Value(exportIndex));
-    return fun;
-}
-
-bool
-Module::createExportObject(JSContext* cx, Handle<WasmModuleObject*> moduleObj,
-                           const ExportMap& map, MutableHandleObject exportObj)
-{
-    MOZ_ASSERT(this == &moduleObj->module());
-    MOZ_ASSERT(map.exportNames.length() == exports().length());
-    MOZ_ASSERT(map.fieldNames.length() == map.fieldsToExports.length());
-
-    for (size_t fieldIndex = 0; fieldIndex < map.fieldNames.length(); fieldIndex++) {
-        const char* fieldName = map.fieldNames[fieldIndex].get();
-        if (!*fieldName) {
-            MOZ_ASSERT_IF(isAsmJS(), exports().length() == 1);
-            MOZ_ASSERT(!exportObj);
-            uint32_t exportIndex = map.fieldsToExports[fieldIndex];
-            exportObj.set(NewExportedFunction(cx, moduleObj, map, exportIndex));
-            if (!exportObj)
-                return false;
-            break;
-        }
-    }
-
-    Rooted<ValueVector> vals(cx, ValueVector(cx));
-    for (size_t exportIndex = 0; exportIndex < exports().length(); exportIndex++) {
-        JSFunction* fun = NewExportedFunction(cx, moduleObj, map, exportIndex);
-        if (!fun || !vals.append(ObjectValue(*fun)))
-            return false;
-    }
-
-    if (!exportObj) {
-        exportObj.set(JS_NewPlainObject(cx));
-        if (!exportObj)
-            return false;
-    }
-
-    for (size_t fieldIndex = 0; fieldIndex < map.fieldNames.length(); fieldIndex++) {
-        const char* fieldName = map.fieldNames[fieldIndex].get();
-        if (!*fieldName)
-            continue;
-
-        JSAtom* atom = AtomizeUTF8Chars(cx, fieldName, strlen(fieldName));
-        if (!atom)
-            return false;
-
-        RootedId id(cx, AtomToId(atom));
-        HandleValue val = vals[map.fieldsToExports[fieldIndex]];
-        if (!JS_DefinePropertyById(cx, exportObj, id, val, JSPROP_ENUMERATE))
-            return false;
-    }
-
-    return true;
+    return CreateExportObject(cx, moduleObj, exportMap, exports(), exportObj);
 }
 
 SharedMem<uint8_t*>
@@ -1257,6 +1293,8 @@ Module::callExport(JSContext* cx, uint32_t exportIndex, CallArgs args)
             memcpy(&coercedArgs[i], simd.asInt32x4(), Simd128DataSize);
             break;
           }
+          case ValType::Limit:
+            MOZ_CRASH("Limit");
         }
     }
 
@@ -1319,6 +1357,8 @@ Module::callExport(JSContext* cx, uint32_t exportIndex, CallArgs args)
             return false;
         args.rval().set(ObjectValue(*simdObj));
         break;
+      case ExprType::Limit:
+        MOZ_CRASH("Limit");
     }
 
     return true;
@@ -1382,6 +1422,7 @@ Module::callImport(JSContext* cx, uint32_t importIndex, unsigned argc, const Val
           case ValType::I32x4: MOZ_CRASH("NYI");
           case ValType::F32x4: MOZ_CRASH("NYI");
           case ValType::B32x4: MOZ_CRASH("NYI");
+          case ValType::Limit: MOZ_CRASH("Limit");
         }
         if (!TypeScript::ArgTypes(script, i)->hasType(type))
             return true;
@@ -1397,23 +1438,33 @@ Module::callImport(JSContext* cx, uint32_t importIndex, unsigned argc, const Val
 }
 
 const char*
+Module::prettyFuncName(uint32_t funcIndex) const
+{
+    return module_->prettyFuncNames[funcIndex].get();
+}
+
+const char*
+Module::getFuncName(JSContext* cx, uint32_t funcIndex, UniqueChars* owner) const
+{
+    if (!module_->prettyFuncNames.empty())
+        return prettyFuncName(funcIndex);
+
+    char* chars = JS_smprintf("wasm-function[%u]", funcIndex);
+    if (!chars) {
+        ReportOutOfMemory(cx);
+        return nullptr;
+    }
+
+    owner->reset(chars);
+    return chars;
+}
+
+const char*
 Module::profilingLabel(uint32_t funcIndex) const
 {
     MOZ_ASSERT(dynamicallyLinked_);
     MOZ_ASSERT(profilingEnabled_);
     return funcLabels_[funcIndex].get();
-}
-
-void
-Module::addSizeOfMisc(MallocSizeOf mallocSizeOf, size_t* code, size_t* data)
-{
-    *code += codeBytes();
-    *data += mallocSizeOf(this) +
-             globalBytes() +
-             mallocSizeOf(module_.get()) +
-             module_->sizeOfExcludingThis(mallocSizeOf) +
-             funcPtrTables_.sizeOfExcludingThis(mallocSizeOf) +
-             SizeOfVectorExcludingThis(funcLabels_, mallocSizeOf);
 }
 
 const Class WasmModuleObject::class_ = {

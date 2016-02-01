@@ -54,7 +54,7 @@ class nsIFrame;
 class nsStyleCoord;
 class nsStyleCorners;
 class gfxContext;
-class nsPIDOMWindow;
+class nsPIDOMWindowOuter;
 class imgIRequest;
 class nsIDocument;
 struct gfxPoint;
@@ -147,6 +147,7 @@ public:
   typedef mozilla::CSSPoint CSSPoint;
   typedef mozilla::CSSSize CSSSize;
   typedef mozilla::CSSIntSize CSSIntSize;
+  typedef mozilla::CSSRect CSSRect;
   typedef mozilla::ScreenMargin ScreenMargin;
   typedef mozilla::LayoutDeviceIntSize LayoutDeviceIntSize;
 
@@ -1971,7 +1972,7 @@ public:
    * complicated than it ought to be in multi-monitor situations.
    */
   static nsDeviceContext*
-  GetDeviceContextForScreenInfo(nsPIDOMWindow* aWindow);
+  GetDeviceContextForScreenInfo(nsPIDOMWindowOuter* aWindow);
 
   /**
    * Some frames with 'position: fixed' (nsStylePosition::mDisplay ==
@@ -2769,6 +2770,19 @@ public:
    * Returns true if the given frame is a scrollframe and it has snap points.
    */
   static bool IsScrollFrameWithSnapping(nsIFrame* aFrame);
+  /**
+   * Calculate the bounding rect of |aContent|, relative to the origin
+   * of the scrolled content of |aRootScrollFrame|.
+   * Where the element is contained inside a scrollable subframe, the
+   * bounding rect is clipped to the bounds of the subframe.
+   */
+  static CSSRect GetBoundingContentRect(const nsIContent* aContent,
+                                        const nsIScrollableFrame* aRootScrollFrame);
+
+  /**
+   * Returns the first ancestor who is a float containing block.
+   */
+  static nsBlockFrame* GetFloatContainingBlock(nsIFrame* aFrame);
 
 private:
   static uint32_t sFontSizeInflationEmPerLine;

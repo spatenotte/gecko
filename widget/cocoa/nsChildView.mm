@@ -3753,13 +3753,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
   RefPtr<gfxContext> targetContext = new gfxContext(dt);
 
   // Set up the clip region.
-  LayoutDeviceIntRegion::RectIterator iter(region);
   targetContext->NewPath();
-  for (;;) {
-    const LayoutDeviceIntRect* r = iter.Next();
-    if (!r)
-      break;
-    targetContext->Rectangle(gfxRect(r->x, r->y, r->width, r->height));
+  for (auto iter = region.RectIter(); !iter.Done(); iter.Next()) {
+    const LayoutDeviceIntRect& r = iter.Get();
+    targetContext->Rectangle(gfxRect(r.x, r.y, r.width, r.height));
   }
   targetContext->Clip();
 
@@ -4541,7 +4538,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   else
     geckoEvent.button = WidgetMouseEvent::eLeftButton;
 
-  mGeckoChild->DispatchAPZAwareEvent(&geckoEvent);
+  mGeckoChild->DispatchInputEvent(&geckoEvent);
   mBlockedLastMouseDown = NO;
 
   // XXX maybe call markedTextSelectionChanged:client: here?
@@ -4568,7 +4565,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   // This might destroy our widget (and null out mGeckoChild).
   bool defaultPrevented =
-    (mGeckoChild->DispatchAPZAwareEvent(&geckoEvent) == nsEventStatus_eConsumeNoDefault);
+    (mGeckoChild->DispatchInputEvent(&geckoEvent) == nsEventStatus_eConsumeNoDefault);
 
   // Check to see if we are double-clicking in the titlebar.
   CGFloat locationInTitlebar = [[self window] frame].size.height - [theEvent locationInWindow].y;
@@ -4632,13 +4629,8 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
                        CGRect (^aRectConverter)(const LayoutDeviceIntRect&))
 {
   nsTArray<CGRect> rects;
-  LayoutDeviceIntRegion::RectIterator iter(aRegion);
-  for (;;) {
-    const LayoutDeviceIntRect* r = iter.Next();
-    if (!r) {
-      break;
-    }
-    rects.AppendElement(aRectConverter(*r));
+  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+    rects.AppendElement(aRectConverter(iter.Get()));
   }
 
   CGSRegionObj region;
@@ -4694,7 +4686,7 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
                               WidgetMouseEvent::eReal);
   [self convertCocoaMouseEvent:theEvent toGeckoEvent:&geckoEvent];
 
-  mGeckoChild->DispatchAPZAwareEvent(&geckoEvent);
+  mGeckoChild->DispatchInputEvent(&geckoEvent);
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -4740,7 +4732,7 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
   geckoEvent.button = WidgetMouseEvent::eRightButton;
   geckoEvent.clickCount = [theEvent clickCount];
 
-  mGeckoChild->DispatchAPZAwareEvent(&geckoEvent);
+  mGeckoChild->DispatchInputEvent(&geckoEvent);
   if (!mGeckoChild)
     return;
 
@@ -4764,7 +4756,7 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
   geckoEvent.clickCount = [theEvent clickCount];
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
-  mGeckoChild->DispatchAPZAwareEvent(&geckoEvent);
+  mGeckoChild->DispatchInputEvent(&geckoEvent);
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -4848,7 +4840,7 @@ static int32_t RoundUp(double aDouble)
   WidgetWheelEvent wheelEvent(true, msg, mGeckoChild);
   [self convertCocoaMouseWheelEvent:theEvent toGeckoEvent:&wheelEvent];
   mExpectingWheelStop = (msg == eWheelOperationStart);
-  mGeckoChild->DispatchAPZAwareEvent(wheelEvent.AsInputEvent());
+  mGeckoChild->DispatchInputEvent(wheelEvent.AsInputEvent());
 }
 
 - (void)sendWheelCondition:(BOOL)condition
@@ -4975,7 +4967,8 @@ PanGestureTypeForEvent(NSEvent* aEvent)
                                 ScrollWheelInput::SCROLLDELTA_PIXEL,
                                 position,
                                 preciseDelta.x,
-                                preciseDelta.y);
+                                preciseDelta.y,
+                                false);
     wheelEvent.mLineOrPageDeltaX = lineOrPageDeltaX;
     wheelEvent.mLineOrPageDeltaY = lineOrPageDeltaY;
     wheelEvent.mIsMomentum = nsCocoaUtils::IsMomentumScrollEvent(theEvent);
@@ -4990,7 +4983,8 @@ PanGestureTypeForEvent(NSEvent* aEvent)
                                 ScrollWheelInput::SCROLLDELTA_LINE,
                                 position,
                                 lineOrPageDeltaX,
-                                lineOrPageDeltaY);
+                                lineOrPageDeltaY,
+                                false);
     wheelEvent.mLineOrPageDeltaX = lineOrPageDeltaX;
     wheelEvent.mLineOrPageDeltaY = lineOrPageDeltaY;
     mGeckoChild->DispatchAPZWheelInputEvent(wheelEvent, false);

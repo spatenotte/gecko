@@ -715,20 +715,20 @@ addEventListener("pageshow", function(event) {
 var PageMetadataMessenger = {
   init() {
     addMessageListener("PageMetadata:GetPageData", this);
-    addMessageListener("PageMetadata:GetMicrodata", this);
+    addMessageListener("PageMetadata:GetMicroformats", this);
   },
   receiveMessage(message) {
     switch(message.name) {
       case "PageMetadata:GetPageData": {
-        let result = PageMetadata.getData(content.document);
+        let target = message.objects.target;
+        let result = PageMetadata.getData(content.document, target);
         sendAsyncMessage("PageMetadata:PageDataResult", result);
         break;
       }
-
-      case "PageMetadata:GetMicrodata": {
+      case "PageMetadata:GetMicroformats": {
         let target = message.objects.target;
-        let result = PageMetadata.getMicrodata(content.document, target);
-        sendAsyncMessage("PageMetadata:MicrodataResult", result);
+        let result = PageMetadata.getMicroformats(content.document, target);
+        sendAsyncMessage("PageMetadata:MicroformatsResult", result);
         break;
       }
     }
@@ -1046,14 +1046,31 @@ var PageInfoListener = {
       document = content.document;
     }
 
+    let imageElement = message.objects.imageElement;
+
     let pageInfoData = {metaViewRows: this.getMetaInfo(document),
                         docInfo: this.getDocumentInfo(document),
                         feeds: this.getFeedsInfo(document, strings),
-                        windowInfo: this.getWindowInfo(window)};
+                        windowInfo: this.getWindowInfo(window),
+                        imageInfo: this.getImageInfo(imageElement)};
+
     sendAsyncMessage("PageInfo:data", pageInfoData);
 
     // Separate step so page info dialog isn't blank while waiting for this to finish.
     this.getMediaInfo(document, window, strings);
+  },
+
+  getImageInfo: function(imageElement) {
+    let imageInfo = null;
+    if (imageElement) {
+      imageInfo = {
+        currentSrc: imageElement.currentSrc,
+        width: imageElement.width,
+        height: imageElement.height,
+        imageText: imageElement.title || imageElement.alt
+      };
+    }
+    return imageInfo;
   },
 
   getMetaInfo: function(document) {

@@ -106,7 +106,13 @@ FrameIterator::functionDisplayAtom() const
 {
     MOZ_ASSERT(!done());
 
-    const char* chars = module_->functionName(codeRange_->funcNameIndex());
+    UniqueChars owner;
+    const char* chars = module_->getFuncName(cx_, codeRange_->funcIndex(), &owner);
+    if (!chars) {
+        cx_->clearPendingException();
+        return cx_->names().empty;
+    }
+
     JSAtom* atom = AtomizeUTF8Chars(cx_, chars, strlen(chars));
     if (!atom) {
         cx_->clearPendingException();
@@ -117,12 +123,10 @@ FrameIterator::functionDisplayAtom() const
 }
 
 unsigned
-FrameIterator::computeLine(uint32_t* column) const
+FrameIterator::lineOrBytecode() const
 {
     MOZ_ASSERT(!done());
-    if (column)
-        *column = callsite_->column();
-    return callsite_->line();
+    return callsite_->lineOrBytecode();
 }
 
 /*****************************************************************************/
@@ -515,6 +519,7 @@ ProfilingFrameIterator::ProfilingFrameIterator(const WasmActivation& activation,
     codeRange_(nullptr),
     callerFP_(nullptr),
     callerPC_(nullptr),
+    stackAddress_(nullptr),
     exitReason_(ExitReason::None)
 {
     // If profiling hasn't been enabled for this module, then CallerFPFromFP
@@ -692,7 +697,7 @@ ProfilingFrameIterator::label() const
     }
 
     switch (codeRange_->kind()) {
-      case CodeRange::Function:         return module_->profilingLabel(codeRange_->funcNameIndex());
+      case CodeRange::Function:         return module_->profilingLabel(codeRange_->funcIndex());
       case CodeRange::Entry:            return "entry trampoline (in asm.js)";
       case CodeRange::ImportJitExit:    return importJitDescription;
       case CodeRange::ImportInterpExit: return importInterpDescription;

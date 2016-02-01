@@ -58,12 +58,9 @@ Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
   }
 
   if (aVisibleRegion.GetNumRects() > 1) {
-    nsIntRegionRectIterator screenIter(aVisibleRegion);
-
-    while (const gfx::IntRect* rect = screenIter.Next())
-    {
+    for (auto iter = aVisibleRegion.RectIter(); !iter.Done(); iter.Next()) {
       DrawDiagnostics(aFlags | DiagnosticFlags::REGION_RECT,
-                      IntRectToRect(*rect), aClipRect, aTransform,
+                      IntRectToRect(iter.Get()), aClipRect, aTransform,
                       aFlashCounter);
     }
   }
@@ -365,17 +362,18 @@ Compositor::ComputeBackdropCopyRect(const gfx::Rect& aRect,
   gfx::Rect renderBounds = mRenderBounds;
 
   // Compute the clip.
+  gfx::IntPoint offset = GetCurrentRenderTarget()->GetOrigin();
   renderBounds.IntersectRect(renderBounds, aClipRect);
+  renderBounds.MoveBy(offset);
 
   // Apply the layer transform.
   gfx::Rect dest = aTransform.TransformAndClipBounds(aRect, renderBounds);
-  dest.RoundOut();
+  dest -= offset;
 
+  // Round out to integer.
   gfx::IntRect result;
+  dest.RoundOut();
   dest.ToIntRect(&result);
-
-  gfx::IntPoint offset = GetCurrentRenderTarget()->GetOrigin();
-  result.MoveBy(-offset);
   return result;
 }
 

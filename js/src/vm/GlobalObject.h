@@ -27,7 +27,7 @@ InitSharedArrayBufferClass(JSContext* cx, HandleObject obj);
 
 class Debugger;
 class TypedObjectModuleObject;
-class StaticBlockObject;
+class StaticBlockScope;
 class ClonedBlockObject;
 
 class SimdTypeDescr;
@@ -133,9 +133,10 @@ class GlobalObject : public NativeObject
                   "global object slot counts are inconsistent");
 
     enum WarnOnceFlag : int32_t {
-        WARN_WATCH_DEPRECATED                   = 0x00000001,
-        WARN_PROTO_SETTING_SLOW                 = 0x00000002,
-        WARN_STRING_CONTAINS_DEPRECATED         = 0x00000004
+        WARN_WATCH_DEPRECATED                   = 1 << 0,
+        WARN_PROTO_SETTING_SLOW                 = 1 << 1,
+        WARN_STRING_CONTAINS_DEPRECATED         = 1 << 2,
+        WARN_PROXY_CREATE_DEPRECATED            = 1 << 3,
     };
 
     // Emit the specified warning if the given slot in |obj|'s global isn't
@@ -163,6 +164,7 @@ class GlobalObject : public NativeObject
         MOZ_ASSERT(key <= JSProto_LIMIT);
         return getSlot(APPLICATION_SLOTS + key);
     }
+    static bool skipDeselectedConstructor(JSContext* cx, JSProtoKey key);
     static bool ensureConstructor(JSContext* cx, Handle<GlobalObject*> global, JSProtoKey key);
     static bool resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JSProtoKey key);
     static bool initBuiltinConstructor(JSContext* cx, Handle<GlobalObject*> global,
@@ -448,7 +450,7 @@ class GlobalObject : public NativeObject
         RootedObject globalSimdObject(cx, global->getOrCreateSimdGlobalObject(cx));
         if (!globalSimdObject)
             return nullptr;
-        uint32_t typeSlotIndex(T::type);
+        uint32_t typeSlotIndex = uint32_t(T::type);
         if (globalSimdObject->as<NativeObject>().getReservedSlot(typeSlotIndex).isUndefined() &&
             !GlobalObject::initSimdType(cx, global, typeSlotIndex))
         {
@@ -686,9 +688,15 @@ class GlobalObject : public NativeObject
     }
 
     // Warn about use of the deprecated String.prototype.contains method
-    static bool warnOnceAboutStringContains(JSContext *cx, HandleObject strContains) {
+    static bool warnOnceAboutStringContains(JSContext* cx, HandleObject strContains) {
         return warnOnceAbout(cx, strContains, WARN_STRING_CONTAINS_DEPRECATED,
                              JSMSG_DEPRECATED_STRING_CONTAINS);
+    }
+
+    // Warn about uses of Proxy.create and Proxy.createFunction
+    static bool warnOnceAboutProxyCreate(JSContext* cx, HandleObject create) {
+        return warnOnceAbout(cx, create, WARN_PROXY_CREATE_DEPRECATED,
+                             JSMSG_DEPRECATED_PROXY_CREATE);
     }
 
     static bool getOrCreateEval(JSContext* cx, Handle<GlobalObject*> global,

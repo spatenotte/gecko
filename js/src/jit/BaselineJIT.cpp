@@ -379,9 +379,7 @@ jit::CanEnterBaselineMethod(JSContext* cx, RunState& state)
             return Method_Error;
         }
     } else {
-        MOZ_ASSERT(state.isExecute());
-        ExecuteType type = state.asExecute()->type();
-        if (type == EXECUTE_DEBUG) {
+        if (state.asExecute()->isDebuggerEval()) {
             JitSpew(JitSpew_BaselineAbort, "debugger frame");
             return Method_CantCompile;
         }
@@ -697,6 +695,18 @@ BaselineScript::stackCheckICEntry(bool earlyCheck)
             return icEntry(i);
     }
     MOZ_CRASH("No stack check ICEntry found.");
+}
+
+ICEntry&
+BaselineScript::warmupCountICEntry()
+{
+    // The stack check will be at a very low offset, so just do a linear search
+    // from the beginning.
+    for (size_t i = 0; i < numICEntries() && icEntry(i).pcOffset() == 0; i++) {
+        if (icEntry(i).kind() == ICEntry::Kind_WarmupCounter)
+            return icEntry(i);
+    }
+    MOZ_CRASH("No warmup count ICEntry found.");
 }
 
 ICEntry&

@@ -1437,7 +1437,7 @@ nsObjectLoadingContent::ObjectState() const
         case eFallbackVulnerableNoUpdate:
           return NS_EVENT_STATE_VULNERABLE_NO_UPDATE;
       }
-  };
+  }
   NS_NOTREACHED("unknown type?");
   return NS_EVENT_STATE_LOADING;
 }
@@ -1527,6 +1527,7 @@ nsObjectLoadingContent::ShouldRewriteYoutubeEmbed(nsIURI* aURI)
   nsAutoCString uri;
   aURI->GetSpec(uri);
   if (uri.Find("enablejsapi=1", true, 0, -1) != kNotFound) {
+    Telemetry::Accumulate(Telemetry::YOUTUBE_NONREWRITABLE_EMBED_SEEN, 1);
     return false;
   }
 
@@ -2422,7 +2423,7 @@ nsObjectLoadingContent::LoadObject(bool aNotify,
     case eType_Null:
       // Handled below, silence compiler warnings
     break;
-  };
+  }
 
   //
   // Loaded, handle notifications and fallback
@@ -2719,8 +2720,8 @@ nsObjectLoadingContent::NotifyStateChanged(ObjectType aOldType,
   EventStates newState = ObjectState();
 
   if (newState != aOldState) {
+    NS_ASSERTION(thisContent->IsInComposedDoc(), "Something is confused");
     // This will trigger frame construction
-    NS_ASSERTION(InActiveDocument(thisContent), "Something is confused");
     EventStates changedBits = aOldState ^ newState;
 
     {
@@ -2728,6 +2729,7 @@ nsObjectLoadingContent::NotifyStateChanged(ObjectType aOldType,
       doc->ContentStateChanged(thisContent, changedBits);
     }
     if (aSync) {
+      NS_ASSERTION(InActiveDocument(thisContent), "Something is confused");
       // Make sure that frames are actually constructed immediately.
       doc->FlushPendingNotifications(Flush_Frames);
     }
@@ -3102,6 +3104,7 @@ nsObjectLoadingContent::DoStopPlugin(nsPluginInstanceOwner* aInstanceOwner,
 NS_IMETHODIMP
 nsObjectLoadingContent::StopPluginInstance()
 {
+  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
   // Clear any pending events
   mPendingInstantiateEvent = nullptr;
   mPendingCheckPluginStopEvent = nullptr;
@@ -3273,12 +3276,17 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
     sPrefsInitialized = true;
   }
 
-  if (XRE_IsParentProcess() &&
-      BrowserTabsRemoteAutostart()) {
-    // Plugins running OOP from the chrome process along with plugins running
-    // OOP from the content process will hang. Let's prevent that situation.
-    aReason = eFallbackDisabled;
-    return false;
+  if (BrowserTabsRemoteAutostart()) {
+    bool shouldLoadInParent = nsPluginHost::ShouldLoadTypeInParent(mContentType);
+    bool inParent = XRE_IsParentProcess();
+
+    if (shouldLoadInParent != inParent) {
+      // Plugins need to be locked to either the parent process or the content
+      // process. If a plugin is locked to one process type, it can't be used in
+      // the other. Otherwise we'll get hangs.
+      aReason = eFallbackDisabled;
+      return false;
+    }
   }
 
   RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
@@ -3334,11 +3342,11 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
   MOZ_ASSERT(thisContent);
   nsIDocument* ownerDoc = thisContent->OwnerDoc();
 
-  nsCOMPtr<nsPIDOMWindow> window = ownerDoc->GetWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> window = ownerDoc->GetWindow();
   if (!window) {
     return false;
   }
-  nsCOMPtr<nsPIDOMWindow> topWindow = window->GetTop();
+  nsCOMPtr<nsPIDOMWindowOuter> topWindow = window->GetTop();
   NS_ENSURE_TRUE(topWindow, false);
   nsCOMPtr<nsIDocument> topDoc = topWindow->GetDoc();
   NS_ENSURE_TRUE(topDoc, false);
@@ -3696,7 +3704,7 @@ nsObjectLoadingContent::TeardownProtoChain()
 bool
 nsObjectLoadingContent::DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
                                   JS::Handle<jsid> aId,
-                                  JS::MutableHandle<JSPropertyDescriptor> aDesc)
+                                  JS::MutableHandle<JS::PropertyDescriptor> aDesc)
 {
   // We don't resolve anything; we just try to make sure we're instantiated.
   // This purposefully does not fire for chrome/xray resolves, see bug 967694

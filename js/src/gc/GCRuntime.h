@@ -18,11 +18,6 @@
 #include "gc/StoreBuffer.h"
 #include "gc/Tracer.h"
 
-/* Perform validation of incremental marking in debug builds but not on B2G. */
-#if defined(DEBUG) && !defined(MOZ_B2G)
-#define JS_GC_MARKING_VALIDATION
-#endif
-
 namespace js {
 
 class AutoLockGC;
@@ -769,7 +764,6 @@ class GCRuntime
     JS::GCNurseryCollectionCallback setNurseryCollectionCallback(
         JS::GCNurseryCollectionCallback callback);
 
-    void setValidate(bool enable);
     void setFullCompartmentChecks(bool enable);
 
     bool isManipulatingDeadZones() { return manipulatingDeadZones; }
@@ -1183,7 +1177,7 @@ class GCRuntime
     js::gc::ZoneList zonesToMaybeCompact;
     ArenaHeader* relocatedArenasToRelease;
 
-#ifdef JS_GC_MARKING_VALIDATION
+#ifdef JS_GC_ZEAL
     js::gc::MarkingValidator* markingValidator;
 #endif
 
@@ -1274,7 +1268,6 @@ class GCRuntime
     js::Vector<JSObject*, 0, js::SystemAllocPolicy> selectedForMarking;
 #endif
 
-    bool validate;
     bool fullCompartmentChecks;
 
     Callback<JSGCCallback> gcCallback;

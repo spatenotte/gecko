@@ -1176,8 +1176,45 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
   }
 
   // Display port margins changing means that the set of visible images may
-  // have drastically changed. Schedule an update.
-  aPresShell->ScheduleImageVisibilityUpdate();
+  // have drastically changed. Check if we should schedule an update.
+  nsIFrame* frame = GetScrollFrameFromContent(aContent);
+  nsIScrollableFrame* scrollableFrame = frame ? frame->GetScrollTargetFrame() : nullptr;
+  if (!scrollableFrame) {
+    return true;
+  }
+
+  nsRect oldDisplayPort;
+  bool hadDisplayPort =
+    scrollableFrame->GetDisplayPortAtLastImageVisibilityUpdate(&oldDisplayPort);
+
+  nsRect newDisplayPort;
+  Unused << GetDisplayPort(aContent, &newDisplayPort);
+
+  bool needImageVisibilityUpdate = !hadDisplayPort;
+  // Check if the total size has changed by a large factor.
+  if (!needImageVisibilityUpdate) {
+    if ((newDisplayPort.width > 2 * oldDisplayPort.width) ||
+        (oldDisplayPort.width > 2 * newDisplayPort.width) ||
+        (newDisplayPort.height > 2 * oldDisplayPort.height) ||
+        (oldDisplayPort.height > 2 * newDisplayPort.height)) {
+      needImageVisibilityUpdate = true;
+    }
+  }
+  // Check if it's moved by a significant amount.
+  if (!needImageVisibilityUpdate) {
+    if (nsRect* baseData = static_cast<nsRect*>(aContent->GetProperty(nsGkAtoms::DisplayPortBase))) {
+      nsRect base = *baseData;
+      if ((std::abs(newDisplayPort.X() - oldDisplayPort.X()) > base.width) ||
+          (std::abs(newDisplayPort.XMost() - oldDisplayPort.XMost()) > base.width) ||
+          (std::abs(newDisplayPort.Y() - oldDisplayPort.Y()) > base.height) ||
+          (std::abs(newDisplayPort.YMost() - oldDisplayPort.YMost()) > base.height)) {
+        needImageVisibilityUpdate = true;
+      }
+    }
+  }
+  if (needImageVisibilityUpdate) {
+    aPresShell->ScheduleImageVisibilityUpdate();
+  }
 
   return true;
 }
@@ -1217,7 +1254,7 @@ nsLayoutUtils::LastContinuationWithChild(nsContainerFrame* aFrame)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
   nsIFrame* f = aFrame->LastContinuation();
-  while (!f->GetFirstPrincipalChild() && f->GetPrevContinuation()) {
+  while (!f->PrincipalChildList().FirstChild() && f->GetPrevContinuation()) {
     f = f->GetPrevContinuation();
   }
   return static_cast<nsContainerFrame*>(f);
@@ -1345,7 +1382,7 @@ nsLayoutUtils::GetBeforeFrameForContent(nsIFrame* aFrame,
   // If the first child frame is a pseudo-frame, then try that.
   // Note that the frame we create for the generated content is also a
   // pseudo-frame and so don't drill down in that case.
-  nsIFrame* childFrame = genConParentFrame->GetFirstPrincipalChild();
+  nsIFrame* childFrame = genConParentFrame->PrincipalChildList().FirstChild();
   if (childFrame &&
       childFrame->IsPseudoFrame(aContent) &&
       !childFrame->IsGeneratedContentFrame()) {
@@ -1429,7 +1466,7 @@ nsIFrame*
 nsLayoutUtils::GetStyleFrame(nsIFrame* aFrame)
 {
   if (aFrame->GetType() == nsGkAtoms::tableOuterFrame) {
-    nsIFrame* inner = aFrame->GetFirstPrincipalChild();
+    nsIFrame* inner = aFrame->PrincipalChildList().FirstChild();
     NS_ASSERTION(inner, "Outer table must have an inner");
     return inner;
   }
@@ -1877,19 +1914,18 @@ nsLayoutUtils::IsFixedPosFrameInDisplayPort(const nsIFrame* aFrame)
   return ViewportHasDisplayPort(aFrame->PresContext());
 }
 
-NS_DECLARE_FRAME_PROPERTY(ScrollbarThumbLayerized, nullptr)
+NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(ScrollbarThumbLayerized, bool)
 
 /* static */ void
 nsLayoutUtils::SetScrollbarThumbLayerization(nsIFrame* aThumbFrame, bool aLayerize)
 {
-  aThumbFrame->Properties().Set(ScrollbarThumbLayerized(),
-    reinterpret_cast<void*>(intptr_t(aLayerize)));
+  aThumbFrame->Properties().Set(ScrollbarThumbLayerized(), aLayerize);
 }
 
 bool
 nsLayoutUtils::IsScrollbarThumbLayerized(nsIFrame* aThumbFrame)
 {
-  return reinterpret_cast<intptr_t>(aThumbFrame->Properties().Get(ScrollbarThumbLayerized()));
+  return aThumbFrame->Properties().Get(ScrollbarThumbLayerized());
 }
 
 // static
@@ -3561,7 +3597,7 @@ AddBoxesForFrame(nsIFrame* aFrame,
   nsIAtom* pseudoType = aFrame->StyleContext()->GetPseudo();
 
   if (pseudoType == nsCSSAnonBoxes::tableOuter) {
-    AddBoxesForFrame(aFrame->GetFirstPrincipalChild(), aCallback);
+    AddBoxesForFrame(aFrame->PrincipalChildList().FirstChild(), aCallback);
     nsIFrame* kid = aFrame->GetChildList(nsIFrame::kCaptionList).FirstChild();
     if (kid) {
       AddBoxesForFrame(kid, aCallback);
@@ -3594,7 +3630,7 @@ nsLayoutUtils::GetFirstNonAnonymousFrame(nsIFrame* aFrame)
     nsIAtom* pseudoType = aFrame->StyleContext()->GetPseudo();
 
     if (pseudoType == nsCSSAnonBoxes::tableOuter) {
-      nsIFrame* f = GetFirstNonAnonymousFrame(aFrame->GetFirstPrincipalChild());
+      nsIFrame* f = GetFirstNonAnonymousFrame(aFrame->PrincipalChildList().FirstChild());
       if (f) {
         return f;
       }
@@ -3917,7 +3953,7 @@ ComputeConcreteObjectSize(const nsSize& aConstraintSize,
 
 // (Helper for HasInitialObjectFitAndPosition, to check
 // each "object-position" coord.)
-typedef nsStyleBackground::Position::PositionCoord PositionCoord;
+typedef nsStyleImageLayers::Position::PositionCoord PositionCoord;
 static bool
 IsCoord50Pct(const PositionCoord& aCoord)
 {
@@ -3931,7 +3967,7 @@ IsCoord50Pct(const PositionCoord& aCoord)
 static bool
 HasInitialObjectFitAndPosition(const nsStylePosition* aStylePos)
 {
-  const nsStyleBackground::Position& objectPos = aStylePos->mObjectPosition;
+  const nsStyleImageLayers::Position& objectPos = aStylePos->mObjectPosition;
 
   return aStylePos->mObjectFit == NS_STYLE_OBJECT_FIT_FILL &&
     IsCoord50Pct(objectPos.mXPosition) &&
@@ -5823,7 +5859,7 @@ nsLayoutUtils::GetFirstLinePosition(WritingMode aWM,
 
     if (fType == nsGkAtoms::fieldSetFrame) {
       LinePosition kidPosition;
-      nsIFrame* kid = aFrame->GetFirstPrincipalChild();
+      nsIFrame* kid = aFrame->PrincipalChildList().FirstChild();
       // kid might be a legend frame here, but that's ok.
       if (GetFirstLinePosition(aWM, kid, &kidPosition)) {
         *aResult = kidPosition +
@@ -6722,7 +6758,7 @@ nsLayoutUtils::GetFrameTransparency(nsIFrame* aBackgroundFrame,
   // doing otherwise breaks window display effects on some platforms,
   // specifically Vista. (bug 450322)
   if (aBackgroundFrame->GetType() == nsGkAtoms::viewportFrame &&
-      !aBackgroundFrame->GetFirstPrincipalChild()) {
+      !aBackgroundFrame->PrincipalChildList().FirstChild()) {
     return eTransparencyOpaque;
   }
 
@@ -6733,7 +6769,7 @@ nsLayoutUtils::GetFrameTransparency(nsIFrame* aBackgroundFrame,
   const nsStyleBackground* bg = bgSC->StyleBackground();
   if (NS_GET_A(bg->mBackgroundColor) < 255 ||
       // bottom layer's clip is used for the color
-      bg->BottomLayer().mClip != NS_STYLE_BG_CLIP_BORDER)
+      bg->BottomLayer().mClip != NS_STYLE_IMAGELAYER_CLIP_BORDER)
     return eTransparencyTransparent;
   return eTransparencyOpaque;
 }
@@ -6878,7 +6914,7 @@ nsLayoutUtils::GetRectDifferenceStrips(const nsRect& aR1, const nsRect& aR2,
 }
 
 nsDeviceContext*
-nsLayoutUtils::GetDeviceContextForScreenInfo(nsPIDOMWindow* aWindow)
+nsLayoutUtils::GetDeviceContextForScreenInfo(nsPIDOMWindowOuter* aWindow)
 {
   if (!aWindow) {
     return nullptr;
@@ -6890,7 +6926,7 @@ nsLayoutUtils::GetDeviceContextForScreenInfo(nsPIDOMWindow* aWindow)
     // context does the right thing on multi-monitor systems when we return it to
     // the caller.  It will also make sure that our prescontext has been created,
     // if we're supposed to have one.
-    nsCOMPtr<nsPIDOMWindow> win = docShell->GetWindow();
+    nsCOMPtr<nsPIDOMWindowOuter> win = docShell->GetWindow();
     if (!win) {
       // No reason to go on
       return nullptr;
@@ -8867,4 +8903,51 @@ nsLayoutUtils::IsScrollFrameWithSnapping(nsIFrame* aFrame)
   ScrollbarStyles styles = sf->GetScrollbarStyles();
   return styles.mScrollSnapTypeY != NS_STYLE_SCROLL_SNAP_TYPE_NONE ||
          styles.mScrollSnapTypeX != NS_STYLE_SCROLL_SNAP_TYPE_NONE;
+}
+
+/* static */ nsBlockFrame*
+nsLayoutUtils::GetFloatContainingBlock(nsIFrame* aFrame)
+{
+  nsIFrame* ancestor = aFrame->GetParent();
+  while (ancestor && !ancestor->IsFloatContainingBlock()) {
+    ancestor = ancestor->GetParent();
+  }
+  MOZ_ASSERT(!ancestor || GetAsBlock(ancestor),
+             "Float containing block can only be block frame");
+  return static_cast<nsBlockFrame*>(ancestor);
+}
+
+// The implementation of this calculation is adapted from
+// Element::GetBoundingClientRect().
+/* static */ CSSRect
+nsLayoutUtils::GetBoundingContentRect(const nsIContent* aContent,
+                                      const nsIScrollableFrame* aRootScrollFrame) {
+  CSSRect result;
+  if (nsIFrame* frame = aContent->GetPrimaryFrame()) {
+    nsIFrame* relativeTo = aRootScrollFrame->GetScrolledFrame();
+    result = CSSRect::FromAppUnits(
+        nsLayoutUtils::GetAllInFlowRectsUnion(
+            frame,
+            relativeTo,
+            nsLayoutUtils::RECTS_ACCOUNT_FOR_TRANSFORMS));
+
+    // If the element is contained in a scrollable frame that is not
+    // the root scroll frame, make sure to clip the result so that it is
+    // not larger than the containing scrollable frame's bounds.
+    nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetNearestScrollableFrame(frame);
+    if (scrollFrame && scrollFrame != aRootScrollFrame) {
+      nsIFrame* subFrame = do_QueryFrame(scrollFrame);
+      MOZ_ASSERT(subFrame);
+      // Get the bounds of the scroll frame in the same coordinate space
+      // as |result|.
+      CSSRect subFrameRect = CSSRect::FromAppUnits(
+          nsLayoutUtils::TransformFrameRectToAncestor(
+              subFrame,
+              subFrame->GetRectRelativeToSelf(),
+              relativeTo));
+
+      result = subFrameRect.Intersect(result);
+    }
+  }
+  return result;
 }

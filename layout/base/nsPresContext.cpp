@@ -151,7 +151,7 @@ nsPresContext::IsDOMPaintEventPending()
   if (mFireAfterPaintEvents) {
     return true;
   }
-  nsRootPresContext* drpc = GetDisplayRootPresContext();
+  nsRootPresContext* drpc = GetRootPresContext();
   if (drpc && drpc->mRefreshDriver->ViewManagerFlushIsPending()) {
     // Since we're promising that there will be a MozAfterPaint event
     // fired, we record an empty invalidation in case display list
@@ -1333,33 +1333,6 @@ nsPresContext::GetRootPresContext()
   return pc->IsRoot() ? static_cast<nsRootPresContext*>(pc) : nullptr;
 }
 
-nsRootPresContext*
-nsPresContext::GetDisplayRootPresContext()
-{
-  nsPresContext* pc = this;
-  for (;;) {
-    nsPresContext* parent = pc->GetParentPresContext();
-    if (!parent) {
-      // Not sure if this is always strictly the parent, but it works for GetRootPresContext
-      // where the current pres context has no frames.
-      nsIDocument *doc = pc->Document();
-      if (doc) {
-        doc = doc->GetParentDocument();
-        if (doc) {
-          nsIPresShell* shell = doc->GetShell();
-          if (shell) {
-            parent = shell->GetPresContext();
-          }
-        }
-      }
-    }
-    if (!parent || parent == pc)
-      break;
-    pc = parent;
-  }
-  return pc->IsRoot() ? static_cast<nsRootPresContext*>(pc) : nullptr;
-}
-
 void
 nsPresContext::CompatibilityModeChanged()
 {
@@ -1837,7 +1810,7 @@ nsPresContext::IsTopLevelWindowInactive()
     return false;
   }
 
-  nsCOMPtr<nsPIDOMWindow> domWindow = rootItem->GetWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> domWindow = rootItem->GetWindow();
 
   return domWindow && !domWindow->IsActive();
 }
@@ -1990,13 +1963,9 @@ NotifyTabUIResolutionChanged(TabParent* aTab, void *aArg)
 }
 
 static void
-NotifyChildrenUIResolutionChanged(nsIDOMWindow* aWindow)
+NotifyChildrenUIResolutionChanged(nsPIDOMWindowOuter* aWindow)
 {
-  nsCOMPtr<nsPIDOMWindow> piWin = do_QueryInterface(aWindow);
-  if (!piWin) {
-    return;
-  }
-  nsCOMPtr<nsIDocument> doc = piWin->GetExtantDoc();
+  nsCOMPtr<nsIDocument> doc = aWindow->GetExtantDoc();
   RefPtr<nsPIWindowRoot> topLevelWin = nsContentUtils::GetWindowRoot(doc);
   if (!topLevelWin) {
     return;
@@ -2015,7 +1984,9 @@ nsPresContext::UIResolutionChangedInternal()
   }
 
   // Recursively notify all remote leaf descendants of the change.
-  NotifyChildrenUIResolutionChanged(mDocument->GetWindow());
+  if (nsPIDOMWindowOuter* window = mDocument->GetWindow()) {
+    NotifyChildrenUIResolutionChanged(window);
+  }
 
   mDocument->EnumerateSubDocuments(UIResolutionChangedSubdocumentCallback,
                                    nullptr);
@@ -2355,7 +2326,7 @@ nsPresContext::EnsureSafeToHandOutCSSRules()
 void
 nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
 {
-  nsPIDOMWindow* ourWindow = mDocument->GetWindow();
+  nsPIDOMWindowInner* ourWindow = mDocument->GetInnerWindow();
   if (!ourWindow)
     return;
 
@@ -2408,7 +2379,7 @@ MayHavePaintEventListenerSubdocumentCallback(nsIDocument* aDocument, void* aData
 }
 
 static bool
-MayHavePaintEventListener(nsPIDOMWindow* aInnerWindow)
+MayHavePaintEventListener(nsPIDOMWindowInner* aInnerWindow)
 {
   if (!aInnerWindow)
     return false;
@@ -2440,7 +2411,7 @@ MayHavePaintEventListener(nsPIDOMWindow* aInnerWindow)
   if (node)
     return MayHavePaintEventListener(node->OwnerDoc()->GetInnerWindow());
 
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(parentTarget);
+  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(parentTarget);
   if (window)
     return MayHavePaintEventListener(window);
 
@@ -2538,9 +2509,8 @@ nsPresContext::NotifySubDocInvalidation(ContainerLayer* aContainer,
 
   nsIntPoint topLeft = aContainer->GetVisibleRegion().ToUnknownRegion().GetBounds().TopLeft();
 
-  nsIntRegionRectIterator iter(aRegion);
-  while (const nsIntRect* r = iter.Next()) {
-    nsIntRect rect = *r;
+  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+    nsIntRect rect(iter.Get());
     //PresContext coordinate space is relative to the start of our visible
     // region. Is this really true? This feels like the wrong way to get the right
     // answer.

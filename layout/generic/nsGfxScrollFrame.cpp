@@ -602,7 +602,7 @@ nsHTMLScrollFrame::GuessVScrollbarNeeded(const ScrollReflowState& aState)
     return false;
 
   if (mHelper.mIsRoot) {
-    nsIFrame *f = mHelper.mScrolledFrame->GetFirstPrincipalChild();
+    nsIFrame *f = mHelper.mScrolledFrame->PrincipalChildList().FirstChild();
     if (f && f->GetType() == nsGkAtoms::svgOuterSVGFrame &&
         static_cast<nsSVGOuterSVGFrame*>(f)->VerticalScrollbarNotNeeded()) {
       // Common SVG case - avoid a bad guess.
@@ -807,8 +807,7 @@ GetBrowserRoot(nsIContent* aContent)
 {
   if (aContent) {
     nsIDocument* doc = aContent->GetCurrentDoc();
-    nsPIDOMWindow* win = doc->GetWindow();
-    if (win) {
+    if (nsPIDOMWindowOuter* win = doc->GetWindow()) {
       nsCOMPtr<Element> frameElement = win->GetFrameElementInternal();
       if (frameElement &&
           frameElement->NodeInfo()->Equals(nsGkAtoms::browser, kNameSpaceID_XUL))
@@ -1313,7 +1312,9 @@ nsXULScrollFrame::SetInitialChildList(ChildListID     aListID,
                                       nsFrameList&    aChildList)
 {
   nsBoxFrame::SetInitialChildList(aListID, aChildList);
-  mHelper.ReloadChildFrames();
+  if (aListID == kPrincipalList) {
+    mHelper.ReloadChildFrames();
+  }
 }
 
 
@@ -1839,6 +1840,8 @@ ScrollFrameHelper::ScrollFrameHelper(nsContainerFrame* aOuter,
   , mLastPos(-1, -1)
   , mScrollPosForLayerPixelAlignment(-1, -1)
   , mLastUpdateImagesPos(-1, -1)
+  , mHadDisplayPortAtLastImageUpdate(false)
+  , mDisplayPortAtLastImageUpdate()
   , mNeverHasVerticalScrollbar(false)
   , mNeverHasHorizontalScrollbar(false)
   , mHasVerticalScrollbar(false)
@@ -2475,6 +2478,23 @@ ScrollFrameHelper::ScheduleSyntheticMouseMove()
 }
 
 void
+ScrollFrameHelper::NotifyImageVisibilityUpdate()
+{
+  mLastUpdateImagesPos = GetScrollPosition();
+  mHadDisplayPortAtLastImageUpdate =
+    nsLayoutUtils::GetDisplayPort(mOuter->GetContent(), &mDisplayPortAtLastImageUpdate);
+}
+
+bool
+ScrollFrameHelper::GetDisplayPortAtLastImageVisibilityUpdate(nsRect* aDisplayPort)
+{
+  if (mHadDisplayPortAtLastImageUpdate) {
+    *aDisplayPort = mDisplayPortAtLastImageUpdate;
+  }
+  return mHadDisplayPortAtLastImageUpdate;
+}
+
+void
 ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange, nsIAtom* aOrigin)
 {
   if (aOrigin == nullptr) {
@@ -2896,7 +2916,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                     const nsDisplayListSet& aLists)
 {
   if (aBuilder->IsForImageVisibility()) {
-    mLastUpdateImagesPos = GetScrollPosition();
+    NotifyImageVisibilityUpdate();
   }
 
   mOuter->DisplayBorderBackgroundOutline(aBuilder, aLists);
@@ -3892,8 +3912,7 @@ ScrollFrameHelper::ReloadChildFrames()
   mScrollCornerBox = nullptr;
   mResizerBox = nullptr;
 
-  nsIFrame* frame = mOuter->GetFirstPrincipalChild();
-  while (frame) {
+  for (nsIFrame* frame : mOuter->PrincipalChildList()) {
     nsIContent* content = frame->GetContent();
     if (content == mOuter->GetContent()) {
       NS_ASSERTION(!mScrolledFrame, "Already found the scrolled frame");
@@ -3919,8 +3938,6 @@ ScrollFrameHelper::ReloadChildFrames()
         mScrollCornerBox = frame;
       }
     }
-
-    frame = frame->GetNextSibling();
   }
 }
 
@@ -5316,7 +5333,7 @@ ScrollFrameHelper::GetScrolledRectInternal(const nsRect& aScrolledFrameOverflowA
   // direction set by the text content overrides the direction of the frame
   if (mScrolledFrame->StyleTextReset()->mUnicodeBidi &
       NS_STYLE_UNICODE_BIDI_PLAINTEXT) {
-    nsIFrame* childFrame = mScrolledFrame->GetFirstPrincipalChild();
+    nsIFrame* childFrame = mScrolledFrame->PrincipalChildList().FirstChild();
     if (childFrame) {
       frameDir =
         (nsBidiPresUtils::ParagraphDirection(childFrame) == NSBIDI_LTR)
@@ -5748,7 +5765,7 @@ ScrollSnapHelper(SnappingEdgeCallback& aCallback, nsIFrame* aFrame,
         nsPoint offset = f->GetOffsetTo(aScrolledFrame);
         nsRect edgesRect = nsRect(offset, frameRect.Size());
         for (size_t coordNum = 0; coordNum < coordCount; coordNum++) {
-          const nsStyleBackground::Position &coordPosition =
+          const nsStyleImageLayers::Position &coordPosition =
             f->StyleDisplay()->mScrollSnapCoordinate[coordNum];
           nsPoint coordPoint = edgesRect.TopLeft() - aScrollSnapDestination;
           coordPoint += nsPoint(coordPosition.mXPosition.mLength,

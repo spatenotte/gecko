@@ -1062,7 +1062,8 @@ APZCTreeManager::ProcessWheelEvent(WidgetWheelEvent& aEvent,
                          scrollMode,
                          ScrollWheelInput::DeltaTypeForDeltaMode(aEvent.deltaMode),
                          origin,
-                         aEvent.deltaX, aEvent.deltaY);
+                         aEvent.deltaX, aEvent.deltaY,
+                         aEvent.mAllowToOverrideSystemScrollSpeed);
 
   // We add the user multiplier as a separate field, rather than premultiplying
   // it, because if the input is converted back to a WidgetWheelEvent, then
@@ -1086,10 +1087,9 @@ APZCTreeManager::ReceiveInputEvent(WidgetInputEvent& aEvent,
                                    ScrollableLayerGuid* aOutTargetGuid,
                                    uint64_t* aOutInputBlockId)
 {
-  // This function will be removed once metro code is modified to use the
-  // InputData version of ReceiveInputEvent.
   // In general it is preferable to use the version of ReceiveInputEvent
-  // that takes an InputData, as that is usable from off-main-thread.
+  // that takes an InputData, as that is usable from off-main-thread. On some
+  // platforms OMT input isn't possible, and there we can use this version.
 
   MOZ_ASSERT(NS_IsMainThread());
   APZThreadUtils::AssertOnControllerThread();
@@ -1138,11 +1138,12 @@ APZCTreeManager::ReceiveInputEvent(WidgetInputEvent& aEvent,
 
 void
 APZCTreeManager::ZoomToRect(const ScrollableLayerGuid& aGuid,
-                            const CSSRect& aRect)
+                            const CSSRect& aRect,
+                            const uint32_t aFlags)
 {
   RefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aGuid);
   if (apzc) {
-    apzc->ZoomToRect(aRect);
+    apzc->ZoomToRect(aRect, aFlags);
   }
 }
 
@@ -1262,6 +1263,16 @@ APZCTreeManager::CancelAnimation(const ScrollableLayerGuid &aGuid)
   RefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aGuid);
   if (apzc) {
     apzc->CancelAnimation();
+  }
+}
+
+void
+APZCTreeManager::AdjustScrollForSurfaceShift(const ScreenPoint& aShift)
+{
+  MonitorAutoLock lock(mTreeLock);
+  RefPtr<AsyncPanZoomController> apzc = FindRootContentOrRootApzc();
+  if (apzc) {
+    apzc->AdjustScrollForSurfaceShift(aShift);
   }
 }
 
@@ -1736,6 +1747,33 @@ APZCTreeManager::FindRootContentApzcForLayersId(uint64_t aLayersId) const
         return apzc
             && apzc->GetLayersId() == aLayersId
             && apzc->IsRootContent();
+      });
+  return resultNode ? resultNode->GetApzc() : nullptr;
+}
+
+AsyncPanZoomController*
+APZCTreeManager::FindRootContentOrRootApzc() const
+{
+  mTreeLock.AssertCurrentThreadOwns();
+
+  // Note: this is intended to find the same "root" that would be found
+  // by AsyncCompositionManager::ApplyAsyncContentTransformToTree inside
+  // the MOZ_ANDROID_APZ block. That is, it should find the RCD node if there
+  // is one, or the root APZC if there is not.
+  // Since BreadthFirstSearch is a pre-order search, we first do a search for
+  // the RCD, and then if we don't find one, we do a search for the root APZC.
+  HitTestingTreeNode* resultNode = BreadthFirstSearch(mRootNode.get(),
+      [](HitTestingTreeNode* aNode) {
+        AsyncPanZoomController* apzc = aNode->GetApzc();
+        return apzc && apzc->IsRootContent();
+      });
+  if (resultNode) {
+    return resultNode->GetApzc();
+  }
+  resultNode = BreadthFirstSearch(mRootNode.get(),
+      [](HitTestingTreeNode* aNode) {
+        AsyncPanZoomController* apzc = aNode->GetApzc();
+        return (apzc != nullptr);
       });
   return resultNode ? resultNode->GetApzc() : nullptr;
 }

@@ -83,7 +83,13 @@ InvokeFunction(JSContext* cx, HandleObject obj, bool constructing, uint32_t argc
         if (thisv.isMagic()) {
             MOZ_ASSERT(thisv.whyMagic() == JS_IS_CONSTRUCTING ||
                        thisv.whyMagic() == JS_UNINITIALIZED_LEXICAL);
-            return Construct(cx, fval, cargs, newTarget, rval);
+
+            RootedObject obj(cx);
+            if (!Construct(cx, fval, cargs, newTarget, &obj))
+                return false;
+
+            rval.setObject(*obj);
+            return true;
         }
 
         // Otherwise the default |this| has already been created.  We could
@@ -984,7 +990,7 @@ GlobalHasLiveOnDebuggerStatement(JSContext* cx)
 }
 
 bool
-PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<StaticBlockObject*> block)
+PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<StaticBlockScope*> block)
 {
     return frame->pushBlock(cx, block);
 }
@@ -1027,7 +1033,7 @@ DebugLeaveBlock(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 }
 
 bool
-EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val, Handle<StaticWithObject*> templ)
+EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val, Handle<StaticWithScope*> templ)
 {
     return EnterWithOperation(cx, frame, val, templ);
 }
@@ -1289,7 +1295,7 @@ bool
 ThrowObjectCoercible(JSContext* cx, HandleValue v)
 {
     MOZ_ASSERT(v.isUndefined() || v.isNull());
-    MOZ_ALWAYS_FALSE(ToObjectSlow(cx, v, false));
+    MOZ_ALWAYS_FALSE(ToObjectSlow(cx, v, true));
     return false;
 }
 

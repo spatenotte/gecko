@@ -490,6 +490,23 @@ public:
         }
     }
 
+    void AdjustScrollForSurfaceShift(float aX, float aY)
+    {
+        MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
+
+        MutexAutoLock lock(mWindowLock);
+        if (!mWindow) {
+            // We already shut down.
+            return;
+        }
+
+        RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
+        if (controller) {
+            controller->AdjustScrollForSurfaceShift(
+                ScreenPoint(aX, aY));
+        }
+    }
+
     void SetIsLongpressEnabled(bool aIsLongpressEnabled)
     {
         MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
@@ -637,6 +654,16 @@ public:
             window->DispatchHitTest(touchEvent);
         });
         return true;
+    }
+
+    void UpdateOverscrollVelocity(const float x, const float y)
+    {
+        mNPZC->UpdateOverscrollVelocity(x, y);
+    }
+
+    void UpdateOverscrollOffset(const float x, const float y)
+    {
+        mNPZC->UpdateOverscrollOffset(x, y);
     }
 };
 
@@ -937,12 +964,13 @@ nsWindow::GeckoViewSupport::Open(const jni::ClassObject::LocalRef& aCls,
         args->AppendElement(heightArg);
     }
 
-    nsCOMPtr<nsIDOMWindow> domWindow;
+    nsCOMPtr<mozIDOMWindowProxy> domWindow;
     ww->OpenWindow(nullptr, url, "_blank", "chrome,dialog=no,all",
                    args, getter_AddRefs(domWindow));
     MOZ_ASSERT(domWindow);
 
-    nsCOMPtr<nsIWidget> widget = WidgetUtils::DOMWindowToWidget(domWindow);
+    nsCOMPtr<nsIWidget> widget =
+        WidgetUtils::DOMWindowToWidget(nsPIDOMWindowOuter::From(domWindow));
     MOZ_ASSERT(widget);
 
     const auto window = static_cast<nsWindow*>(widget.get());
@@ -1443,7 +1471,7 @@ nsWindow::BringToFront()
     // window that is created will be first in the window list but won't yet
     // be focused.
     nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
-    nsCOMPtr<nsIDOMWindow> existingTopWindow;
+    nsCOMPtr<mozIDOMWindowProxy> existingTopWindow;
     fm->GetActiveWindow(getter_AddRefs(existingTopWindow));
     if (existingTopWindow && FindTopLevel() == nsWindow::TopWindow())
         return;
@@ -1736,6 +1764,22 @@ nsWindow::InitEvent(WidgetGUIEvent& event, LayoutDeviceIntPoint* aPoint)
     }
 
     event.time = PR_Now() / 1000;
+}
+
+void
+nsWindow::UpdateOverscrollVelocity(const float aX, const float aY)
+{
+    if (mNPZCSupport) {
+        mNPZCSupport->UpdateOverscrollVelocity(aX, aY);
+    }
+}
+
+void
+nsWindow::UpdateOverscrollOffset(const float aX, const float aY)
+{
+    if (mNPZCSupport) {
+        mNPZCSupport->UpdateOverscrollOffset(aX, aY);
+    }
 }
 
 gfx::IntSize
@@ -2876,11 +2920,14 @@ nsWindow::GeckoViewSupport::OnImeReplaceText(int32_t aStart, int32_t aEnd,
         window.RemoveIMEComposition();
 
         {
+            // Use text selection to set target postion(s) for
+            // insert, or replace, of text.
             WidgetSelectionEvent event(true, eSetSelection, &window);
             window.InitEvent(event, nullptr);
             event.mOffset = uint32_t(aStart);
             event.mLength = uint32_t(aEnd - aStart);
             event.mExpandToClusterBoundary = false;
+            event.mReason = nsISelectionListener::IME_REASON;
             window.DispatchEvent(&event);
         }
 

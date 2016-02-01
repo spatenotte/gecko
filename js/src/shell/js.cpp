@@ -666,6 +666,7 @@ ReadEvalPrintLoop(JSContext* cx, FILE* in, FILE* out, bool compileOnly)
          */
         int startline = lineno;
         typedef Vector<char, 32> CharBuffer;
+        RootedObject globalLexical(cx, &cx->global()->lexicalScope());
         CharBuffer buffer(cx);
         do {
             ScheduleWatchdog(cx->runtime(), -1);
@@ -700,6 +701,17 @@ ReadEvalPrintLoop(JSContext* cx, FILE* in, FILE* out, bool compileOnly)
         {
             // Catch the error, report it, and keep going.
             JS_ReportPendingException(cx);
+        }
+        // If a let or const fail to initialize they will remain in an unusable
+        // without further intervention. This call cleans up the global scope,
+        // setting uninitialized lexicals to undefined so that they may still
+        // be used. This behavior is _only_ acceptable in the context of the repl.
+        if (JS::ForceLexicalInitialization(cx, globalLexical)) {
+            fputs("Warning: According to the standard, after the above exception,\n"
+                  "Warning: the global bindings should be permanently uninitialized.\n"
+                  "Warning: We have non-standard-ly initialized them to `undefined`"
+                  "for you.\nWarning: This nicety only happens in the JS shell.\n",
+                  stderr);
         }
     } while (!hitEOF && !sr->quitting);
 
@@ -2629,8 +2641,10 @@ SetStandardCompartmentOptions(JS::CompartmentOptions& options)
 static JSObject*
 NewSandbox(JSContext* cx, bool lazy)
 {
+    JS::CompartmentOptions options;
+    SetStandardCompartmentOptions(options);
     RootedObject obj(cx, JS_NewGlobalObject(cx, &sandbox_class, nullptr,
-                                            JS::DontFireOnNewGlobalHook));
+                                            JS::DontFireOnNewGlobalHook, options));
     if (!obj)
         return nullptr;
 
@@ -2767,6 +2781,7 @@ WorkerMain(void* arg)
     JS_SetRuntimePrivate(rt, sr.get());
     JS_SetFutexCanWait(rt);
     JS_SetErrorReporter(rt, my_ErrorReporter);
+    JS_InitDestroyPrincipalsCallback(rt, ShellPrincipals::destroy);
     SetWorkerRuntimeOptions(rt);
 
     if (!InitWatchdog(rt)) {
@@ -2814,7 +2829,21 @@ WorkerMain(void* arg)
     js_delete(input);
 }
 
-Vector<PRThread*, 0, SystemAllocPolicy> workerThreads;
+// Workers can spawn other workers, so we need a lock to access workerThreads.
+static PRLock* workerThreadsLock = nullptr;
+static Vector<PRThread*, 0, SystemAllocPolicy> workerThreads;
+
+class MOZ_RAII AutoLockWorkerThreads
+{
+  public:
+    AutoLockWorkerThreads() {
+        MOZ_ASSERT(workerThreadsLock);
+        PR_Lock(workerThreadsLock);
+    }
+    ~AutoLockWorkerThreads() {
+        PR_Unlock(workerThreadsLock);
+    }
+};
 
 static bool
 EvalInWorker(JSContext* cx, unsigned argc, Value* vp)
@@ -2833,6 +2862,14 @@ EvalInWorker(JSContext* cx, unsigned argc, Value* vp)
     if (!args[0].toString()->ensureLinear(cx))
         return false;
 
+    if (!workerThreadsLock) {
+        workerThreadsLock = PR_NewLock();
+        if (!workerThreadsLock) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+    }
+
     JSLinearString* str = &args[0].toString()->asLinear();
 
     char16_t* chars = (char16_t*) js_malloc(str->length() * sizeof(char16_t));
@@ -2843,7 +2880,7 @@ EvalInWorker(JSContext* cx, unsigned argc, Value* vp)
 
     CopyChars(chars, *str);
 
-    WorkerInput* input = js_new<WorkerInput>(cx->runtime(), chars, str->length());
+    WorkerInput* input = js_new<WorkerInput>(JS_GetParentRuntime(cx), chars, str->length());
     if (!input) {
         ReportOutOfMemory(cx);
         return false;
@@ -2857,6 +2894,7 @@ EvalInWorker(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
+    AutoLockWorkerThreads alwt;
     if (!workerThreads.append(thread)) {
         ReportOutOfMemory(cx);
         PR_JoinThread(thread);
@@ -3051,6 +3089,34 @@ ScheduleWatchdog(JSRuntime* rt, double t)
     sr->watchdogTimeout = timeout;
     PR_Unlock(sr->watchdogLock);
     return true;
+}
+
+static void
+KillWorkerThreads()
+{
+    MOZ_ASSERT_IF(!CanUseExtraThreads(), workerThreads.empty());
+
+    if (!workerThreadsLock) {
+        MOZ_ASSERT(workerThreads.empty());
+        return;
+    }
+
+    while (true) {
+        // We need to leave the AutoLockWorkerThreads scope before we call
+        // PR_JoinThread, to avoid deadlocks when AutoLockWorkerThreads is
+        // used by the worker thread.
+        PRThread* thread;
+        {
+            AutoLockWorkerThreads alwt;
+            if (workerThreads.empty())
+                break;
+            thread = workerThreads.popCopy();
+        }
+        PR_JoinThread(thread);
+    }
+
+    PR_DestroyLock(workerThreadsLock);
+    workerThreadsLock = nullptr;
 }
 
 static void
@@ -5650,7 +5716,7 @@ dom_doFoo(JSContext* cx, HandleObject obj, void* self, const JSJitMethodCallArgs
 static const JSJitInfo dom_x_getterinfo = {
     { (JSJitGetterOp)dom_get_x },
     { 0 },    /* protoID */
-    0,        /* depth */
+    { 0 },    /* depth */
     JSJitInfo::AliasNone, /* aliasSet */
     JSJitInfo::Getter,
     JSVAL_TYPE_UNKNOWN, /* returnType */
@@ -5666,7 +5732,7 @@ static const JSJitInfo dom_x_getterinfo = {
 static const JSJitInfo dom_x_setterinfo = {
     { (JSJitGetterOp)dom_set_x },
     { 0 },    /* protoID */
-    0,        /* depth */
+    { 0 },    /* depth */
     JSJitInfo::Setter,
     JSJitInfo::AliasEverything, /* aliasSet */
     JSVAL_TYPE_UNKNOWN, /* returnType */
@@ -5682,7 +5748,7 @@ static const JSJitInfo dom_x_setterinfo = {
 static const JSJitInfo doFoo_methodinfo = {
     { (JSJitGetterOp)dom_doFoo },
     { 0 },    /* protoID */
-    0,        /* depth */
+    { 0 },    /* depth */
     JSJitInfo::Method,
     JSJitInfo::AliasEverything, /* aliasSet */
     JSVAL_TYPE_UNKNOWN, /* returnType */
@@ -6995,9 +7061,7 @@ main(int argc, char** argv, char** envp)
 
     KillWatchdog(rt);
 
-    MOZ_ASSERT_IF(!CanUseExtraThreads(), workerThreads.empty());
-    for (size_t i = 0; i < workerThreads.length(); i++)
-        PR_JoinThread(workerThreads[i]);
+    KillWorkerThreads();
 
     DestructSharedArrayBufferMailbox();
 

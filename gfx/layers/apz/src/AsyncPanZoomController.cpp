@@ -31,11 +31,14 @@
 #include "mozilla/BasicEvents.h"        // for Modifiers, MODIFIER_*
 #include "mozilla/ClearOnShutdown.h"    // for ClearOnShutdown
 #include "mozilla/EventForwards.h"      // for nsEventStatus_*
+#include "mozilla/MouseEvents.h"        // for WidgetWheelEvent
 #include "mozilla/Preferences.h"        // for Preferences
 #include "mozilla/ReentrantMonitor.h"   // for ReentrantMonitorAutoEnter, etc
 #include "mozilla/StaticPtr.h"          // for StaticAutoPtr
 #include "mozilla/Telemetry.h"          // for Telemetry
 #include "mozilla/TimeStamp.h"          // for TimeDuration, TimeStamp
+#include "mozilla/dom/CheckerboardReportService.h" // for CheckerboardEventStorage
+             // note: CheckerboardReportService.h actually lives in gfx/layers/apz/util/
 #include "mozilla/dom/KeyframeEffect.h" // for ComputedTimingFunction
 #include "mozilla/dom/Touch.h"          // for Touch
 #include "mozilla/gfx/BasePoint.h"      // for BasePoint
@@ -862,7 +865,8 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
      mInputQueue(aInputQueue),
      mAPZCId(sAsyncPanZoomControllerCount++),
      mSharedLock(nullptr),
-     mAsyncTransformAppliedToContent(false)
+     mAsyncTransformAppliedToContent(false),
+     mCheckerboardEventLock("APZCBELock")
 {
   if (aGestures == USE_GESTURE_DETECTOR) {
     mGestureEventListener = new GestureEventListener(this);
@@ -1336,7 +1340,13 @@ nsEventStatus AsyncPanZoomController::OnTouchEnd(const MultiTouchInput& aEvent) 
     if (CurrentTouchBlock()->GetActiveTouchCount() == 0) {
       // It's possible we may be overscrolled if the user tapped during a
       // previous overscroll pan. Make sure to snap back in this situation.
-      if (!SnapBackIfOverscrolled()) {
+      // An ancestor APZC could be overscrolled instead of this APZC, so
+      // walk the handoff chain as well.
+      CurrentTouchBlock()->GetOverscrollHandoffChain()->SnapBackOverscrolledApzc(this);
+      // SnapBackOverscrolledApzc() will put any APZC it causes to snap back
+      // into the OVERSCROLL_ANIMATION state. If that's not us, since we're
+      // done TOUCHING enter the NOTHING state.
+      if (mState != OVERSCROLL_ANIMATION) {
         SetState(NOTHING);
       }
     }
@@ -1630,17 +1640,10 @@ AsyncPanZoomController::GetScrollWheelDelta(const ScrollWheelInput& aEvent) cons
   if (isRootContent &&
       gfxPrefs::MouseWheelHasRootScrollDeltaOverride() &&
       !aEvent.IsCustomizedByUserPrefs() &&
-      aEvent.mDeltaType == ScrollWheelInput::SCROLLDELTA_LINE)
-  {
-    // Only apply delta multipliers if we're increasing the delta.
-    double hfactor = double(gfxPrefs::MouseWheelRootHScrollDeltaFactor()) / 100;
-    double vfactor = double(gfxPrefs::MouseWheelRootVScrollDeltaFactor()) / 100;
-    if (vfactor > 1.0) {
-      delta.x *= hfactor;
-    }
-    if (hfactor > 1.0) {
-      delta.y *= vfactor;
-    }
+      aEvent.mDeltaType == ScrollWheelInput::SCROLLDELTA_LINE &&
+      aEvent.mAllowToOverrideSystemScrollSpeed) {
+    delta.x = WidgetWheelEvent::ComputeOverriddenDelta(delta.x, false);
+    delta.y = WidgetWheelEvent::ComputeOverriddenDelta(delta.y, true);
   }
 
   // If this is a line scroll, and this event was part of a scroll series, then
@@ -2376,15 +2379,22 @@ void AsyncPanZoomController::OverscrollBy(ParentLayerPoint& aOverscroll) {
   // scroll to begin with.
   bool xCanScroll = mX.CanScroll();
   bool yCanScroll = mY.CanScroll();
-
   bool xConsumed = FuzzyEqualsAdditive(aOverscroll.x, 0.0f, COORDINATE_EPSILON);
+  bool yConsumed = FuzzyEqualsAdditive(aOverscroll.y, 0.0f, COORDINATE_EPSILON);
+
+#if defined(MOZ_ANDROID_APZ)
+  RefPtr<GeckoContentController> controller = GetGeckoContentController();
+  if (controller && ((xCanScroll && !xConsumed) || (yCanScroll && !yConsumed))) {
+    controller->UpdateOverscrollOffset(aOverscroll.x, aOverscroll.y);
+    aOverscroll.x = aOverscroll.y = 0.0f;
+  }
+#else
   if (xCanScroll && !xConsumed) {
     mX.OverscrollBy(aOverscroll.x);
     aOverscroll.x = 0;
     xConsumed = true;
   }
 
-  bool yConsumed = FuzzyEqualsAdditive(aOverscroll.y, 0.0f, COORDINATE_EPSILON);
   if (yCanScroll && !yConsumed) {
     mY.OverscrollBy(aOverscroll.y);
     aOverscroll.y = 0;
@@ -2394,6 +2404,7 @@ void AsyncPanZoomController::OverscrollBy(ParentLayerPoint& aOverscroll) {
   if ((xCanScroll && xConsumed) || (yCanScroll && yConsumed)) {
     ScheduleComposite();
   }
+#endif
 }
 
 RefPtr<const OverscrollHandoffChain> AsyncPanZoomController::BuildOverscrollHandoffChain() {
@@ -2492,7 +2503,14 @@ void AsyncPanZoomController::HandleFlingOverscroll(const ParentLayerPoint& aVelo
                                    aScrolledApzc};
     treeManagerLocal->DispatchFling(this, handoffState);
     if (!IsZero(handoffState.mVelocity) && IsPannable() && gfxPrefs::APZOverscrollEnabled()) {
+#if defined(MOZ_ANDROID_APZ)
+      RefPtr<GeckoContentController> controller = GetGeckoContentController();
+      if (controller) {
+        controller->UpdateOverscrollVelocity(handoffState.mVelocity.x, handoffState.mVelocity.y);
+      }
+#else
       StartOverscrollAnimation(handoffState.mVelocity);
+#endif
     }
   }
 }
@@ -2619,6 +2637,19 @@ void AsyncPanZoomController::SetCompositorParent(CompositorParent* aCompositorPa
 
 void AsyncPanZoomController::ShareFrameMetricsAcrossProcesses() {
   mSharingFrameMetricsAcrossProcesses = true;
+}
+
+void AsyncPanZoomController::AdjustScrollForSurfaceShift(const ScreenPoint& aShift)
+{
+  ReentrantMonitorAutoEnter lock(mMonitor);
+  CSSPoint adjustment =
+    ViewAs<ParentLayerPixel>(aShift, PixelCastJustification::ScreenIsParentLayerForRoot)
+    / mFrameMetrics.GetZoom();
+  APZC_LOG("%p adjusting scroll position by %s for surface shift\n",
+    this, Stringify(adjustment).c_str());
+  mFrameMetrics.ScrollBy(adjustment);
+  ScheduleCompositeAndMaybeRepaint();
+  UpdateSharedCompositorFrameMetrics();
 }
 
 void AsyncPanZoomController::ScrollBy(const CSSPoint& aOffset) {
@@ -2871,13 +2902,16 @@ AsyncPanZoomController::RequestContentRepaint(const FrameMetrics& aFrameMetrics,
   }
 
   APZC_LOG_FM(aFrameMetrics, "%p requesting content repaint", this);
-  if (mCheckerboardEvent) {
-    std::stringstream info;
-    info << " velocity " << aVelocity;
-    std::string str = info.str();
-    mCheckerboardEvent->UpdateRendertraceProperty(
-        CheckerboardEvent::RequestedDisplayPort, GetDisplayPortRect(aFrameMetrics),
-        str);
+  { // scope lock
+    MutexAutoLock lock(mCheckerboardEventLock);
+    if (mCheckerboardEvent && mCheckerboardEvent->IsRecordingTrace()) {
+      std::stringstream info;
+      info << " velocity " << aVelocity;
+      std::string str = info.str();
+      mCheckerboardEvent->UpdateRendertraceProperty(
+          CheckerboardEvent::RequestedDisplayPort, GetDisplayPortRect(aFrameMetrics),
+          str);
+    }
   }
 
   controller->RequestContentRepaint(aFrameMetrics);
@@ -2981,11 +3015,14 @@ bool AsyncPanZoomController::AdvanceAnimations(const TimeStamp& aSampleTime)
 
     requestAnimationFrame = UpdateAnimation(aSampleTime, &deferredTasks);
 
-    if (mCheckerboardEvent) {
-      mCheckerboardEvent->UpdateRendertraceProperty(
-          CheckerboardEvent::UserVisible,
-          CSSRect(mFrameMetrics.GetScrollOffset(),
-                  mFrameMetrics.CalculateCompositedSizeInCssPixels()));
+    { // scope lock
+      MutexAutoLock lock(mCheckerboardEventLock);
+      if (mCheckerboardEvent) {
+        mCheckerboardEvent->UpdateRendertraceProperty(
+            CheckerboardEvent::UserVisible,
+            CSSRect(mFrameMetrics.GetScrollOffset(),
+                    mFrameMetrics.CalculateCompositedSizeInCssPixels()));
+      }
     }
   }
 
@@ -3102,24 +3139,42 @@ AsyncPanZoomController::ReportCheckerboard(const TimeStamp& aSampleTime)
     // checkerboard once per composite though.
     return;
   }
-  uint32_t time = (aSampleTime - mLastCheckerboardReport).ToMilliseconds();
-  uint32_t magnitude = GetCheckerboardMagnitude();
-  // TODO: make this a function of velocity
-  mozilla::Telemetry::Accumulate(
-      mozilla::Telemetry::CHECKERBOARDED_CSSPIXELS_MS, magnitude * time);
   mLastCheckerboardReport = aSampleTime;
 
-  if (!mCheckerboardEvent && gfxPrefs::APZRecordCheckerboarding()) {
-    mCheckerboardEvent = MakeUnique<CheckerboardEvent>();
+  bool recordTrace = gfxPrefs::APZRecordCheckerboarding();
+  bool forTelemetry = Telemetry::CanRecordExtended();
+  uint32_t magnitude = GetCheckerboardMagnitude();
+
+  MutexAutoLock lock(mCheckerboardEventLock);
+  if (!mCheckerboardEvent && (recordTrace || forTelemetry)) {
+    mCheckerboardEvent = MakeUnique<CheckerboardEvent>(recordTrace);
   }
-  if (mCheckerboardEvent) {
-    if (mCheckerboardEvent->RecordFrameInfo(magnitude)) {
-      // This checkerboard event is done. TODO: save the info somewhere or
-      // dispatch it to telemetry or something. For now we just print it.
-      std::stringstream log(mCheckerboardEvent->GetLog());
-      print_stderr(log);
-      mCheckerboardEvent = nullptr;
+  if (magnitude) {
+    mPotentialCheckerboardTracker.CheckerboardSeen();
+  }
+  if (mCheckerboardEvent && mCheckerboardEvent->RecordFrameInfo(magnitude)) {
+    // This checkerboard event is done. Report some metrics to telemetry.
+    mozilla::Telemetry::Accumulate(mozilla::Telemetry::CHECKERBOARD_SEVERITY,
+      mCheckerboardEvent->GetSeverity());
+    mozilla::Telemetry::Accumulate(mozilla::Telemetry::CHECKERBOARD_PEAK,
+      mCheckerboardEvent->GetPeak());
+    mozilla::Telemetry::Accumulate(mozilla::Telemetry::CHECKERBOARD_DURATION,
+      (uint32_t)mCheckerboardEvent->GetDuration().ToMilliseconds());
+
+    mPotentialCheckerboardTracker.CheckerboardDone();
+
+    if (recordTrace) {
+      // if the pref is enabled, also send it to the storage class. it may be
+      // chosen for public display on about:checkerboard, the hall of fame for
+      // checkerboard events.
+      uint32_t severity = mCheckerboardEvent->GetSeverity();
+      std::string log = mCheckerboardEvent->GetLog();
+      NS_DispatchToMainThread(NS_NewRunnableFunction([severity, log]() {
+          RefPtr<CheckerboardEventStorage> storage = CheckerboardEventStorage::GetInstance();
+          storage->ReportCheckerboard(severity, log);
+      }));
     }
+    mCheckerboardEvent = nullptr;
   }
 }
 
@@ -3157,36 +3212,39 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
   APZC_LOG_FM(aLayerMetrics, "%p got a NotifyLayersUpdated with aIsFirstPaint=%d, aThisLayerTreeUpdated=%d",
     this, aIsFirstPaint, aThisLayerTreeUpdated);
 
-  if (mCheckerboardEvent) {
-    std::string str;
-    if (aThisLayerTreeUpdated) {
-      if (!aLayerMetrics.GetPaintRequestTime().IsNull()) {
-        // Note that we might get the paint request time as non-null, but with
-        // aThisLayerTreeUpdated false. That can happen if we get a layer transaction
-        // from a different process right after we get the layer transaction with
-        // aThisLayerTreeUpdated == true. In this case we want to ignore the
-        // paint request time because it was already dumped in the previous layer
-        // transaction.
-        TimeDuration paintTime = TimeStamp::Now() - aLayerMetrics.GetPaintRequestTime();
-        std::stringstream info;
-        info << " painttime " << paintTime.ToMilliseconds();
-        str = info.str();
-      } else {
-        // This might be indicative of a wasted paint particularly if it happens
-        // during a checkerboard event.
-        str = " (this layertree updated)";
+  { // scope lock
+    MutexAutoLock lock(mCheckerboardEventLock);
+    if (mCheckerboardEvent && mCheckerboardEvent->IsRecordingTrace()) {
+      std::string str;
+      if (aThisLayerTreeUpdated) {
+        if (!aLayerMetrics.GetPaintRequestTime().IsNull()) {
+          // Note that we might get the paint request time as non-null, but with
+          // aThisLayerTreeUpdated false. That can happen if we get a layer transaction
+          // from a different process right after we get the layer transaction with
+          // aThisLayerTreeUpdated == true. In this case we want to ignore the
+          // paint request time because it was already dumped in the previous layer
+          // transaction.
+          TimeDuration paintTime = TimeStamp::Now() - aLayerMetrics.GetPaintRequestTime();
+          std::stringstream info;
+          info << " painttime " << paintTime.ToMilliseconds();
+          str = info.str();
+        } else {
+          // This might be indicative of a wasted paint particularly if it happens
+          // during a checkerboard event.
+          str = " (this layertree updated)";
+        }
       }
-    }
-    mCheckerboardEvent->UpdateRendertraceProperty(
-        CheckerboardEvent::Page, aLayerMetrics.GetScrollableRect());
-    mCheckerboardEvent->UpdateRendertraceProperty(
-        CheckerboardEvent::PaintedDisplayPort,
-        aLayerMetrics.GetDisplayPort() + aLayerMetrics.GetScrollOffset(),
-        str);
-    if (!aLayerMetrics.GetCriticalDisplayPort().IsEmpty()) {
       mCheckerboardEvent->UpdateRendertraceProperty(
-          CheckerboardEvent::PaintedCriticalDisplayPort,
-          aLayerMetrics.GetCriticalDisplayPort() + aLayerMetrics.GetScrollOffset());
+          CheckerboardEvent::Page, aLayerMetrics.GetScrollableRect());
+      mCheckerboardEvent->UpdateRendertraceProperty(
+          CheckerboardEvent::PaintedDisplayPort,
+          aLayerMetrics.GetDisplayPort() + aLayerMetrics.GetScrollOffset(),
+          str);
+      if (!aLayerMetrics.GetCriticalDisplayPort().IsEmpty()) {
+        mCheckerboardEvent->UpdateRendertraceProperty(
+            CheckerboardEvent::PaintedCriticalDisplayPort,
+            aLayerMetrics.GetCriticalDisplayPort() + aLayerMetrics.GetScrollOffset());
+      }
     }
   }
 
@@ -3372,7 +3430,7 @@ APZCTreeManager* AsyncPanZoomController::GetApzcTreeManager() const {
   return mTreeManager;
 }
 
-void AsyncPanZoomController::ZoomToRect(CSSRect aRect) {
+void AsyncPanZoomController::ZoomToRect(CSSRect aRect, const uint32_t aFlags) {
   if (!aRect.IsFinite()) {
     NS_WARNING("ZoomToRect got called with a non-finite rect; ignoring...");
     return;
@@ -3413,16 +3471,22 @@ void AsyncPanZoomController::ZoomToRect(CSSRect aRect) {
       targetZoom = CSSToParentLayerScale(std::min(compositionBounds.width / aRect.width,
                                                   compositionBounds.height / aRect.height));
     }
+
     // 1. If the rect is empty, the content-side logic for handling a double-tap
     //    requested that we zoom out.
     // 2. currentZoom is equal to mZoomConstraints.mMaxZoom and user still double-tapping it
     // 3. currentZoom is equal to localMinZoom and user still double-tapping it
     // Treat these three cases as a request to zoom out as much as possible.
-    bool zoomOut = false;
-    if (aRect.IsEmpty() ||
+    bool zoomOut;
+    if (aFlags & DISABLE_ZOOM_OUT) {
+      zoomOut = false;
+    } else {
+      zoomOut = aRect.IsEmpty() ||
         (currentZoom == localMaxZoom && targetZoom >= localMaxZoom) ||
-        (currentZoom == localMinZoom && targetZoom <= localMinZoom)) {
-      zoomOut = true;
+        (currentZoom == localMinZoom && targetZoom <= localMinZoom);
+    }
+
+    if (zoomOut) {
       CSSSize compositedSize = mFrameMetrics.CalculateCompositedSizeInCssPixels();
       float y = scrollOffset.y;
       float newHeight =
@@ -3440,6 +3504,9 @@ void AsyncPanZoomController::ZoomToRect(CSSRect aRect) {
 
     targetZoom.scale = clamped(targetZoom.scale, localMinZoom.scale, localMaxZoom.scale);
     FrameMetrics endZoomToMetrics = mFrameMetrics;
+    if (aFlags & PAN_INTO_VIEW_ONLY) {
+      targetZoom = currentZoom;
+    }
     endZoomToMetrics.SetZoom(CSSToParentLayerScale2D(targetZoom));
 
     // Adjust the zoomToRect to a sensible position to prevent overscrolling.
@@ -3519,6 +3586,11 @@ AsyncPanZoomController::ResetTouchInputState()
     listener->HandleInputEvent(cancel);
   }
   CancelAnimationAndGestureState();
+  // Clear overscroll along the entire handoff chain, in case an APZC
+  // later in the chain is overscrolled.
+  if (TouchBlockState* block = CurrentTouchBlock()) {
+    block->GetOverscrollHandoffChain()->ClearOverscroll();
+  }
 }
 
 void
@@ -3562,6 +3634,7 @@ void AsyncPanZoomController::DispatchStateChangeNotification(PanZoomState aOldSt
 
   if (RefPtr<GeckoContentController> controller = GetGeckoContentController()) {
     if (!IsTransformingState(aOldState) && IsTransformingState(aNewState)) {
+      mPotentialCheckerboardTracker.TransformStarted();
       controller->NotifyAPZStateChange(
           GetGuid(), APZStateChange::TransformBegin);
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
@@ -3572,6 +3645,7 @@ void AsyncPanZoomController::DispatchStateChangeNotification(PanZoomState aOldSt
       }
 #endif
     } else if (IsTransformingState(aOldState) && !IsTransformingState(aNewState)) {
+      mPotentialCheckerboardTracker.TransformStopped();
       controller->NotifyAPZStateChange(
           GetGuid(), APZStateChange::TransformEnd);
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)

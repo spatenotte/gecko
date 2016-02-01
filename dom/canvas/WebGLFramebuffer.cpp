@@ -989,7 +989,13 @@ WebGLFramebuffer::ValidateAndInitAttachments(const char* funcName)
     }
 
     // Clear!
-    mContext->ForceClearFramebufferWithDefaultValues(clearBits, false);
+    {
+        // This FB maybe bind to GL_READ_FRAMEBUFFER and glClear only
+        // clear GL_DRAW_FRAMEBUFFER. So bind FB to GL_DRAW_FRAMEBUFFER
+        // here.
+        gl::ScopedBindFramebuffer autoFB(mContext->gl, mGLName);
+        mContext->ForceClearFramebufferWithDefaultValues(clearBits, false);
+    }
 
     if (hasDrawBuffers) {
         fnDrawBuffers(mDrawBuffers);
@@ -1150,6 +1156,8 @@ WebGLFramebuffer::GetAttachmentParameter(const char* funcName, JSContext* cx,
 
         attachPoint = GetAttachPoint(LOCAL_GL_DEPTH_ATTACHMENT);
     }
+
+    FinalizeAttachments();
 
     return attachPoint->GetParameter(funcName, mContext, cx, target, attachment, pname,
                                      out_error);

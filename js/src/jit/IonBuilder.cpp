@@ -3554,8 +3554,12 @@ IonBuilder::replaceTypeSet(MDefinition* subject, TemporaryTypeSet* type, MTest* 
 
             if (ins->type() == MIRType_Undefined)
                 current->setSlot(i, constant(UndefinedValue()));
-            if (ins->type() == MIRType_Null)
+            else if (ins->type() == MIRType_Null)
                 current->setSlot(i, constant(NullValue()));
+            else if (ins->type() == MIRType_MagicOptimizedArguments)
+                current->setSlot(i, constant(MagicValue(JS_OPTIMIZED_ARGUMENTS)));
+            else
+                MOZ_ASSERT(!IsMagicType(ins->type()));
             continue;
         }
 
@@ -3575,8 +3579,12 @@ IonBuilder::replaceTypeSet(MDefinition* subject, TemporaryTypeSet* type, MTest* 
 
                 if (replace->type() == MIRType_Undefined)
                     replace = constant(UndefinedValue());
-                if (replace->type() == MIRType_Null)
+                else if (replace->type() == MIRType_Null)
                     replace = constant(NullValue());
+                else if (replace->type() == MIRType_MagicOptimizedArguments)
+                    replace = constant(MagicValue(JS_OPTIMIZED_ARGUMENTS));
+                else
+                    MOZ_ASSERT(!IsMagicType(ins->type()));
             }
             current->setSlot(i, replace);
         }
@@ -5036,7 +5044,7 @@ IonBuilder::inlineScriptedCall(CallInfo& callInfo, JSFunction* target)
         if (types && !types->unknown()) {
             TemporaryTypeSet* clonedTypes = types->clone(alloc_->lifoAlloc());
             if (!clonedTypes)
-                return oom();
+                return false;
             MTypeBarrier* barrier = MTypeBarrier::New(alloc(), callInfo.thisArg(), clonedTypes);
             current->add(barrier);
             if (barrier->type() == MIRType_Undefined)
@@ -8298,27 +8306,32 @@ IonBuilder::testGlobalLexicalBinding(PropertyName* name)
     jsid id = NameToId(name);
     if (analysisContext)
         lexicalKey->ensureTrackedProperty(analysisContext, id);
-    if (!lexicalKey->unknownProperties()) {
-        // If the property is not found on the global lexical scope but it is
-        // found on the global and is configurable, freeze the typeset for its
-        // non-existence.
-        //
-        // In the case that it is found on the global but is non-configurable,
-        // the binding cannot be shadowed by a global lexical binding.
-        HeapTypeSetKey lexicalProperty = lexicalKey->property(id);
-        Shape* shape = obj->lookupPure(name);
-        if (shape) {
-            if ((JSOp(*pc) != JSOP_GETGNAME && !shape->writable()) ||
-                obj->getSlot(shape->slot()).isMagic(JS_UNINITIALIZED_LEXICAL))
-            {
-                return nullptr;
-            }
-        } else {
-            shape = script()->global().lookupPure(name);
-            if (!shape || shape->configurable())
-                MOZ_ALWAYS_FALSE(lexicalProperty.isOwnProperty(constraints()));
-            obj = &script()->global();
+
+    // If the property is not found on the global lexical scope but it is found
+    // on the global and is configurable, try to freeze the typeset for its
+    // non-existence.  If we don't have type information then fail.
+    //
+    // In the case that it is found on the global but is non-configurable,
+    // the binding cannot be shadowed by a global lexical binding.
+    Maybe<HeapTypeSetKey> lexicalProperty;
+    if (!lexicalKey->unknownProperties())
+        lexicalProperty.emplace(lexicalKey->property(id));
+    Shape* shape = obj->lookupPure(name);
+    if (shape) {
+        if ((JSOp(*pc) != JSOP_GETGNAME && !shape->writable()) ||
+            obj->getSlot(shape->slot()).isMagic(JS_UNINITIALIZED_LEXICAL))
+        {
+            return nullptr;
         }
+    } else {
+        shape = script()->global().lookupPure(name);
+        if (!shape || shape->configurable()) {
+            if (lexicalProperty.isSome())
+                MOZ_ALWAYS_FALSE(lexicalProperty->isOwnProperty(constraints()));
+            else
+                return nullptr;
+        }
+        obj = &script()->global();
     }
 
     return obj;
@@ -8667,10 +8680,10 @@ IonBuilder::checkTypedObjectIndexInBounds(int32_t elemSize,
         length = constantInt(lenOfAll);
 
         // If we are not loading the length from the object itself, only
-        // optimize if the array buffer can't have been neutered.
+        // optimize if the array buffer can never be a detached array buffer.
         TypeSet::ObjectKey* globalKey = TypeSet::ObjectKey::get(&script()->global());
-        if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_NEUTERED)) {
-            trackOptimizationOutcome(TrackedOutcome::TypedObjectNeutered);
+        if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER)) {
+            trackOptimizationOutcome(TrackedOutcome::TypedObjectHasDetachedBuffer);
             return false;
         }
     } else {
@@ -10217,7 +10230,7 @@ IonBuilder::jsop_length_fastPath()
         TypedObjectPrediction prediction = typedObjectPrediction(obj);
         if (!prediction.isUseless()) {
             TypeSet::ObjectKey* globalKey = TypeSet::ObjectKey::get(&script()->global());
-            if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
+            if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER))
                 return false;
 
             MInstruction* length;
@@ -11249,26 +11262,6 @@ IonBuilder::getPropTryConstant(bool* emitted, MDefinition* obj, jsid id, Tempora
     return true;
 }
 
-MIRType
-IonBuilder::SimdTypeDescrToMIRType(SimdTypeDescr::Type type)
-{
-    switch (type) {
-      case SimdTypeDescr::Int32x4:   return MIRType_Int32x4;
-      case SimdTypeDescr::Float32x4: return MIRType_Float32x4;
-      case SimdTypeDescr::Bool32x4:  return MIRType_Bool32x4;
-      case SimdTypeDescr::Int8x16:
-      case SimdTypeDescr::Int16x8:
-      case SimdTypeDescr::Uint8x16:
-      case SimdTypeDescr::Uint16x8:
-      case SimdTypeDescr::Uint32x4:
-      case SimdTypeDescr::Float64x2:
-      case SimdTypeDescr::Bool8x16:
-      case SimdTypeDescr::Bool16x8:
-      case SimdTypeDescr::Bool64x2: return MIRType_Undefined;
-    }
-    MOZ_CRASH("unimplemented MIR type for a SimdTypeDescr::Type");
-}
-
 bool
 IonBuilder::getPropTryTypedObject(bool* emitted,
                                   MDefinition* obj,
@@ -11318,9 +11311,9 @@ IonBuilder::getPropTryScalarPropOfTypedObject(bool* emitted, MDefinition* typedO
     // Must always be loading the same scalar type
     Scalar::Type fieldType = fieldPrediction.scalarType();
 
-    // Don't optimize if the typed object might be neutered.
+    // Don't optimize if the typed object's underlying buffer may be detached.
     TypeSet::ObjectKey* globalKey = TypeSet::ObjectKey::get(&script()->global());
-    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
+    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER))
         return true;
 
     trackOptimizationSuccess();
@@ -11342,7 +11335,7 @@ IonBuilder::getPropTryReferencePropOfTypedObject(bool* emitted, MDefinition* typ
     ReferenceTypeDescr::Type fieldType = fieldPrediction.referenceType();
 
     TypeSet::ObjectKey* globalKey = TypeSet::ObjectKey::get(&script()->global());
-    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
+    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER))
         return true;
 
     trackOptimizationSuccess();
@@ -11362,9 +11355,9 @@ IonBuilder::getPropTryComplexPropOfTypedObject(bool* emitted,
                                                TypedObjectPrediction fieldPrediction,
                                                size_t fieldIndex)
 {
-    // Don't optimize if the typed object might be neutered.
+    // Don't optimize if the typed object's underlying buffer may be detached.
     TypeSet::ObjectKey* globalKey = TypeSet::ObjectKey::get(&script()->global());
-    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
+    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER))
         return true;
 
     // OK, perform the optimization
@@ -12352,7 +12345,7 @@ IonBuilder::setPropTryReferencePropOfTypedObject(bool* emitted,
     ReferenceTypeDescr::Type fieldType = fieldPrediction.referenceType();
 
     TypeSet::ObjectKey* globalKey = TypeSet::ObjectKey::get(&script()->global());
-    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
+    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER))
         return true;
 
     LinearSum byteOffset(alloc());
@@ -12379,9 +12372,9 @@ IonBuilder::setPropTryScalarPropOfTypedObject(bool* emitted,
     // Must always be loading the same scalar type
     Scalar::Type fieldType = fieldPrediction.scalarType();
 
-    // Don't optimize if the typed object might be neutered.
+    // Don't optimize if the typed object's underlying buffer may be detached.
     TypeSet::ObjectKey* globalKey = TypeSet::ObjectKey::get(&script()->global());
-    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_NEUTERED))
+    if (globalKey->hasFlags(constraints(), OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER))
         return true;
 
     LinearSum byteOffset(alloc());

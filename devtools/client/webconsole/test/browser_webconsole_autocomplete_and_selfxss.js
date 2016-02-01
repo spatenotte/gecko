@@ -1,6 +1,8 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
-/* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 "use strict";
 
@@ -71,23 +73,23 @@ function consoleOpened(HUD) {
     WebConsoleUtils.usageCount = 0;
     updateEditUIVisibility();
 
-    let oldVal = jsterm.inputNode.value;
+    let oldVal = jsterm.getInputValue();
     goDoCommand("cmd_paste");
     let notificationbox = jsterm.hud.document.getElementById("webconsole-notificationbox");
     let notification = notificationbox.getNotificationWithValue("selfxss-notification");
     ok(notification, "Self-xss notification shown");
-    is(oldVal, jsterm.inputNode.value, "Paste blocked by self-xss prevention");
+    is(oldVal, jsterm.getInputValue(), "Paste blocked by self-xss prevention");
 
     // Allow pasting
-    jsterm.inputNode.value = "allow pasting";
+    jsterm.setInputValue("allow pasting");
     let evt = document.createEvent("KeyboardEvent");
     evt.initKeyEvent("keyup", true, true, window,
                      0, 0, 0, 0,
                      0, " ".charCodeAt(0));
     jsterm.inputNode.dispatchEvent(evt);
-    jsterm.inputNode.value = "";
+    jsterm.setInputValue("");
     goDoCommand("cmd_paste");
-    isnot("", jsterm.inputNode.value, "Paste works");
+    isnot("", jsterm.getInputValue(), "Paste works");
   }
   function onClipboardPaste() {
     ok(!jsterm.completeNode.value, "no completion value after paste");

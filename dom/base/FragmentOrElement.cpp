@@ -239,10 +239,15 @@ dom::Element*
 nsIContent::GetEditingHost()
 {
   // If this isn't editable, return nullptr.
-  NS_ENSURE_TRUE(IsEditableInternal(), nullptr);
+  if (!IsEditableInternal()) {
+    return nullptr;
+  }
 
   nsIDocument* doc = GetComposedDoc();
-  NS_ENSURE_TRUE(doc, nullptr);
+  if (!doc) {
+    return nullptr;
+  }
+
   // If this is in designMode, we should return <body>
   if (doc->HasFlag(NODE_IS_EDITABLE) && !IsInShadowTree()) {
     return doc->GetBodyElement();
@@ -842,7 +847,7 @@ nsIContent::PreHandleEvent(EventChainPreVisitor& aVisitor)
       // the event to chrome (nsPIDOMWindow::GetParentTarget()).
       // The load event is special in that we don't ever propagate it
       // to chrome.
-      nsCOMPtr<nsPIDOMWindow> win = OwnerDoc()->GetWindow();
+      nsCOMPtr<nsPIDOMWindowOuter> win = OwnerDoc()->GetWindow();
       EventTarget* parentTarget = win && aVisitor.mEvent->mMessage != eLoad
         ? win->GetParentTarget() : nullptr;
 

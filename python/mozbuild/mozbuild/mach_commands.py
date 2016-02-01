@@ -39,6 +39,8 @@ from mozpack.manifests import (
     InstallManifest,
 )
 
+from mozbuild.backend import backends
+
 
 BUILD_WHAT_HELP = '''
 What to build. Can be a top-level make target or a relative directory. If
@@ -384,8 +386,7 @@ class Build(MachCommandBase):
                 # backend. But that involves make reinvoking itself and there
                 # are undesired side-effects of this. See bug 877308 for a
                 # comprehensive history lesson.
-                self._run_make(directory=self.topobjdir,
-                    target='backend.RecursiveMakeBackend',
+                self._run_make(directory=self.topobjdir, target='backend',
                     line_handler=output.on_line, log=False,
                     print_directory=False)
 
@@ -601,11 +602,13 @@ class Build(MachCommandBase):
         help='Show a diff of changes.')
     # It would be nice to filter the choices below based on
     # conditions, but that is for another day.
-    @CommandArgument('-b', '--backend', nargs='+',
-        choices=['RecursiveMake', 'AndroidEclipse', 'CppEclipse',
-                 'VisualStudio', 'FasterMake', 'CompileDB', 'ChromeMap'],
+    @CommandArgument('-b', '--backend', nargs='+', choices=sorted(backends),
         help='Which backend to build.')
-    def build_backend(self, backend, diff=False):
+    @CommandArgument('-v', '--verbose', action='store_true',
+        help='Verbose output.')
+    @CommandArgument('-n', '--dry-run', action='store_true',
+        help='Do everything except writing files out.')
+    def build_backend(self, backend, diff=False, verbose=False, dry_run=False):
         python = self.virtualenv_manager.python_path
         config_status = os.path.join(self.topobjdir, 'config.status')
 
@@ -621,6 +624,10 @@ class Build(MachCommandBase):
             args.extend(backend)
         if diff:
             args.append('--diff')
+        if verbose:
+            args.append('--verbose')
+        if dry_run:
+            args.append('--dry-run')
 
         return self._run_command_in_objdir(args=args, pass_thru=True,
             ensure_exit_code=False)
@@ -1009,8 +1016,11 @@ class Package(MachCommandBase):
 
     @Command('package', category='post-build',
         description='Package the built product for distribution as an APK, DMG, etc.')
-    def package(self):
-        ret = self._run_make(directory=".", target='package', ensure_exit_code=False)
+    @CommandArgument('-v', '--verbose', action='store_true',
+        help='Verbose output for what commands the packaging process is running.')
+    def package(self, verbose=False):
+        ret = self._run_make(directory=".", target='package',
+                             silent=not verbose, ensure_exit_code=False)
         if ret == 0:
             self.notify('Packaging complete')
         return ret
@@ -1447,7 +1457,7 @@ class PackageFrontend(MachCommandBase):
     def _make_artifacts(self, tree=None, job=None):
         self._activate_virtualenv()
         self.virtualenv_manager.install_pip_package('pylru==1.0.9')
-        self.virtualenv_manager.install_pip_package('taskcluster==0.0.16')
+        self.virtualenv_manager.install_pip_package('taskcluster==0.0.32')
         self.virtualenv_manager.install_pip_package('mozregression==1.0.2')
 
         state_dir = self._mach_context.state_dir
@@ -1464,23 +1474,21 @@ class PackageFrontend(MachCommandBase):
         artifacts = Artifacts(tree, job, log=self.log, cache_dir=cache_dir, hg=hg)
         return artifacts
 
-    def _compute_defaults(self, tree=None, job=None):
-        # Firefox front-end developers mostly use fx-team.  Post auto-land, make this central.
-        tree = tree or 'fx-team'
+    def _compute_platform(self, job=None):
         if job:
-            return (tree, job)
+            return job
         if self.substs.get('MOZ_BUILD_APP', '') == 'mobile/android':
             if self.substs['ANDROID_CPU_ARCH'] == 'x86':
-                return tree, 'android-x86'
-            return tree, 'android-api-11'
+                return 'android-x86'
+            return 'android-api-11'
         # TODO: check for 32/64 bit builds.  We'd like to use HAVE_64BIT_BUILD
         # but that relies on the compile environment.
         if self.defines.get('XP_LINUX', False):
-            return tree, 'linux64'
+            return 'linux64'
         if self.defines.get('XP_MACOSX', False):
-            return tree, 'macosx64'
+            return 'macosx64'
         if self.defines.get('XP_WIN', False):
-            return tree, 'win32'
+            return 'win32'
         raise Exception('Cannot determine default tree and job for |mach artifact|!')
 
     @ArtifactSubCommand('artifact', 'install',
@@ -1492,7 +1500,7 @@ class PackageFrontend(MachCommandBase):
         default=None)
     def artifact_install(self, source=None, tree=None, job=None, verbose=False):
         self._set_log_level(verbose)
-        tree, job = self._compute_defaults(tree, job)
+        job = self._compute_platform(job)
         artifacts = self._make_artifacts(tree=tree, job=job)
 
         manifest_path = mozpath.join(self.topobjdir, '_build_manifests', 'install', 'dist_bin')
@@ -1518,7 +1526,7 @@ class PackageFrontend(MachCommandBase):
         'Print the last pre-built artifact installed.')
     def artifact_print_last(self, tree=None, job=None, verbose=False):
         self._set_log_level(verbose)
-        tree, job = self._compute_defaults(tree, job)
+        job = self._compute_platform(job)
         artifacts = self._make_artifacts(tree=tree, job=job)
         artifacts.print_last()
         return 0
@@ -1527,7 +1535,7 @@ class PackageFrontend(MachCommandBase):
         'Print local artifact cache for debugging.')
     def artifact_print_cache(self, tree=None, job=None, verbose=False):
         self._set_log_level(verbose)
-        tree, job = self._compute_defaults(tree, job)
+        job = self._compute_platform(job)
         artifacts = self._make_artifacts(tree=tree, job=job)
         artifacts.print_cache()
         return 0
@@ -1536,7 +1544,7 @@ class PackageFrontend(MachCommandBase):
         'Delete local artifacts and reset local artifact cache.')
     def artifact_clear_cache(self, tree=None, job=None, verbose=False):
         self._set_log_level(verbose)
-        tree, job = self._compute_defaults(tree, job)
+        job = self._compute_platform(job)
         artifacts = self._make_artifacts(tree=tree, job=job)
         artifacts.clear_cache()
         return 0

@@ -183,6 +183,7 @@
 #include "nsSubDocumentFrame.h"
 #include "nsQueryObject.h"
 #include "nsLayoutStylesheetCache.h"
+#include "mozilla/layers/InputAPZContext.h"
 
 #ifdef ANDROID
 #include "nsIDocShellTreeOwner.h"
@@ -777,6 +778,7 @@ PresShell::PresShell()
     addedPointerEventEnabled = true;
   }
 
+  mPaintingIsFrozen = false;
   mHasCSSBackgroundColor = true;
   mIsLastChromeOnlyEscapeKeyConsumed = false;
   mHasReceivedPaintMessage = false;
@@ -799,6 +801,13 @@ PresShell::~PresShell()
   NS_ASSERTION(mFirstCallbackEventRequest == nullptr &&
                mLastCallbackEventRequest == nullptr,
                "post-reflow queues not empty.  This means we're leaking");
+
+  // Verify that if painting was frozen, but we're being removed from the tree,
+  // that we now re-enable painting on our refresh driver, since it may need to
+  // be re-used by another presentation.
+  if (mPaintingIsFrozen) {
+    mPresContext->RefreshDriver()->Thaw();
+  }
 
 #ifdef DEBUG
   MOZ_ASSERT(mPresArenaAllocCount == 0,
@@ -1870,8 +1879,7 @@ PresShell::FireResizeEvent()
   WidgetEvent event(true, mozilla::eResize);
   nsEventStatus status = nsEventStatus_eIgnore;
 
-  nsPIDOMWindow *window = mDocument->GetWindow();
-  if (window) {
+  if (nsPIDOMWindowOuter* window = mDocument->GetWindow()) {
     nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
     mInResize = true;
     EventDispatcher::Dispatch(window, mPresContext, &event, nullptr, &status);
@@ -2268,7 +2276,7 @@ nsIPresShell::GetRootScrollFrame() const
   // Ensure root frame is a viewport frame
   if (!rootFrame || nsGkAtoms::viewportFrame != rootFrame->GetType())
     return nullptr;
-  nsIFrame* theFrame = rootFrame->GetFirstPrincipalChild();
+  nsIFrame* theFrame = rootFrame->PrincipalChildList().FirstChild();
   if (!theFrame || nsGkAtoms::scrollFrame != theFrame->GetType())
     return nullptr;
   return theFrame;
@@ -2639,10 +2647,9 @@ nsIPresShell::GetFrameToScrollAsScrollable(
   nsCOMPtr<nsIContent> focusedContent;
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm && mDocument) {
-    nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(mDocument->GetWindow());
-
     nsCOMPtr<nsIDOMElement> focusedElement;
-    fm->GetFocusedElementForWindow(window, false, nullptr, getter_AddRefs(focusedElement));
+    fm->GetFocusedElementForWindow(mDocument->GetWindow(), false, nullptr,
+                                   getter_AddRefs(focusedElement));
     focusedContent = do_QueryInterface(focusedElement);
   }
   if (!focusedContent && mSelection) {
@@ -2988,11 +2995,11 @@ PresShell::GoToAnchor(const nsAString& aAnchorName, bool aScroll,
     }
     // Selection is at anchor.
     // Now focus the document itself if focus is on an element within it.
-    nsPIDOMWindow *win = mDocument->GetWindow();
+    nsPIDOMWindowOuter *win = mDocument->GetWindow();
 
     nsIFocusManager* fm = nsFocusManager::GetFocusManager();
     if (fm && win) {
-      nsCOMPtr<nsIDOMWindow> focusedWindow;
+      nsCOMPtr<mozIDOMWindowProxy> focusedWindow;
       fm->GetFocusedWindow(getter_AddRefs(focusedWindow));
       if (SameCOMIdentity(win, focusedWindow)) {
         fm->ClearFocus(focusedWindow);
@@ -3706,8 +3713,7 @@ PresShell::UnsuppressAndInvalidate()
   }
 
   // now that painting is unsuppressed, focus may be set on the document
-  nsPIDOMWindow *win = mDocument->GetWindow();
-  if (win)
+  if (nsPIDOMWindowOuter* win = mDocument->GetWindow())
     win->SetReadyForFocus();
 
   if (!mHaveShutDown) {
@@ -4865,10 +4871,9 @@ PresShell::PaintRangePaintInfo(nsTArray<nsAutoPtr<RangePaintInfo> >* aItems,
     nsIntRegion region =
       aRegion->ToAppUnits(nsPresContext::AppUnitsPerCSSPixel())
         .ToOutsidePixels(pc->AppUnitsPerDevPixel());
-    nsIntRegionRectIterator iter(region);
-    const nsIntRect* rect;
-    while ((rect = iter.Next())) {
-      ctx->Clip(gfxRect(rect->x, rect->y, rect->width, rect->height));
+    for (auto iter = region.RectIter(); !iter.Done(); iter.Next()) {
+      const nsIntRect& rect = iter.Get();
+      ctx->Clip(gfxRect(rect.x, rect.y, rect.width, rect.height));
     }
   }
 
@@ -5083,7 +5088,7 @@ static bool IsTransparentContainerElement(nsPresContext* aPresContext)
     return false;
   }
 
-  nsCOMPtr<nsPIDOMWindow> pwin = docShell->GetWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> pwin = docShell->GetWindow();
   if (!pwin)
     return false;
   nsCOMPtr<Element> containerElement = pwin->GetFrameElementInternal();
@@ -5447,6 +5452,13 @@ PresShell::ProcessSynthMouseMoveEvent(bool aFromScroll)
 
   nsCOMPtr<nsIPresShell> shell = pointVM->GetPresShell();
   if (shell) {
+    // Since this gets run in a refresh tick there isn't an InputAPZContext on
+    // the stack from the nsBaseWidget. We need to simulate one with at least
+    // the correct target guid, so that the correct callback transform gets
+    // applied if this event goes to a child process. The input block id is set
+    // to 0 because this is a synthetic event which doesn't really belong to any
+    // input block. Same for the APZ response field.
+    InputAPZContext apzContext(mMouseEventTargetGuid, 0, nsEventStatus_eIgnore);
     shell->DispatchSynthMouseMove(&event, !aFromScroll);
   }
 
@@ -5569,6 +5581,7 @@ PresShell::MarkImagesInSubtreeVisible(nsIFrame* aFrame, const nsRect& aRect)
 
   nsIScrollableFrame* scrollFrame = do_QueryFrame(aFrame);
   if (scrollFrame) {
+    scrollFrame->NotifyImageVisibilityUpdate();
     nsRect displayPort;
     bool usingDisplayport =
       nsLayoutUtils::GetDisplayPortForVisibilityTesting(
@@ -6315,13 +6328,12 @@ bool PresShell::InZombieDocument(nsIContent *aContent)
   return !doc || !doc->GetWindow();
 }
 
-already_AddRefed<nsPIDOMWindow>
+already_AddRefed<nsPIDOMWindowOuter>
 PresShell::GetRootWindow()
 {
-  nsCOMPtr<nsPIDOMWindow> window =
-    do_QueryInterface(mDocument->GetWindow());
+  nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetWindow();
   if (window) {
-    nsCOMPtr<nsPIDOMWindow> rootWindow = window->GetPrivateRoot();
+    nsCOMPtr<nsPIDOMWindowOuter> rootWindow = window->GetPrivateRoot();
     NS_ASSERTION(rootWindow, "nsPIDOMWindow::GetPrivateRoot() returns NULL");
     return rootWindow.forget();
   }
@@ -6379,12 +6391,12 @@ PresShell::DisableNonTestMouseEvents(bool aDisable)
   sDisableNonTestMouseEvents = aDisable;
 }
 
-already_AddRefed<nsPIDOMWindow>
+already_AddRefed<nsPIDOMWindowOuter>
 PresShell::GetFocusedDOMWindowInOurWindow()
 {
-  nsCOMPtr<nsPIDOMWindow> rootWindow = GetRootWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> rootWindow = GetRootWindow();
   NS_ENSURE_TRUE(rootWindow, nullptr);
-  nsCOMPtr<nsPIDOMWindow> focusedWindow;
+  nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
   nsFocusManager::GetFocusedDescendant(rootWindow, true,
                                        getter_AddRefs(focusedWindow));
   return focusedWindow.forget();
@@ -6414,9 +6426,11 @@ PresShell::RecordMouseLocation(WidgetGUIEvent* aEvent)
       nsView* rootView = mViewManager->GetRootView();
       mMouseLocation = nsLayoutUtils::TranslateWidgetToView(mPresContext,
         aEvent->widget, aEvent->refPoint, rootView);
+      mMouseEventTargetGuid = InputAPZContext::GetTargetLayerGuid();
     } else {
       mMouseLocation =
         nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, rootFrame);
+      mMouseEventTargetGuid = InputAPZContext::GetTargetLayerGuid();
     }
 #ifdef DEBUG_MOUSE_LOCATION
     if (aEvent->mMessage == eMouseEnterIntoWidget) {
@@ -6436,6 +6450,7 @@ PresShell::RecordMouseLocation(WidgetGUIEvent* aEvent)
     // this won't matter at all since we'll get the mouse move or enter after
     // the mouse exit when the mouse moves from one of our widgets into another.
     mMouseLocation = nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+    mMouseEventTargetGuid = InputAPZContext::GetTargetLayerGuid();
 #ifdef DEBUG_MOUSE_LOCATION
     printf("[ps=%p]got mouse exit for %p\n",
            this, aEvent->widget);
@@ -6642,7 +6657,7 @@ BuildTargetChainForBeforeAfterKeyboardEvent(nsINode* aTarget,
   if (aTargetIsIframe) {
     frameElement = aTarget->AsElement();
   } else {
-    nsPIDOMWindow* window = aTarget->OwnerDoc()->GetWindow();
+    nsPIDOMWindowOuter* window = aTarget->OwnerDoc()->GetWindow();
     frameElement = window ? window->GetFrameElementInternal() : nullptr;
   }
 
@@ -6651,7 +6666,7 @@ BuildTargetChainForBeforeAfterKeyboardEvent(nsINode* aTarget,
     if (CheckPermissionForBeforeAfterKeyboardEvent(frameElement)) {
       aChain.AppendElement(frameElement);
     }
-    nsPIDOMWindow* window = frameElement->OwnerDoc()->GetWindow();
+    nsPIDOMWindowOuter* window = frameElement->OwnerDoc()->GetWindow();
     frameElement = window ? window->GetFrameElementInternal() : nullptr;
   }
 }
@@ -6875,7 +6890,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
   if (AccessibleCaretEnabled()) {
     // We have to target the focus window because regardless of where the
     // touch goes, we want to access the copy paste manager.
-    nsCOMPtr<nsPIDOMWindow> window = GetFocusedDOMWindowInOurWindow();
+    nsCOMPtr<nsPIDOMWindowOuter> window = GetFocusedDOMWindowInOurWindow();
     nsCOMPtr<nsIDocument> retargetEventDoc =
       window ? window->GetExtantDoc() : nullptr;
     nsCOMPtr<nsIPresShell> presShell =
@@ -6932,7 +6947,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     // content in the last focused DOM window in same top level window.
     // Note, if no DOM window has been focused yet, we can discard the events.
     if (aEvent->IsTargetedAtFocusedWindow()) {
-      nsCOMPtr<nsPIDOMWindow> window = GetFocusedDOMWindowInOurWindow();
+      nsCOMPtr<nsPIDOMWindowOuter> window = GetFocusedDOMWindowInOurWindow();
       // No DOM window in same top level window has not been focused yet,
       // discard the events.
       if (!window) {
@@ -7396,9 +7411,8 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     if (aEvent->IsTargetedAtFocusedContent()) {
       mCurrentEventContent = nullptr;
 
-      nsCOMPtr<nsPIDOMWindow> window =
-        do_QueryInterface(mDocument->GetWindow());
-      nsCOMPtr<nsPIDOMWindow> focusedWindow;
+      nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetWindow();
+      nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
       nsCOMPtr<nsIContent> eventTarget =
         nsFocusManager::GetFocusedDescendant(window, false,
                                              getter_AddRefs(focusedWindow));
@@ -8439,7 +8453,7 @@ PresShell::DidPaintWindow()
 
     nsCOMPtr<nsIObserverService> obsvc = services::GetObserverService();
     if (obsvc && mDocument) {
-      nsPIDOMWindow* window = mDocument->GetWindow();
+      nsPIDOMWindowOuter* window = mDocument->GetWindow();
       nsCOMPtr<nsIDOMChromeWindow> chromeWin(do_QueryInterface(window));
       if (chromeWin) {
         obsvc->NotifyObservers(chromeWin, "widget-first-paint", nullptr);
@@ -8707,9 +8721,8 @@ DOMHighResTimeStamp
 PresShell::GetPerformanceNow()
 {
   DOMHighResTimeStamp now = 0;
-  nsPIDOMWindow* window = mDocument->GetInnerWindow();
 
-  if (window) {
+  if (nsPIDOMWindowInner* window = mDocument->GetInnerWindow()) {
     nsPerformance* perf = window->GetPerformance();
 
     if (perf) {
@@ -9461,7 +9474,7 @@ CompareTrees(nsPresContext* aFirstPresContext, nsIFrame* aFirstFrame,
     const nsFrameList& kids1 = !lists1.IsDone() ? lists1.CurrentList() : nsFrameList();
     const nsFrameList& kids2 = !lists2.IsDone() ? lists2.CurrentList() : nsFrameList();
     int32_t l1 = kids1.GetLength();
-    int32_t l2 = kids2.GetLength();;
+    int32_t l2 = kids2.GetLength();
     if (l1 != l2) {
       ok = false;
       LogVerifyMessage(kids1.FirstChild(), kids2.FirstChild(),
@@ -9583,13 +9596,11 @@ FindTopFrame(nsIFrame* aRoot)
     }
 
     // Try one of the children
-    nsIFrame* kid = aRoot->GetFirstPrincipalChild();
-    while (nullptr != kid) {
+    for (nsIFrame* kid : aRoot->PrincipalChildList()) {
       nsIFrame* result = FindTopFrame(kid);
       if (nullptr != result) {
         return result;
       }
-      kid = kid->GetNextSibling();
     }
   }
   return nullptr;
@@ -10169,10 +10180,8 @@ static void RecurseIndiTotals(nsPresContext* aPresContext,
     free(name);
   }
 
-  nsIFrame* child = aParentFrame->GetFirstPrincipalChild();
-  while (child) {
+  for (nsIFrame* child : aParentFrame->PrincipalChildList()) {
     RecurseIndiTotals(aPresContext, aHT, child, aLevel+1);
-    child = child->GetNextSibling();
   }
 
 }
@@ -10722,6 +10731,26 @@ nsIPresShell::FontSizeInflationEnabled()
   }
 
   return mFontSizeInflationEnabled;
+}
+
+void
+PresShell::PausePainting()
+{
+  if (GetPresContext()->RefreshDriver()->PresContext() != GetPresContext())
+    return;
+
+  mPaintingIsFrozen = true;
+  GetPresContext()->RefreshDriver()->Freeze();
+}
+
+void
+PresShell::ResumePainting()
+{
+  if (GetPresContext()->RefreshDriver()->PresContext() != GetPresContext())
+    return;
+
+  mPaintingIsFrozen = false;
+  GetPresContext()->RefreshDriver()->Thaw();
 }
 
 void

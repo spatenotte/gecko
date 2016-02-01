@@ -195,7 +195,7 @@ public:
                   nsIntRect* aScreenRect,
                   uint32_t aFlags) override;
 
-  virtual already_AddRefed<nsPIDOMWindow> GetRootWindow() override;
+  virtual already_AddRefed<nsPIDOMWindowOuter> GetRootWindow() override;
 
   virtual LayerManager* GetLayerManager() override;
 
@@ -666,7 +666,7 @@ protected:
                                  nsEventStatus* aEventStatus);
   // This returns the focused DOM window under our top level window.
   //  I.e., when we are deactive, this returns the *last* focused DOM window.
-  already_AddRefed<nsPIDOMWindow> GetFocusedDOMWindowInOurWindow();
+  already_AddRefed<nsPIDOMWindowOuter> GetFocusedDOMWindowInOurWindow();
 
   /*
    * This and the next two helper methods are used to target and position the
@@ -722,6 +722,10 @@ protected:
 #ifdef ANDROID
   virtual nsIDocument* GetTouchEventTargetDocument();
 #endif
+
+  virtual void PausePainting() override;
+  virtual void ResumePainting() override;
+
   void UpdateImageVisibility();
   void UpdateActivePointerState(mozilla::WidgetGUIEvent* aEvent);
 
@@ -775,6 +779,10 @@ protected:
   // over our window or there is no last observed mouse location for some
   // reason.
   nsPoint                   mMouseLocation;
+  // This is an APZ state variable that tracks the target guid for the last
+  // mouse event that was processed (corresponding to mMouseLocation). This is
+  // needed for the synthetic mouse events.
+  mozilla::layers::ScrollableLayerGuid mMouseEventTargetGuid;
 
   // mStyleSet owns it but we maintain a ref, may be null
   RefPtr<mozilla::CSSStyleSheet> mPrefStyleSheet;

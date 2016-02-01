@@ -203,7 +203,6 @@ class nsDisplayListBuilder {
   };
 
 public:
-  typedef mozilla::FramePropertyDescriptor FramePropertyDescriptor;
   typedef mozilla::FrameLayerBuilder FrameLayerBuilder;
   typedef mozilla::DisplayItemClip DisplayItemClip;
   typedef mozilla::DisplayListClipState DisplayListClipState;
@@ -959,8 +958,8 @@ public:
     nsRect mDirtyRect;
   };
 
-  NS_DECLARE_FRAME_PROPERTY(OutOfFlowDisplayDataProperty,
-                            DeleteValue<OutOfFlowDisplayData>)
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(OutOfFlowDisplayDataProperty,
+                                      OutOfFlowDisplayData)
 
   static OutOfFlowDisplayData* GetOutOfFlowData(nsIFrame* aFrame)
   {
@@ -968,7 +967,7 @@ public:
       aFrame->Properties().Get(OutOfFlowDisplayDataProperty()));
   }
 
-  NS_DECLARE_FRAME_PROPERTY(Preserve3DDirtyRectProperty, DeleteValue<nsRect>)
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(Preserve3DDirtyRectProperty, nsRect)
 
   nsPresContext* CurrentPresContext() {
     return CurrentPresShellState()->mPresShell->GetPresContext();
@@ -1154,6 +1153,7 @@ private:
 
   friend class nsDisplayCanvasBackgroundImage;
   friend class nsDisplayBackgroundImage;
+  friend class nsDisplayFixedPosition;
   AnimatedGeometryRoot* FindAnimatedGeometryRootFor(nsDisplayItem* aItem);
 
   AnimatedGeometryRoot* WrapAGRForFrame(nsIFrame* aAnimatedGeometryRoot,
@@ -2747,9 +2747,7 @@ public:
 
   virtual bool ShouldFixToViewport(nsDisplayListBuilder* aBuilder) override;
 
-  AnimatedGeometryRoot* AnimatedGeometryRootForScrollMetadata() const override {
-    return mAnimatedGeometryRootForScrollMetadata;
-  }
+  void MarkBoundsAsVisible(nsDisplayListBuilder* aBuilder);
 
 protected:
   typedef class mozilla::layers::ImageContainer ImageContainer;
@@ -2782,7 +2780,6 @@ protected:
   nsCOMPtr<imgIContainer> mImage;
   RefPtr<ImageContainer> mImageContainer;
   LayoutDeviceRect mImageLayerDestRect;
-  AnimatedGeometryRoot* mAnimatedGeometryRootForScrollMetadata;
   /* Bounds of this display item */
   nsRect mBounds;
   nsRect mDestArea;
@@ -3619,6 +3616,52 @@ public:
   virtual bool TryMerge(nsDisplayItem* aItem) override;
 };
 
+class nsDisplayFixedPosition : public nsDisplayOwnLayer {
+public:
+  nsDisplayFixedPosition(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                          nsDisplayList* aList);
+
+  static nsDisplayFixedPosition* CreateForFixedBackground(nsDisplayListBuilder* aBuilder,
+                                                          nsIFrame* aFrame,
+                                                          nsDisplayBackgroundImage* aImage,
+                                                          uint32_t aIndex);
+
+
+#ifdef NS_BUILD_REFCNT_LOGGING
+  virtual ~nsDisplayFixedPosition();
+#endif
+
+  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
+                                             LayerManager* aManager,
+                                             const ContainerLayerParameters& aContainerParameters) override;
+  NS_DISPLAY_DECL_NAME("FixedPosition", TYPE_FIXED_POSITION)
+  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
+                                   LayerManager* aManager,
+                                   const ContainerLayerParameters& aParameters) override
+  {
+    return mozilla::LAYER_ACTIVE;
+  }
+  virtual bool TryMerge(nsDisplayItem* aItem) override;
+
+  virtual bool ShouldFixToViewport(nsDisplayListBuilder* aBuilder) override { return mIsFixedBackground; }
+
+  virtual uint32_t GetPerFrameKey() override { return (mIndex << nsDisplayItem::TYPE_BITS) | nsDisplayItem::GetPerFrameKey(); }
+
+  AnimatedGeometryRoot* AnimatedGeometryRootForScrollMetadata() const override {
+    return mAnimatedGeometryRootForScrollMetadata;
+  }
+
+private:
+  // For background-attachment:fixed
+  nsDisplayFixedPosition(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                         nsDisplayList* aList, uint32_t aIndex);
+  void Init(nsDisplayListBuilder* aBuilder);
+
+  AnimatedGeometryRoot* mAnimatedGeometryRootForScrollMetadata;
+  uint32_t mIndex;
+  bool mIsFixedBackground;
+};
+
 /**
  * This creates an empty scrollable layer. It has no child layers.
  * It is used to record the existence of a scrollable frame in the layer
@@ -3912,6 +3955,10 @@ public:
     return nsDisplayItem::ReferenceFrameForChildren(); 
   }
 
+  AnimatedGeometryRoot* AnimatedGeometryRootForScrollMetadata() const override {
+    return mAnimatedGeometryRootForScrollMetadata;
+  }
+
   virtual const nsRect& GetVisibleRectForChildren() const override
   {
     return mChildrenVisibleRect;
@@ -4059,6 +4106,8 @@ public:
                                                 bool aLogAnimations = false);
   bool CanUseAsyncAnimations(nsDisplayListBuilder* aBuilder) override;
 
+  bool MayBeAnimated(nsDisplayListBuilder* aBuilder);
+
   /**
    * This will return if it's possible for this element to be prerendered.
    * This should never return false if we're going to prerender.
@@ -4148,6 +4197,7 @@ private:
   Matrix4x4 mTransformPreserves3D;
   ComputeTransformFunction mTransformGetter;
   AnimatedGeometryRoot* mAnimatedGeometryRootForChildren;
+  AnimatedGeometryRoot* mAnimatedGeometryRootForScrollMetadata;
   nsRect mChildrenVisibleRect;
   uint32_t mIndex;
   nsRect mBounds;
@@ -4242,6 +4292,8 @@ public:
   }
 
   nsIFrame* TransformFrame() { return mTransformFrame; }
+
+  virtual int32_t ZIndex() const override;
 
   virtual void
   DoUpdateBoundsPreserves3D(nsDisplayListBuilder* aBuilder) override {

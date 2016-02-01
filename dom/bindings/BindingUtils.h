@@ -40,7 +40,6 @@
 #include "nsWrapperCacheInlines.h"
 
 class nsIJSID;
-class nsPIDOMWindow;
 
 namespace mozilla {
 
@@ -52,6 +51,9 @@ template<typename DataType> class MozMap;
 nsresult
 UnwrapArgImpl(JS::Handle<JSObject*> src, const nsIID& iid, void** ppArg);
 
+nsresult
+UnwrapWindowProxyImpl(JS::Handle<JSObject*> src, nsPIDOMWindowOuter** ppArg);
+
 /** Convert a jsval to an XPCOM pointer. */
 template <class Interface>
 inline nsresult
@@ -59,6 +61,13 @@ UnwrapArg(JS::Handle<JSObject*> src, Interface** ppArg)
 {
   return UnwrapArgImpl(src, NS_GET_TEMPLATE_IID(Interface),
                        reinterpret_cast<void**>(ppArg));
+}
+
+template <>
+inline nsresult
+UnwrapArg<nsPIDOMWindowOuter>(JS::Handle<JSObject*> src, nsPIDOMWindowOuter** ppArg)
+{
+  return UnwrapWindowProxyImpl(src, ppArg);
 }
 
 bool
@@ -2309,7 +2318,7 @@ public:
 
 // Rooter class for MozMap; this is what we mostly use in the codegen.
 template<typename T>
-class MOZ_RAII MozMapRooter : private JS::CustomAutoRooter
+class MOZ_RAII MozMapRooter final : private JS::CustomAutoRooter
 {
 public:
   MozMapRooter(JSContext *aCx, MozMap<T>* aMozMap
@@ -2417,7 +2426,7 @@ bool
 XrayResolveOwnProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
                        JS::Handle<JSObject*> obj,
                        JS::Handle<jsid> id,
-                       JS::MutableHandle<JSPropertyDescriptor> desc,
+                       JS::MutableHandle<JS::PropertyDescriptor> desc,
                        bool& cacheOnHolder);
 
 /**
@@ -2434,7 +2443,7 @@ XrayResolveOwnProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
 bool
 XrayDefineProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
                    JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
-                   JS::Handle<JSPropertyDescriptor> desc,
+                   JS::Handle<JS::PropertyDescriptor> desc,
                    JS::ObjectOpResult &result,
                    bool *defined);
 
@@ -3149,7 +3158,7 @@ EnforceNotInPrerendering(JSContext* aCx, JSObject* aObj);
 // aborting the scripts, and preventing timers and event handlers from running
 // in the window in the future.
 void
-HandlePrerenderingViolation(nsPIDOMWindow* aWindow);
+HandlePrerenderingViolation(nsPIDOMWindowInner* aWindow);
 
 bool
 CallerSubsumes(JSObject* aObject);

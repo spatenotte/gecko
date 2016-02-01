@@ -16,6 +16,7 @@
 #include "mozilla/Services.h"
 #include "prprf.h"
 
+#include "gfxCrashReporterUtils.h"
 #include "gfxPlatform.h"
 #include "gfxPrefs.h"
 #include "gfxEnv.h"
@@ -519,6 +520,44 @@ gfxPlatform::Init()
     auto fwd = new CrashStatsLogForwarder("GraphicsCriticalError");
     fwd->SetCircularBufferSize(gfxPrefs::GfxLoggingCrashLength());
 
+    // Drop a note in the crash report if we end up forcing an option that could
+    // destabilize things.  New items should be appended at the end (of an existing
+    // or in a new section), so that we don't have to know the version to interpret
+    // these cryptic strings.
+    {
+      nsAutoCString forcedPrefs;
+      // D2D prefs
+      forcedPrefs.AppendPrintf("FP(D%d%d%d",
+                               gfxPrefs::Direct2DDisabled(),
+                               gfxPrefs::Direct2DForceEnabled(),
+                               gfxPrefs::DirectWriteFontRenderingForceEnabled());
+      // Layers prefs
+      forcedPrefs.AppendPrintf("-L%d%d%d%d%d%d",
+                               gfxPrefs::LayersAMDSwitchableGfxEnabled(),
+                               gfxPrefs::LayersAccelerationDisabled(),
+                               gfxPrefs::LayersAccelerationForceEnabled(),
+                               gfxPrefs::LayersD3D11DisableWARP(),
+                               gfxPrefs::LayersD3D11ForceWARP(),
+                               gfxPrefs::LayersOffMainThreadCompositionForceEnabled());
+      // WebGL prefs
+      forcedPrefs.AppendPrintf("-W%d%d%d%d%d%d%d%d",
+                               gfxPrefs::WebGLANGLEForceD3D11(),
+                               gfxPrefs::WebGLANGLEForceWARP(),
+                               gfxPrefs::WebGLDisabled(),
+                               gfxPrefs::WebGLDisableANGLE(),
+                               gfxPrefs::WebGLDXGLEnabled(),
+                               gfxPrefs::WebGLForceEnabled(),
+                               gfxPrefs::WebGLForceLayersReadback(),
+                               gfxPrefs::WebGLForceMSAA());
+      // Prefs that don't fit into any of the other sections
+      forcedPrefs.AppendPrintf("-T%d%d%d%d) ",
+                               gfxPrefs::AndroidRGB16Force(),
+                               gfxPrefs::CanvasAzureAccelerated(),
+                               gfxPrefs::DisableGralloc(),
+                               gfxPrefs::ForceShmemTiles());
+      ScopedGfxFeatureReporter::AppNote(forcedPrefs);
+    }
+
     mozilla::gfx::Config cfg;
     cfg.mLogForwarder = fwd;
     cfg.mMaxTextureSize = gfxPrefs::MaxTextureSize();
@@ -906,11 +945,7 @@ gfxPlatform::GetSourceSurfaceForSurface(DrawTarget *aTarget, gfxASurface *aSurfa
     // readback of aSurface's surface into memory if, for example, aSurface
     // wraps an xlib cairo surface (which can be important to avoid a major
     // slowdown).
-    NativeSurface surf;
-    surf.mFormat = format;
-    surf.mType = NativeSurfaceType::CAIRO_CONTEXT;
-    surf.mSurface = aSurface->CairoSurface();
-    surf.mSize = aSurface->GetSize();
+    //
     // We return here regardless of whether CreateSourceSurfaceFromNativeSurface
     // succeeds or not since we don't expect to be able to do any better below
     // if it fails.
@@ -923,7 +958,8 @@ gfxPlatform::GetSourceSurfaceForSurface(DrawTarget *aTarget, gfxASurface *aSurfa
     // strong reference back to srcBuffer, creating a reference loop and a
     // memory leak. Not caching is fine since wrapping is cheap enough (no
     // copying) so we can just wrap again next time we're called.
-    return aTarget->CreateSourceSurfaceFromNativeSurface(surf);
+    return Factory::CreateSourceSurfaceForCairoSurface(aSurface->CairoSurface(),
+                                                       aSurface->GetSize(), format);
   }
 
   RefPtr<SourceSurface> srcBuffer;
@@ -964,18 +1000,8 @@ gfxPlatform::GetSourceSurfaceForSurface(DrawTarget *aTarget, gfxASurface *aSurfa
     // readback), and the OptimizeSourceSurface may well copy again and upload
     // to the GPU. So, while this code path is rarely hit, hitting it may be
     // very slow.
-    NativeSurface surf;
-    surf.mFormat = format;
-    surf.mType = NativeSurfaceType::CAIRO_CONTEXT;
-    surf.mSurface = aSurface->CairoSurface();
-    surf.mSize = aSurface->GetSize();
-    RefPtr<DrawTarget> drawTarget =
-      Factory::CreateDrawTarget(BackendType::CAIRO, IntSize(1, 1), format);
-    if (!drawTarget) {
-      gfxWarning() << "gfxPlatform::GetSourceSurfaceForSurface failed in CreateDrawTarget";
-      return nullptr;
-    }
-    srcBuffer = drawTarget->CreateSourceSurfaceFromNativeSurface(surf);
+    srcBuffer = Factory::CreateSourceSurfaceForCairoSurface(aSurface->CairoSurface(),
+                                                            aSurface->GetSize(), format);
     if (srcBuffer) {
       srcBuffer = aTarget->OptimizeSourceSurface(srcBuffer);
     }
@@ -1978,8 +2004,8 @@ InitLayersAccelerationPrefs()
 #endif
         NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING,
                                                &status))) {
-      if (status == nsIGfxInfo::FEATURE_STATUS_OK) {
-        sLayersSupportsHardwareVideoDecoding = true;
+        if (status == nsIGfxInfo::FEATURE_STATUS_OK || gfxPrefs::HardwareVideoDecodingForceEnabled()) {
+           sLayersSupportsHardwareVideoDecoding = true;
       }
     }
 

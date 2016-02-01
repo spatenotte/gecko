@@ -28,29 +28,27 @@ namespace js {
 namespace wasm {
 
 class FunctionGenerator;
-typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
 
 // A slow function describes a function that took longer than msThreshold to
 // validate and compile.
 
 struct SlowFunction
 {
-    SlowFunction(PropertyName* name, unsigned ms, unsigned line, unsigned column)
-     : name(name), ms(ms), line(line), column(column)
+    SlowFunction(uint32_t index, unsigned ms, unsigned lineOrBytecode)
+     : index(index), ms(ms), lineOrBytecode(lineOrBytecode)
     {}
 
     static const unsigned msThreshold = 250;
 
-    PropertyName* name;
+    uint32_t index;
     unsigned ms;
-    unsigned line;
-    unsigned column;
+    unsigned lineOrBytecode;
 };
 typedef Vector<SlowFunction> SlowFunctionVector;
 
 // The ModuleGeneratorData holds all the state shared between the
-// ModuleGenerator and ModuleGeneratorThreadView. The ModuleGeneratorData is
-// encapsulated by ModuleGenerator/ModuleGeneratorThreadView classes which
+// ModuleGenerator and ModuleGeneratorThreadView. The ModuleGeneratorData
+// is encapsulated by ModuleGenerator/ModuleGeneratorThreadView classes which
 // present a race-free interface to the code in each thread assuming any given
 // element is initialized by the ModuleGenerator thread before an index to that
 // element is written to Bytecode sent to a ModuleGeneratorThreadView thread.
@@ -58,17 +56,33 @@ typedef Vector<SlowFunction> SlowFunctionVector;
 
 struct ModuleImportGeneratorData
 {
-    DeclaredSig* sig;
+    const DeclaredSig* sig;
     uint32_t globalDataOffset;
+
+    ModuleImportGeneratorData() : sig(nullptr), globalDataOffset(0) {}
+    explicit ModuleImportGeneratorData(const DeclaredSig* sig) : sig(sig), globalDataOffset(0) {}
 };
 
 typedef Vector<ModuleImportGeneratorData, 0, SystemAllocPolicy> ModuleImportGeneratorDataVector;
+
+struct AsmJSGlobalVariable
+{
+    ExprType type;
+    unsigned globalDataOffset;
+    bool isConst;
+    AsmJSGlobalVariable(ExprType type, unsigned offset, bool isConst)
+      : type(type), globalDataOffset(offset), isConst(isConst)
+    {}
+};
+
+typedef Vector<AsmJSGlobalVariable, 0, SystemAllocPolicy> AsmJSGlobalVariableVector;
 
 struct ModuleGeneratorData
 {
     DeclaredSigVector               sigs;
     DeclaredSigPtrVector            funcSigs;
     ModuleImportGeneratorDataVector imports;
+    AsmJSGlobalVariableVector       globals;
 };
 
 typedef UniquePtr<ModuleGeneratorData> UniqueModuleGeneratorData;
@@ -97,6 +111,9 @@ class ModuleGeneratorThreadView
         MOZ_ASSERT(shared_.imports[importIndex].sig);
         return shared_.imports[importIndex];
     }
+    const AsmJSGlobalVariable& globalVar(uint32_t globalIndex) const {
+        return shared_.globals[globalIndex];
+    }
 };
 
 // A ModuleGenerator encapsulates the creation of a wasm module. During the
@@ -120,6 +137,7 @@ class MOZ_STACK_CLASS ModuleGenerator
 
     // Data scoped to the ModuleGenerator's lifetime
     UniqueModuleGeneratorData       shared_;
+    uint32_t                        numSigs_;
     LifoAlloc                       lifo_;
     jit::TempAllocator              alloc_;
     jit::MacroAssembler             masm_;
@@ -140,27 +158,37 @@ class MOZ_STACK_CLASS ModuleGenerator
 
     bool finishOutstandingTask();
     bool finishTask(IonCompileTask* task);
+    bool addImport(const Sig& sig, uint32_t globalDataOffset);
+    bool startedFuncDefs() const { return !!threadView_; }
+    bool allocateGlobalBytes(uint32_t bytes, uint32_t align, uint32_t* globalDataOffset);
 
   public:
     explicit ModuleGenerator(ExclusiveContext* cx);
     ~ModuleGenerator();
 
-    bool init(UniqueModuleGeneratorData shared);
+    bool init(UniqueModuleGeneratorData shared, ModuleKind = ModuleKind::Wasm);
 
+    bool isAsmJS() const { return module_->kind == ModuleKind::AsmJS; }
     CompileArgs args() const { return module_->compileArgs; }
     jit::MacroAssembler& masm() { return masm_; }
     const Uint32Vector& funcEntryOffsets() const { return funcEntryOffsets_; }
 
-    // Global data:
-    bool allocateGlobalBytes(uint32_t bytes, uint32_t align, uint32_t* globalDataOffset);
-    bool allocateGlobalVar(ValType type, uint32_t* globalDataOffset);
+    // asm.js global variables:
+    bool allocateGlobalVar(ValType type, bool isConst, uint32_t* index);
+    const AsmJSGlobalVariable& globalVar(unsigned index) const { return shared_->globals[index]; }
 
     // Signatures:
     void initSig(uint32_t sigIndex, Sig&& sig);
+    uint32_t numSigs() const { return numSigs_; }
     const DeclaredSig& sig(uint32_t sigIndex) const;
 
+    // Function declarations:
+    bool initFuncSig(uint32_t funcIndex, uint32_t sigIndex);
+    uint32_t numFuncSigs() const { return module_->numFuncs; }
+    const DeclaredSig& funcSig(uint32_t funcIndex) const;
+
     // Imports:
-    bool initImport(uint32_t importIndex, uint32_t sigIndex, uint32_t globalDataOffset);
+    bool initImport(uint32_t importIndex, uint32_t sigIndex);
     uint32_t numImports() const;
     const ModuleImportGeneratorData& import(uint32_t index) const;
     bool defineImport(uint32_t index, ProfilingOffsets interpExit, ProfilingOffsets jitExit);
@@ -172,14 +200,11 @@ class MOZ_STACK_CLASS ModuleGenerator
     const Sig& exportSig(uint32_t index) const;
     bool defineExport(uint32_t index, Offsets offsets);
 
-    // Functions:
-    bool initFuncSig(uint32_t funcIndex, uint32_t sigIndex);
-    const DeclaredSig& funcSig(uint32_t funcIndex) const;
-    bool startFunc(PropertyName* name, unsigned line, unsigned column, UniqueBytecode* recycled,
-                   FunctionGenerator* fg);
-    bool finishFunc(uint32_t funcIndex, UniqueBytecode bytecode, unsigned generateTime,
-                    FunctionGenerator* fg);
-    bool finishFuncs();
+    // Function definitions:
+    bool startFuncDefs();
+    bool startFuncDef(uint32_t lineOrBytecode, FunctionGenerator* fg);
+    bool finishFuncDef(uint32_t funcIndex, unsigned generateTime, FunctionGenerator* fg);
+    bool finishFuncDefs();
 
     // Function-pointer tables:
     bool declareFuncPtrTable(uint32_t numElems, uint32_t* index);
@@ -196,9 +221,8 @@ class MOZ_STACK_CLASS ModuleGenerator
     // StaticLinkData required to call Module::staticallyLink, and the list of
     // functions that took a long time to compile.
     bool finish(HeapUsage heapUsage,
-                MutedErrorsBool mutedErrors,
                 CacheableChars filename,
-                CacheableTwoByteChars displayURL,
+                CacheableCharsVector&& prettyFuncNames,
                 UniqueModuleData* module,
                 UniqueStaticLinkData* staticLinkData,
                 SlowFunctionVector* slowFuncs);
@@ -217,32 +241,30 @@ class MOZ_STACK_CLASS FunctionGenerator
     ModuleGenerator*   m_;
     IonCompileTask*    task_;
 
-    // Function metadata created during function generation, then handed over
-    // to the FuncBytecode in ModuleGenerator::finishFunc().
-    SourceCoordsVector callSourceCoords_;
-    ValTypeVector      localVars_;
+    // Data created during function generation, then handed over to the
+    // FuncBytecode in ModuleGenerator::finishFunc().
+    UniqueBytecode     bytecode_;
+    Uint32Vector       callSiteLineNums_;
+    ValTypeVector      locals_;
 
-    // Note: this unrooted field assumes AutoKeepAtoms via TokenStream via
-    // asm.js compilation.
-    PropertyName* name_;
-    unsigned line_;
-    unsigned column_;
+    uint32_t lineOrBytecode_;
 
   public:
     FunctionGenerator()
-      : m_(nullptr),
-        task_(nullptr),
-        name_(nullptr),
-        line_(0),
-        column_(0)
+      : m_(nullptr), task_(nullptr), lineOrBytecode_(0)
     {}
 
-    bool addSourceCoords(size_t byteOffset, uint32_t line, uint32_t column) {
-        SourceCoords sc = { byteOffset, line, column };
-        return callSourceCoords_.append(sc);
+    Bytecode& bytecode() const {
+        return *bytecode_;
     }
-    bool addVariable(ValType v) {
-        return localVars_.append(v);
+    bool addCallSiteLineNum(uint32_t lineno) {
+        return callSiteLineNums_.append(lineno);
+    }
+    bool addLocal(ValType v) {
+        return locals_.append(v);
+    }
+    const ValTypeVector& locals() const {
+        return locals_;
     }
 };
 

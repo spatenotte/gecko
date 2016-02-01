@@ -10,7 +10,7 @@
 var PREF_UA_STYLES = "devtools.inspector.showUserAgentStyles";
 const { PrefObserver } = require("devtools/client/styleeditor/utils");
 
-const TEST_URI = TEST_URL_ROOT + "doc_author-sheet.html";
+const TEST_URI = URL_ROOT + "doc_author-sheet.html";
 
 const TEST_DATA = [
   {
@@ -48,6 +48,8 @@ const TEST_DATA = [
     numUserRules: 1,
     numUARules: 0
   },
+  // Note that some tests below assume that the "a" selector is the
+  // last test in TEST_DATA.
   {
     selector: "a",
     numUserRules: 3,
@@ -111,9 +113,11 @@ function* userAgentStylesVisible(inspector, view) {
   ok(userRules.some(rule=> rule.matchedSelectors.length === 1),
     "There is an inline style for element in user styles");
 
-  ok(uaRules.some(rule=> rule.matchedSelectors.indexOf(":-moz-any-link")),
+  // These tests rely on the "a" selector being the last test in
+  // TEST_DATA.
+  ok(uaRules.some(rule=> rule.matchedSelectors.indexOf(":-moz-any-link") !== -1),
     "There is a rule for :-moz-any-link");
-  ok(uaRules.some(rule=> rule.matchedSelectors.indexOf("*|*:link")),
+  ok(uaRules.some(rule=> rule.matchedSelectors.indexOf("*|*:link") !== -1),
     "There is a rule for *|*:link");
   ok(uaRules.some(rule=> rule.matchedSelectors.length === 1),
     "Inline styles for ua styles");

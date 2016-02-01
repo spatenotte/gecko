@@ -370,8 +370,9 @@ struct JSCompartment
      */
     bool                         globalWriteBarriered;
 
-    // Non-zero if any typed objects in this compartment might be neutered.
-    int32_t                      neuteredTypedObjects;
+    // Non-zero if the storage underlying any typed object in this compartment
+    // might be detached.
+    int32_t                      detachedTypedObjects;
 
   private:
     friend class js::AutoSetNewObjectMetadata;
@@ -753,6 +754,7 @@ struct JSCompartment
         DeprecatedFlagsArgument = 7,        // JS 1.3 or older
         // NO LONGER USING 8
         // NO LONGER USING 9
+        DeprecatedBlockScopeFunRedecl = 10,
         DeprecatedLanguageExtensionCount
     };
 

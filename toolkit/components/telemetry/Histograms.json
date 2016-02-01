@@ -88,14 +88,41 @@
     "kind": "boolean",
     "description": "blocklist.xml has been loaded synchronously *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
   },
-  "CHECKERBOARDED_CSSPIXELS_MS": {
+  "CHECKERBOARD_DURATION": {
     "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1221694],
+    "bug_numbers": [1238040],
     "expires_in_version": "55",
     "kind": "exponential",
-    "high": "3840 * 2160 * 16",
+    "high": "100000",
     "n_buckets": 50,
-    "description": "Magnitude of checkerboarding in CSSPixel-milliseconds per scrollable frame per composite"
+    "description": "Duration of a checkerboard event in milliseconds"
+  },
+  "CHECKERBOARD_PEAK": {
+    "alert_emails": ["kgupta@mozilla.com"],
+    "bug_numbers": [1238040],
+    "expires_in_version": "55",
+    "kind": "exponential",
+    "high": "3840 * 2160 * 8",
+    "n_buckets": 50,
+    "description": "Peak number of CSS pixels checkerboarded during a checkerboard event (the high value is the size of a 4k display with max APZ zooming)"
+  },
+  "CHECKERBOARD_POTENTIAL_DURATION": {
+    "alert_emails": ["kgupta@mozilla.com"],
+    "bug_numbers": [1238040],
+    "expires_in_version": "55",
+    "kind": "exponential",
+    "high": "1000000",
+    "n_buckets": 50,
+    "description": "Duration of a chunk of time (in ms) that could reasonably have had checkerboarding"
+  },
+  "CHECKERBOARD_SEVERITY": {
+    "alert_emails": ["kgupta@mozilla.com"],
+    "bug_numbers": [1238040],
+    "expires_in_version": "55",
+    "kind": "exponential",
+    "high": "1073741824",
+    "n_buckets": 50,
+    "description": "Opaque measure of the severity of a checkerboard event"
   },
   "COMPOSITE_TIME" : {
     "expires_in_version": "never",
@@ -480,14 +507,14 @@
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 10,
-    "description": "Use of SpiderMonkey's deprecated language extensions in web content: ForEach=0, DestructuringForIn=1 (obsolete), LegacyGenerator=2, ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7, RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete)"
+    "description": "Use of SpiderMonkey's deprecated language extensions in web content: ForEach=0, DestructuringForIn=1 (obsolete), LegacyGenerator=2, ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7, RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete), BlockScopeFunRedecl=10"
   },
   "JS_DEPRECATED_LANGUAGE_EXTENSIONS_IN_ADDONS": {
     "alert_emails": ["jdemooij@mozilla.com"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 10,
-    "description": "Use of SpiderMonkey's deprecated language extensions in add-ons: ForEach=0, DestructuringForIn=1 (obsolete), LegacyGenerator=2, ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7, RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete)"
+    "description": "Use of SpiderMonkey's deprecated language extensions in add-ons: ForEach=0, DestructuringForIn=1 (obsolete), LegacyGenerator=2, ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7, RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete), BlockScopeFunRedecl=10"
   },
   "XUL_CACHE_DISABLED": {
     "expires_in_version": "default",
@@ -3213,6 +3240,15 @@
     "releaseChannelCollection": "opt-out",
     "description": "PLACES: Number of unique pages"
   },
+  "PLACES_MOST_RECENT_EXPIRED_VISIT_DAYS": {
+    "alert_emails": ["mbonardo@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "low": 30,
+    "high": 730,
+    "n_buckets": 12,
+    "description": "PLACES: the most recent expired visit in days"
+  },
   "PLACES_BOOKMARKS_COUNT": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -5133,6 +5169,14 @@
     "description": "Killed, likely due to an OOM condition",
     "cpp_guard": "ANDROID"
   },
+  "FIPS_ENABLED": {
+    "alert_emails": ["seceng@mozilla.org"],
+    "expires_in_version": "54",
+    "kind": "flag",
+    "bug_numbers": [1241317],
+    "releaseChannelCollection": "opt-out",
+    "description": "Has FIPS mode been enabled?"
+  },
   "SECURITY_UI": {
     "expires_in_version": "never",
     "kind": "enumerated",
@@ -6085,6 +6129,21 @@
     "kind": "boolean",
     "description": "Whether Ogg audio/video encountered are chained or not.",
     "bug_numbers": [1230295]
+  },
+  "VIDEO_MFT_OUTPUT_NULL_SAMPLES": {
+    "alert_emails": ["cpearce@mozilla.com"],
+    "expires_in_version": "53",
+    "kind": "enumerated",
+    "n_values": 10,
+    "description": "Does the WMF video decoder return success but null output? 0 = playback successful, 1 = excessive null output but able to decode some frames, 2 = excessive null output and gave up, 3 = null output but recovered, 4 = non-excessive null output without being able to decode frames.",
+    "bug_numbers": [1176071]
+  },
+  "AUDIO_MFT_OUTPUT_NULL_SAMPLES": {
+    "alert_emails": ["cpearce@mozilla.com"],
+    "expires_in_version": "53",
+    "kind": "count",
+    "description": "How many times the audio MFT decoder returns success but output nothing.",
+    "bug_numbers": [1176071]
   },
   "VIDEO_CAN_CREATE_AAC_DECODER": {
     "alert_emails": ["cpearce@mozilla.com"],
@@ -8016,11 +8075,11 @@
     "n_values": 4,
     "description": "Does enforcing a larger minimum RSA key size cause verification failures? 1 = no, 2 = yes, 3 = another error prevented finding a verified chain"
   },
-  "CERT_CHAIN_SIGNATURE_DIGEST_STATUS": {
+  "CERT_CHAIN_SHA1_POLICY_STATUS": {
     "expires_in_version": "default",
     "kind": "enumerated",
     "n_values": 6,
-    "description": "Information on weak signature digest algorithms in the chain: 1 = Only good algorithms, 2 = a weak algorithm was present in an end entity, 3 = a weak algorithm was present in a CA cert, 4 = a weak algorithm was present in both EE and CA certs, 5 = another error prevented signature algorithm from being determined"
+    "description": "1 = No SHA1 signatures, 2 = SHA1 certificates issued before 2016, 3 = SHA1 certificates issued by an imported root, 4 = SHA1 certificates issued after 2015, 5 = another error prevented successful verification"
   },
   "WEAVE_CONFIGURED": {
     "expires_in_version": "default",
@@ -8252,7 +8311,7 @@
   },
   "LOOP_TWO_WAY_MEDIA_CONN_LENGTH_1": {
     "alert_emails": ["firefox-dev@mozilla.org", "dmose@mozilla.com"],
-    "expires_in_version": "47",
+    "expires_in_version": "50",
     "kind": "enumerated",
     "n_values": 8,
     "releaseChannelCollection": "opt-out",
@@ -8260,7 +8319,7 @@
   },
   "LOOP_SHARING_STATE_CHANGE_1": {
     "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
-    "expires_in_version": "47",
+    "expires_in_version": "48",
     "kind": "enumerated",
     "n_values": 8,
     "releaseChannelCollection": "opt-out",
@@ -8268,7 +8327,7 @@
   },
   "LOOP_SHARING_ROOM_URL": {
     "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
-    "expires_in_version": "47",
+    "expires_in_version": "50",
     "kind": "enumerated",
     "n_values": 8,
     "releaseChannelCollection": "opt-out",
@@ -8276,7 +8335,7 @@
   },
   "LOOP_ROOM_CREATE": {
     "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
-    "expires_in_version": "47",
+    "expires_in_version": "50",
     "kind": "enumerated",
     "n_values": 4,
     "releaseChannelCollection": "opt-out",
@@ -8284,7 +8343,7 @@
   },
   "LOOP_ROOM_DELETE": {
     "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
-    "expires_in_version": "47",
+    "expires_in_version": "50",
     "kind": "enumerated",
     "n_values": 4,
     "releaseChannelCollection": "opt-out",
@@ -8292,7 +8351,7 @@
   },
   "LOOP_ROOM_CONTEXT_ADD": {
     "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
-    "expires_in_version": "47",
+    "expires_in_version": "48",
     "kind": "enumerated",
     "n_values": 8,
     "releaseChannelCollection": "opt-out",
@@ -8300,23 +8359,26 @@
   },
   "LOOP_ROOM_CONTEXT_CLICK": {
     "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
-    "expires_in_version": "47",
+    "expires_in_version": "48",
     "kind": "count",
     "releaseChannelCollection": "opt-out",
     "description": "Number times room context is clicked to visit the attached URL"
   },
   "LOOP_ROOM_SESSION_WITHCHAT": {
     "alert_emails": ["firefox-dev@mozilla.org", "mdeboer@mozilla.com"],
-    "expires_in_version": "47",
+    "expires_in_version": "50",
     "kind": "count",
     "releaseChannelCollection": "opt-out",
     "description": "Number of sessions where at least one chat message was exchanged"
   },
-  "E10S_AUTOSTART_STATUS": {
+  "E10S_STATUS": {
+    "alert_emails": ["firefox-dev@mozilla.org"],
     "expires_in_version": "never",
     "kind": "enumerated",
-    "n_values": 6,
-    "description": "Why e10s is enabled or disabled (0=ENABLED_BY_USER, 1=ENABLED_BY_DEFAULT, 2=DISABLED_BY_USER, 3=DISABLED_IN_SAFE_MODE, 4=DISABLED_FOR_ACCESSIBILITY, 5=DISABLED_FOR_MAC_GFX)"
+    "n_values": 12,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1241294],
+    "description": "Why e10s is enabled or disabled (0=ENABLED_BY_USER, 1=ENABLED_BY_DEFAULT, 2=DISABLED_BY_USER, 3=DISABLED_IN_SAFE_MODE, 4=DISABLED_FOR_ACCESSIBILITY, 5=DISABLED_FOR_MAC_GFX, 6=DISABLED_FOR_BIDI, 7=DISABLED_FOR_ADDONS)"
   },
   "E10S_WINDOW": {
     "expires_in_version": "never",
@@ -10005,6 +10067,13 @@
     "bug_numbers": [1229971],
     "description": "Flag activated whenever a rewritable youtube flash embed is seen during a session."
   },
+  "YOUTUBE_NONREWRITABLE_EMBED_SEEN": {
+    "alert_emails": ["cpeterson@mozilla.com"],
+    "expires_in_version": "48",
+    "kind": "flag",
+    "bug_numbers": [1237401],
+    "description": "Flag activated whenever a non-rewritable (enablejsapi=1) youtube flash embed is seen during a session."
+  },
   "PLUGIN_DRAWING_MODEL": {
     "alert_emails": ["danderson@mozilla.com"],
     "expires_in_version": "never",
@@ -10012,5 +10081,12 @@
     "bug_numbers": [1229961],
     "n_values": 12,
     "description": "Plugin drawing model. 0 when windowed, otherwise NPDrawingModel + 1."
+  },
+  "WEB_NOTIFICATION_REQUEST_PERMISSION_CALLBACK": {
+    "alert_emails": ["push@mozilla.com"],
+    "expires_in_version": "55",
+    "bug_numbers": [1241278],
+    "kind": "boolean",
+    "description": "Usage of the deprecated Notification.requestPermission() callback argument"
   }
 }

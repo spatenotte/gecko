@@ -100,6 +100,20 @@ class CompositorVsyncScheduler
 
 public:
   explicit CompositorVsyncScheduler(CompositorParent* aCompositorParent, nsIWidget* aWidget);
+
+#ifdef MOZ_WIDGET_GONK
+  // emulator-ics never trigger the display on/off, so compositor will always
+  // skip composition request at that device. Only check the display status
+  // with kk device and upon.
+#if ANDROID_VERSION >= 19
+  // SetDisplay() and CancelSetDisplayTask() are used for the display on/off.
+  // It will clear all composition related task and flag, and skip another
+  // composition task during the display off. That could prevent the problem
+  // that compositor might show the old content at the first frame of display on.
+  void SetDisplay(bool aDisplayEnable);
+#endif
+#endif
+
   bool NotifyVsync(TimeStamp aVsyncTimestamp);
   void SetNeedsComposite();
   void OnForceComposeToTarget();
@@ -112,9 +126,7 @@ public:
   void ScheduleComposition();
   void CancelCurrentCompositeTask();
   bool NeedsComposite();
-  void Composite(TimeStamp aVsyncTimestamp,
-                 gfx::DrawTarget* aTarget = nullptr,
-                 const gfx::IntRect* aRect = nullptr);
+  void Composite(TimeStamp aVsyncTimestamp);
   void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect);
 
   const TimeStamp& GetLastComposeTime()
@@ -128,7 +140,7 @@ public:
     return mExpectedComposeStartTime;
   }
 #endif
- 
+
 private:
   virtual ~CompositorVsyncScheduler();
 
@@ -138,6 +150,11 @@ private:
   void DispatchTouchEvents(TimeStamp aVsyncTimestamp);
   void DispatchVREvents(TimeStamp aVsyncTimestamp);
   void CancelCurrentSetNeedsCompositeTask();
+#ifdef MOZ_WIDGET_GONK
+#if ANDROID_VERSION >= 19
+  void CancelSetDisplayTask();
+#endif
+#endif
 
   class Observer final : public VsyncObserver
   {
@@ -155,7 +172,6 @@ private:
 
   CompositorParent* mCompositorParent;
   TimeStamp mLastCompose;
-  CancelableTask* mCurrentCompositeTask;
 
 #ifdef COMPOSITOR_PERFORMANCE_WARNING
   TimeStamp mExpectedComposeStartTime;
@@ -169,9 +185,18 @@ private:
   RefPtr<CompositorVsyncScheduler::Observer> mVsyncObserver;
 
   mozilla::Monitor mCurrentCompositeTaskMonitor;
+  CancelableTask* mCurrentCompositeTask;
 
   mozilla::Monitor mSetNeedsCompositeMonitor;
   CancelableTask* mSetNeedsCompositeTask;
+
+#ifdef MOZ_WIDGET_GONK
+#if ANDROID_VERSION >= 19
+  bool mDisplayEnabled;
+  mozilla::Monitor mSetDisplayMonitor;
+  CancelableTask* mSetDisplayTask;
+#endif
+#endif
 };
 
 class CompositorUpdateObserver
@@ -420,6 +445,8 @@ public:
 
   nsIWidget* GetWidget() { return mWidget; }
 
+  void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr);
+
 protected:
   // Protected destructor, to discourage deletion outside of Release():
   virtual ~CompositorParent();
@@ -434,7 +461,6 @@ protected:
   virtual bool DeallocPLayerTransactionParent(PLayerTransactionParent* aLayers) override;
   virtual void ScheduleTask(CancelableTask*, int);
   void CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr);
-  void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr);
 
   void SetEGLSurfaceSize(int width, int height);
 

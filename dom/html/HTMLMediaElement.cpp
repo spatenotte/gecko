@@ -737,6 +737,7 @@ void HTMLMediaElement::AbortExistingLoads()
   }
 
   mError = nullptr;
+  mCurrentPlayRangeStart = -1.0;
   mLoadedDataFired = false;
   mAutoplaying = true;
   mIsLoadingFromSourceChildren = false;
@@ -789,6 +790,7 @@ void HTMLMediaElement::NoSupportedMediaSourceError()
   ChangeNetworkState(nsIDOMHTMLMediaElement::NETWORK_NO_SOURCE);
   DispatchAsyncEvent(NS_LITERAL_STRING("error"));
   ChangeDelayLoadStatus(false);
+  UpdateAudioChannelPlayingState();
 }
 
 typedef void (HTMLMediaElement::*SyncSectionFn)();
@@ -1861,7 +1863,7 @@ already_AddRefed<DOMMediaStream>
 HTMLMediaElement::CaptureStreamInternal(bool aFinishWhenEnded,
                                         MediaStreamGraph* aGraph)
 {
-  nsIDOMWindow* window = OwnerDoc()->GetInnerWindow();
+  nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
   if (!window) {
     return nullptr;
   }
@@ -2121,7 +2123,8 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mElementInTreeState(ELEMENT_NOT_INTREE),
     mHasUserInteraction(false),
     mFirstFrameLoaded(false),
-    mDefaultPlaybackStartPosition(0.0)
+    mDefaultPlaybackStartPosition(0.0),
+    mIsAudioTrackAudible(false)
 {
   mAudioChannel = AudioChannelService::GetDefaultAudioChannel();
 
@@ -3055,41 +3058,36 @@ class HTMLMediaElement::StreamSizeListener : public MediaStreamListener {
 public:
   explicit StreamSizeListener(HTMLMediaElement* aElement) :
     mElement(aElement),
-    mMutex("HTMLMediaElement::StreamSizeListener")
+    mInitialSizeFound(false)
   {}
   void Forget() { mElement = nullptr; }
 
-  void ReceivedSize()
+  void ReceivedSize(gfx::IntSize aSize)
   {
     if (!mElement) {
       return;
     }
-    gfx::IntSize size;
-    {
-      MutexAutoLock lock(mMutex);
-      size = mInitialSize;
-    }
     RefPtr<HTMLMediaElement> deathGrip = mElement;
-    mElement->UpdateInitialMediaSize(size);
+    mElement->UpdateInitialMediaSize(aSize);
   }
-  virtual void NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
-                                        StreamTime aTrackOffset,
-                                        uint32_t aTrackEvents,
-                                        const MediaSegment& aQueuedMedia,
-                                        MediaStream* aInputStream,
-                                        TrackID aInputTrackID) override
+
+  void NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
+                                StreamTime aTrackOffset,
+                                uint32_t aTrackEvents,
+                                const MediaSegment& aQueuedMedia,
+                                MediaStream* aInputStream,
+                                TrackID aInputTrackID) override
   {
-    MutexAutoLock lock(mMutex);
-    if (mInitialSize != gfx::IntSize(0,0) ||
-        aQueuedMedia.GetType() != MediaSegment::VIDEO) {
+    if (mInitialSizeFound || aQueuedMedia.GetType() != MediaSegment::VIDEO) {
       return;
     }
     const VideoSegment& video = static_cast<const VideoSegment&>(aQueuedMedia);
     for (VideoSegment::ConstChunkIterator c(video); !c.IsEnded(); c.Next()) {
       if (c->mFrame.GetIntrinsicSize() != gfx::IntSize(0,0)) {
-        mInitialSize = c->mFrame.GetIntrinsicSize();
         nsCOMPtr<nsIRunnable> event =
-          NS_NewRunnableMethod(this, &StreamSizeListener::ReceivedSize);
+          NS_NewRunnableMethodWithArgs<gfx::IntSize>(
+              this, &StreamSizeListener::ReceivedSize,
+              c->mFrame.GetIntrinsicSize());
         aGraph->DispatchToMainThreadAfterStreamStateUpdate(event.forget());
       }
     }
@@ -3099,9 +3097,8 @@ private:
   // These fields may only be accessed on the main thread
   HTMLMediaElement* mElement;
 
-  // mMutex protects the fields below; they can be accessed on any thread
-  Mutex mMutex;
-  gfx::IntSize mInitialSize;
+  // These fields may only be accessed on the MSG thread
+  bool mInitialSizeFound;
 };
 
 class HTMLMediaElement::MediaStreamTracksAvailableCallback:
@@ -3171,9 +3168,7 @@ void HTMLMediaElement::UpdateSrcMediaStreamPlaying(uint32_t aFlags)
 
     mMediaStreamListener = new StreamListener(this,
         "HTMLMediaElement::mMediaStreamListener");
-    mMediaStreamSizeListener = new StreamSizeListener(this);
     stream->AddListener(mMediaStreamListener);
-    stream->AddListener(mMediaStreamSizeListener);
 
     mWatchManager.Watch(*mMediaStreamListener,
         &HTMLMediaElement::UpdateReadyStateInternal);
@@ -3190,7 +3185,6 @@ void HTMLMediaElement::UpdateSrcMediaStreamPlaying(uint32_t aFlags)
       mSrcStreamPausedCurrentTime = CurrentTime();
 
       stream->RemoveListener(mMediaStreamListener);
-      stream->RemoveListener(mMediaStreamSizeListener);
 
       stream->RemoveAudioOutput(this);
       VideoFrameContainer* container = GetVideoFrameContainer();
@@ -3206,8 +3200,6 @@ void HTMLMediaElement::UpdateSrcMediaStreamPlaying(uint32_t aFlags)
 
     mMediaStreamListener->Forget();
     mMediaStreamListener = nullptr;
-    mMediaStreamSizeListener->Forget();
-    mMediaStreamSizeListener = nullptr;
   }
 }
 
@@ -3218,7 +3210,7 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
 
   mSrcStream = aStream;
 
-  nsIDOMWindow* window = OwnerDoc()->GetInnerWindow();
+  nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
   if (!window) {
     return;
   }
@@ -3226,6 +3218,9 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
   RefPtr<MediaStream> stream = GetSrcMediaStream();
   if (stream) {
     stream->SetAudioChannelType(mAudioChannel);
+
+    mMediaStreamSizeListener = new StreamSizeListener(this);
+    stream->AddListener(mMediaStreamSizeListener);
   }
 
   UpdateSrcMediaStreamPlaying();
@@ -3251,6 +3246,15 @@ void HTMLMediaElement::EndSrcMediaStreamPlayback()
   MOZ_ASSERT(mSrcStream);
 
   UpdateSrcMediaStreamPlaying(REMOVING_SRC_STREAM);
+
+  if (mMediaStreamSizeListener) {
+    RefPtr<MediaStream> stream = GetSrcMediaStream();
+    if (stream) {
+      stream->RemoveListener(mMediaStreamSizeListener);
+    }
+    mMediaStreamSizeListener->Forget();
+    mMediaStreamSizeListener = nullptr;
+  }
 
   mSrcStream->UnregisterTrackListener(mMediaStreamTrackListener);
   mMediaStreamTrackListener = nullptr;
@@ -3400,6 +3404,10 @@ void HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
   if (IsVideo() && HasVideo()) {
     DispatchAsyncEvent(NS_LITERAL_STRING("resize"));
   }
+  NS_ASSERTION(!HasVideo() ||
+               (mMediaInfo.mVideo.mDisplay.width > 0 &&
+                mMediaInfo.mVideo.mDisplay.height > 0),
+               "Video resolution must be known on 'loadedmetadata'");
   DispatchAsyncEvent(NS_LITERAL_STRING("loadedmetadata"));
   if (mDecoder && mDecoder->IsTransportSeekable() && mDecoder->IsMediaSeekable()) {
     ProcessMediaFragmentURI();
@@ -3514,6 +3522,7 @@ void HTMLMediaElement::Error(uint16_t aErrorCode)
     ChangeNetworkState(nsIDOMHTMLMediaElement::NETWORK_IDLE);
   }
   ChangeDelayLoadStatus(false);
+  UpdateAudioChannelPlayingState();
 }
 
 void HTMLMediaElement::PlaybackEnded()
@@ -4156,6 +4165,16 @@ void HTMLMediaElement::UpdateInitialMediaSize(const nsIntSize& aSize)
   if (!mMediaInfo.HasVideo()) {
     UpdateMediaSize(aSize);
   }
+
+  if (!mMediaStreamSizeListener) {
+    return;
+  }
+  RefPtr<MediaStream> stream = GetSrcMediaStream();
+  if (stream) {
+    stream->RemoveListener(mMediaStreamSizeListener);
+  }
+  mMediaStreamSizeListener->Forget();
+  mMediaStreamSizeListener = nullptr;
 }
 
 void HTMLMediaElement::SuspendOrResumeElement(bool aPauseElement, bool aSuspendEvents)
@@ -4728,6 +4747,11 @@ HTMLMediaElement::IsPlayingThroughTheAudioChannel() const
     return false;
   }
 
+  // If we have an error, we are not playing.
+  if (mError) {
+    return false;
+  }
+
   // If this element doesn't have any audio tracks.
   if (!HasAudio()) {
     return false;
@@ -5001,12 +5025,12 @@ already_AddRefed<nsIPrincipal>
 HTMLMediaElement::GetTopLevelPrincipal()
 {
   RefPtr<nsIPrincipal> principal;
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(OwnerDoc()->GetParentObject());
+  nsCOMPtr<nsPIDOMWindowInner> window = OwnerDoc()->GetInnerWindow();
   if (!window) {
     return nullptr;
   }
-  window = window->GetOuterWindow();
-  nsCOMPtr<nsPIDOMWindow> top = window->GetTop();
+  // XXXkhuey better hope we always have an outer ...
+  nsCOMPtr<nsPIDOMWindowOuter> top = window->GetOuterWindow()->GetTop();
   if (!top) {
     return nullptr;
   }
@@ -5031,8 +5055,7 @@ NS_IMETHODIMP HTMLMediaElement::WindowAudioCaptureChanged(bool aCapture)
   if (aCapture != mAudioCapturedByWindow) {
     if (aCapture) {
       mAudioCapturedByWindow = true;
-      nsCOMPtr<nsPIDOMWindow> window =
-        do_QueryInterface(OwnerDoc()->GetParentObject());
+      nsCOMPtr<nsPIDOMWindowInner> window = OwnerDoc()->GetInnerWindow();
       uint64_t id = window->WindowID();
       MediaStreamGraph* msg =
         MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER,
@@ -5072,7 +5095,7 @@ AudioTrackList*
 HTMLMediaElement::AudioTracks()
 {
   if (!mAudioTrackList) {
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(OwnerDoc()->GetParentObject());
+    nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(OwnerDoc()->GetParentObject());
     mAudioTrackList = new AudioTrackList(window, this);
   }
   return mAudioTrackList;
@@ -5082,7 +5105,7 @@ VideoTrackList*
 HTMLMediaElement::VideoTracks()
 {
   if (!mVideoTrackList) {
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(OwnerDoc()->GetParentObject());
+    nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(OwnerDoc()->GetParentObject());
     mVideoTrackList = new VideoTrackList(window, this);
   }
   return mVideoTrackList;
@@ -5175,6 +5198,15 @@ HTMLMediaElement::IsCurrentlyPlaying() const
     return true;
   }
   return false;
+}
+
+void
+HTMLMediaElement::NotifyAudibleStateChanged(bool aAudible)
+{
+  if (mIsAudioTrackAudible != aAudible) {
+    mIsAudioTrackAudible = aAudible;
+    // To do ...
+  }
 }
 
 } // namespace dom

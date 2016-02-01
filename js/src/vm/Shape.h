@@ -110,12 +110,11 @@
 namespace js {
 
 class Bindings;
-class StaticBlockObject;
+class StaticBlockScope;
 class TenuringTracer;
 
 typedef JSGetterOp GetterOp;
 typedef JSSetterOp SetterOp;
-typedef JSPropertyDescriptor PropertyDescriptor;
 
 /* Limit on the number of slotful properties in an object. */
 static const uint32_t SHAPE_INVALID_SLOT = JS_BIT(24) - 1;
@@ -520,10 +519,9 @@ struct StackBaseShape : public DefaultHasher<ReadBarriered<UnownedBaseShape*>>
     static inline bool match(ReadBarriered<UnownedBaseShape*> key, const Lookup& lookup);
 };
 
-typedef HashSet<ReadBarriered<UnownedBaseShape*>,
-                StackBaseShape,
-                SystemAllocPolicy> BaseShapeSet;
-
+using BaseShapeSet = js::GCHashSet<ReadBarriered<UnownedBaseShape*>,
+                                   StackBaseShape,
+                                   SystemAllocPolicy>;
 
 class Shape : public gc::TenuredCell
 {
@@ -532,7 +530,7 @@ class Shape : public gc::TenuredCell
     friend class Bindings;
     friend class NativeObject;
     friend class PropertyTree;
-    friend class StaticBlockObject;
+    friend class StaticBlockScope;
     friend class TenuringTracer;
     friend struct StackBaseShape;
     friend struct StackShape;
@@ -1112,9 +1110,16 @@ struct InitialShapeEntry
     static inline HashNumber hash(const Lookup& lookup);
     static inline bool match(const InitialShapeEntry& key, const Lookup& lookup);
     static void rekey(InitialShapeEntry& k, const InitialShapeEntry& newKey) { k = newKey; }
+
+    bool needsSweep() {
+        Shape* ushape = shape.unbarrieredGet();
+        JSObject* protoObj = proto.raw();
+        return (gc::IsAboutToBeFinalizedUnbarriered(&ushape) ||
+                (proto.isObject() && gc::IsAboutToBeFinalizedUnbarriered(&protoObj)));
+    }
 };
 
-typedef HashSet<InitialShapeEntry, InitialShapeEntry, SystemAllocPolicy> InitialShapeSet;
+using InitialShapeSet = js::GCHashSet<InitialShapeEntry, InitialShapeEntry, SystemAllocPolicy>;
 
 struct StackShape : public JS::Traceable
 {

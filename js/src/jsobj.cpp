@@ -43,6 +43,7 @@
 #include "builtin/SymbolObject.h"
 #include "frontend/BytecodeCompiler.h"
 #include "gc/Marking.h"
+#include "gc/Policy.h"
 #include "jit/BaselineJIT.h"
 #include "js/MemoryMetrics.h"
 #include "js/Proxy.h"
@@ -1061,7 +1062,7 @@ JS_CopyPropertyFrom(JSContext* cx, HandleId id, HandleObject target,
 {
     // |obj| and |cx| are generally not same-compartment with |target| here.
     assertSameCompartment(cx, obj, id);
-    Rooted<JSPropertyDescriptor> desc(cx);
+    Rooted<PropertyDescriptor> desc(cx);
 
     if (!GetOwnPropertyDescriptor(cx, obj, id, &desc))
         return false;

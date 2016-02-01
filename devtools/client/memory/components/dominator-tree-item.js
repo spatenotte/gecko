@@ -31,6 +31,7 @@ const DominatorTreeItem = module.exports = createClass({
   shouldComponentUpdate(nextProps, nextState) {
     return this.props.item != nextProps.item
       || this.props.depth != nextProps.depth
+      || this.props.expanded != nextProps.expanded
       || this.props.focused != nextProps.focused;
   },
 
@@ -70,7 +71,8 @@ const DominatorTreeItem = module.exports = createClass({
         label[i * 2] = Frame({
           key,
           onClick: () => onViewSourceInDebugger(piece),
-          frame: piece
+          frame: piece,
+          showFunctionName: true
         });
       } else if (piece === "noStack") {
         label[i * 2] = dom.span({ key, className: "not-available" },
@@ -78,6 +80,12 @@ const DominatorTreeItem = module.exports = createClass({
       } else if (piece === "noFilename") {
         label[i * 2] = dom.span({ key, className: "not-available" },
                                 L10N.getStr("tree-item.nofilename"));
+      } else if (piece === "JS::ubi::RootList") {
+        // Don't use the usual labeling machinery for root lists: replace it
+        // with the "GC Roots" string.
+        label.splice(0, label.length);
+        label.push(L10N.getStr("tree-item.rootlist"));
+        break;
       } else {
         label[i * 2] = piece;
       }

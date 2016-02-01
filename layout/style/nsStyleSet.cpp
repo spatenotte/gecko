@@ -691,7 +691,7 @@ nsStyleSet::DirtyRuleProcessors(SheetType aType)
 }
 
 bool
-nsStyleSet::GetAuthorStyleDisabled()
+nsStyleSet::GetAuthorStyleDisabled() const
 {
   return mAuthorStyleDisabled;
 }
@@ -1521,7 +1521,9 @@ nsStyleSet::RuleNodeWithReplacement(Element* aElement,
   // rule tree from ElementRestyler::RestyleSelf to avoid taking that
   // path when we're rebuilding the rule tree.
 
-  nsTArray<RuleNodeInfo> rules;
+  // This array can be hot and often grows to ~20 elements, so inline storage
+  // is best.
+  nsAutoTArray<RuleNodeInfo, 30> rules;
   for (nsRuleNode* ruleNode = aOldRuleNode; !ruleNode->IsRoot();
        ruleNode = ruleNode->GetParent()) {
     RuleNodeInfo* curRule = rules.AppendElement();
@@ -1960,7 +1962,7 @@ nsStyleSet::ResolveAnonymousBoxStyle(nsIAtom* aPseudoTag,
     // Add any @page rules that are specified.
     nsTArray<nsCSSPageRule*> rules;
     nsTArray<css::ImportantStyleData*> importantRules;
-    PresContext()->StyleSet()->AppendPageRules(rules);
+    AppendPageRules(rules);
     for (uint32_t i = 0, i_end = rules.Length(); i != i_end; ++i) {
       css::Declaration* declaration = rules[i]->Declaration();
       declaration->SetImmutable();

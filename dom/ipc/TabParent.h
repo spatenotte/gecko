@@ -299,7 +299,8 @@ public:
 
   virtual bool RecvZoomToRect(const uint32_t& aPresShellId,
                               const ViewID& aViewId,
-                              const CSSRect& aRect) override;
+                              const CSSRect& aRect,
+                              const uint32_t& aFlags) override;
 
   virtual bool
   RecvUpdateZoomConstraints(const uint32_t& aPresShellId,
@@ -613,7 +614,7 @@ public:
   void OnStartSignedPackageRequest(nsIChannel* aChannel,
                                    const nsACString& aPackageId);
 
-  void AudioChannelChangeNotification(nsPIDOMWindow* aWindow,
+  void AudioChannelChangeNotification(nsPIDOMWindowOuter* aWindow,
                                       AudioChannel aAudioChannel,
                                       float aVolume,
                                       bool aMuted);

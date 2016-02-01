@@ -31,6 +31,7 @@
 #include "builtin/TypedObject.h"
 #include "builtin/WeakSetObject.h"
 #include "gc/Marking.h"
+#include "gc/Policy.h"
 #include "jit/AtomicOperations.h"
 #include "jit/InlinableNatives.h"
 #include "js/Date.h"
@@ -886,9 +887,9 @@ intrinsic_MoveTypedArrayElements(JSContext* cx, unsigned argc, Value* vp)
 
     MOZ_ASSERT(count > 0,
                "don't call this method if copying no elements, because then "
-               "the not-neutered requirement is wrong");
+               "the not-detached requirement is wrong");
 
-    if (tarray->isNeutered() && tarray->hasBuffer()) {
+    if (tarray->hasDetachedBuffer()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_BAD_ARGS);
         return false;
     }
@@ -970,8 +971,9 @@ intrinsic_SetFromTypedArrayApproach(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(args.length() == 4);
 
     Rooted<TypedArrayObject*> target(cx, &args[0].toObject().as<TypedArrayObject>());
-    MOZ_ASSERT(!target->hasBuffer() || !target->isNeutered(),
-               "something should have defended against a neutered target");
+    MOZ_ASSERT(!target->hasDetachedBuffer(),
+               "something should have defended against a target viewing a "
+               "detached buffer");
 
     // As directed by |DangerouslyUnwrapTypedArray|, sigil this pointer and all
     // variables derived from it to counsel extreme caution here.
@@ -990,9 +992,7 @@ intrinsic_SetFromTypedArrayApproach(JSContext* cx, unsigned argc, Value* vp)
     // that might abort processing (other than for reason of internal error.)
 
     // Steps 12-13.
-    if (unsafeTypedArrayCrossCompartment->hasBuffer() &&
-        unsafeTypedArrayCrossCompartment->isNeutered())
-    {
+    if (unsafeTypedArrayCrossCompartment->hasDetachedBuffer()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
         return false;
     }
@@ -1216,9 +1216,9 @@ intrinsic_SetDisjointTypedElements(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(args.length() == 3);
 
     Rooted<TypedArrayObject*> target(cx, &args[0].toObject().as<TypedArrayObject>());
-    MOZ_ASSERT(!target->hasBuffer() || !target->isNeutered(),
-               "a neutered typed array has no elements to set, so "
-               "it's nonsensical to be setting them");
+    MOZ_ASSERT(!target->hasDetachedBuffer(),
+               "a typed array viewing a detached buffer has no elements to "
+               "set, so it's nonsensical to be setting them");
 
     uint32_t targetOffset = uint32_t(args[1].toInt32());
 
@@ -1242,8 +1242,8 @@ intrinsic_SetOverlappingTypedElements(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(args.length() == 3);
 
     Rooted<TypedArrayObject*> target(cx, &args[0].toObject().as<TypedArrayObject>());
-    MOZ_ASSERT(!target->hasBuffer() || !target->isNeutered(),
-               "shouldn't be setting elements if neutered");
+    MOZ_ASSERT(!target->hasDetachedBuffer(),
+               "shouldn't set elements if underlying buffer is detached");
 
     uint32_t targetOffset = uint32_t(args[1].toInt32());
 
@@ -1376,7 +1376,12 @@ intrinsic_ConstructFunction(JSContext* cx, unsigned argc, Value* vp)
     for (uint32_t index = 0; index < len; index++)
         constructArgs[index].set(argsList->getDenseElement(index));
 
-    return Construct(cx, args[0], constructArgs, args.rval());
+    RootedObject res(cx);
+    if (!Construct(cx, args[0], constructArgs, args[0], &res))
+        return false;
+
+    args.rval().setObject(*res);
+    return true;
 }
 
 
@@ -1652,11 +1657,11 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_FN("std_SIMD_Int8x16_extractLane",        simd_int8x16_extractLane,     2,0),
     JS_FN("std_SIMD_Int16x8_extractLane",        simd_int16x8_extractLane,     2,0),
-    JS_INLINABLE_FN("std_SIMD_Int32x4_extractLane",   simd_int32x4_extractLane,  2,0, SimdInt32x4),
+    JS_INLINABLE_FN("std_SIMD_Int32x4_extractLane",   simd_int32x4_extractLane,  2,0, SimdInt32x4_extractLane),
     JS_FN("std_SIMD_Uint8x16_extractLane",       simd_uint8x16_extractLane,    2,0),
     JS_FN("std_SIMD_Uint16x8_extractLane",       simd_uint16x8_extractLane,    2,0),
     JS_FN("std_SIMD_Uint32x4_extractLane",       simd_uint32x4_extractLane,    2,0),
-    JS_INLINABLE_FN("std_SIMD_Float32x4_extractLane", simd_float32x4_extractLane,2,0, SimdFloat32x4),
+    JS_INLINABLE_FN("std_SIMD_Float32x4_extractLane", simd_float32x4_extractLane,2,0, SimdFloat32x4_extractLane),
     JS_FN("std_SIMD_Float64x2_extractLane",      simd_float64x2_extractLane,   2,0),
     JS_FN("std_SIMD_Bool8x16_extractLane",       simd_bool8x16_extractLane,    2,0),
     JS_FN("std_SIMD_Bool16x8_extractLane",       simd_bool16x8_extractLane,    2,0),
@@ -1776,7 +1781,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_INLINABLE_FN("TypedArrayLength", intrinsic_TypedArrayLength,     1,0,
                     IntrinsicTypedArrayLength),
-    JS_FN("PossiblyWrappedTypedArrayLength", intrinsic_PossiblyWrappedTypedArrayLength, 1, 0),
+    JS_INLINABLE_FN("PossiblyWrappedTypedArrayLength", intrinsic_PossiblyWrappedTypedArrayLength,
+                    1, 0, IntrinsicPossiblyWrappedTypedArrayLength),
 
     JS_FN("MoveTypedArrayElements",  intrinsic_MoveTypedArrayElements,  4,0),
     JS_FN("SetFromTypedArrayApproach",intrinsic_SetFromTypedArrayApproach, 4, 0),
@@ -2325,7 +2331,7 @@ JSRuntime::cloneSelfHostedFunctionScript(JSContext* cx, HandlePropertyName name,
     // global lexical scope on the scope chain is for uniformity and engine
     // invariants.
     MOZ_ASSERT(IsStaticGlobalLexicalScope(sourceScript->enclosingStaticScope()));
-    Rooted<ScopeObject*> enclosingScope(cx, &cx->global()->lexicalScope().staticBlock());
+    Rooted<StaticScope*> enclosingScope(cx, &cx->global()->lexicalScope().staticBlock());
     if (!CloneScriptIntoFunction(cx, enclosingScope, targetFun, sourceScript))
         return false;
     MOZ_ASSERT(!targetFun->isInterpretedLazy());

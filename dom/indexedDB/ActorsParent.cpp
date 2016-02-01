@@ -10299,7 +10299,7 @@ DatabaseConnection::Close()
   AssertIsOnConnectionThread();
   MOZ_ASSERT(mStorageConnection);
   MOZ_ASSERT(!mDEBUGSavepointCount);
-  MOZ_ASSERT(!mInWriteTransaction);
+  MOZ_RELEASE_ASSERT(!mInWriteTransaction);
 
   PROFILER_LABEL("IndexedDB",
                  "DatabaseConnection::Close",
@@ -23228,8 +23228,9 @@ NormalJSRuntime::Init()
 
   JSAutoRequest ar(mContext);
 
+  JS::CompartmentOptions options;
   mGlobal = JS_NewGlobalObject(mContext, &kGlobalClass, nullptr,
-                               JS::FireOnNewGlobalHook);
+                               JS::FireOnNewGlobalHook, options);
   if (NS_WARN_IF(!mGlobal)) {
     return false;
   }

@@ -112,9 +112,6 @@ pref("offline-apps.quota.warn",        51200);
 // cache compression turned off for now - see bug #715198
 pref("browser.cache.compression_level", 0);
 
-// Whether or not MozAbortablePromise is enabled.
-pref("dom.abortablepromise.enabled", false);
-
 // Whether or not testing features are enabled.
 pref("dom.quotaManager.testing", false);
 
@@ -145,7 +142,7 @@ pref("dom.select_events.enabled", false);
 // Whether or not Web Workers are enabled.
 pref("dom.workers.enabled", true);
 // The number of workers per domain allowed to run concurrently.
-pref("dom.workers.maxPerDomain", 20);
+pref("dom.workers.maxPerDomain", 50);
 
 pref("dom.serviceWorkers.enabled", false);
 
@@ -209,6 +206,12 @@ pref("dom.url.getters_decode_hash", false);
 // significantly increase the number of compartments in the system.
 pref("dom.compartment_per_addon", true);
 
+#ifdef NIGHTLY_BUILD
+pref("dom.document.scrollingElement.enabled", true);
+#else
+pref("dom.document.scrollingElement.enabled", false);
+#endif
+
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
 pref("browser.sessionhistory.max_total_viewers", -1);
@@ -217,6 +220,9 @@ pref("ui.use_native_colors", true);
 pref("ui.click_hold_context_menus", false);
 // Duration of timeout of incremental search in menus (ms).  0 means infinite.
 pref("ui.menu.incremental_search.timeout", 1000);
+// If true, all popups won't hide automatically on blur
+pref("ui.popup.disable_autohide", false);
+
 pref("browser.display.use_document_fonts",  1);  // 0 = never, 1 = quick, 2 = always
 // 0 = default: always, except in high contrast mode
 // 1 = always
@@ -306,6 +312,7 @@ pref("media.play-stand-alone", true);
 pref("media.block-play-until-visible", false);
 
 pref("media.hardware-video-decoding.enabled", true);
+pref("media.hardware-video-decoding.force-enabled", false);
 
 pref("media.decoder.heuristic.dormant.enabled", true);
 pref("media.decoder.heuristic.dormant.timeout", 60000);
@@ -327,7 +334,14 @@ pref("media.wmf.low-latency.enabled", false);
 pref("media.wmf.skip-blacklist", false);
 #endif
 #if defined(MOZ_FFMPEG)
+#if defined(XP_MACOSX)
+pref("media.ffmpeg.enabled", false);
+#else
 pref("media.ffmpeg.enabled", true);
+#endif
+#endif
+#if defined(MOZ_FFVPX)
+pref("media.ffvpx.enabled", true);
 #endif
 pref("media.gmp.decoder.enabled", false);
 pref("media.gmp.decoder.aac", 0);
@@ -378,12 +392,8 @@ pref("media.navigator.video.h264.level", 12); // 0x42E00C - level 1.2
 pref("media.navigator.video.h264.max_br", 700); // 8x10
 pref("media.navigator.video.h264.max_mbps", 11880); // CIF@30fps
 pref("media.peerconnection.video.h264_enabled", false);
+pref("media.peerconnection.video.vp9_enabled", false);
 pref("media.getusermedia.aec", 4);
-// Gonk typically captures at QVGA, and so min resolution is QQVGA or
-// 160x120; 100Kbps is plenty for that.
-pref("media.peerconnection.video.min_bitrate", 100);
-pref("media.peerconnection.video.start_bitrate", 220);
-pref("media.peerconnection.video.max_bitrate", 1000);
 #else
 pref("media.navigator.video.default_width",0);  // adaptive default
 pref("media.navigator.video.default_height",0); // adaptive default
@@ -397,14 +407,18 @@ pref("media.navigator.video.h264.max_mbps", 0);
 pref("media.peerconnection.video.h264_enabled", false);
 pref("media.getusermedia.aec", 1);
 pref("media.getusermedia.browser.enabled", true);
+#endif
+// Gonk typically captures at QVGA, and so min resolution is QQVGA or
+// 160x120; 100Kbps is plenty for that.
 // Desktop is typically VGA capture or more; and qm_select will not drop resolution
 // below 1/2 in each dimension (or so), so QVGA (320x200) is the lowest here usually.
-pref("media.peerconnection.video.min_bitrate", 200);
-pref("media.peerconnection.video.start_bitrate", 300);
-pref("media.peerconnection.video.max_bitrate", 2000);
-#endif
+pref("media.peerconnection.video.min_bitrate", 0);
+pref("media.peerconnection.video.start_bitrate", 0);
+pref("media.peerconnection.video.max_bitrate", 0);
+pref("media.peerconnection.video.min_bitrate_estimate", 0);
 pref("media.navigator.audio.fake_frequency", 1000);
 pref("media.navigator.permission.disabled", false);
+pref("media.peerconnection.simulcast", true);
 pref("media.peerconnection.default_iceservers", "[]");
 pref("media.peerconnection.ice.loopback", false); // Set only for testing in offline environments.
 pref("media.peerconnection.ice.tcp", false);
@@ -435,27 +449,33 @@ pref("media.getusermedia.aec_delay_agnostic", true);
 pref("media.getusermedia.noise", 1);
 pref("media.getusermedia.agc_enabled", false);
 pref("media.getusermedia.agc", 1);
-// Adjustments for OS-specific input delay (lower bound)
-// Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
+// capture_delay: Adjustments for OS-specific input delay (lower bound)
+// playout_delay: Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
+// full_duplex: enable cubeb full-duplex capture/playback
 #if defined(XP_MACOSX)
 pref("media.peerconnection.capture_delay", 50);
 pref("media.getusermedia.playout_delay", 10);
+pref("media.navigator.audio.full_duplex", false);
 #elif defined(XP_WIN)
 pref("media.peerconnection.capture_delay", 50);
 pref("media.getusermedia.playout_delay", 40);
+pref("media.navigator.audio.full_duplex", false);
 #elif defined(ANDROID)
 pref("media.peerconnection.capture_delay", 100);
 pref("media.getusermedia.playout_delay", 100);
+pref("media.navigator.audio.full_duplex", false);
 // Whether to enable Webrtc Hardware acceleration support
 pref("media.navigator.hardware.vp8_encode.acceleration_enabled", false);
 pref("media.navigator.hardware.vp8_decode.acceleration_enabled", false);
 #elif defined(XP_LINUX)
 pref("media.peerconnection.capture_delay", 70);
 pref("media.getusermedia.playout_delay", 50);
+pref("media.navigator.audio.full_duplex", false);
 #else
 // *BSD, others - merely a guess for now
 pref("media.peerconnection.capture_delay", 50);
 pref("media.getusermedia.playout_delay", 50);
+pref("media.navigator.audio.full_duplex", false);
 #endif
 #endif
 
@@ -1316,7 +1336,7 @@ pref("network.http.max-persistent-connections-per-proxy", 32);
 pref("network.http.request.max-start-delay", 10);
 
 // If a connection is reset, we will retry it max-attempts times.
-pref("network.http.request.max-attempts", 3);
+pref("network.http.request.max-attempts", 6);
 
 // Headers
 pref("network.http.accept.default", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
@@ -1850,7 +1870,6 @@ pref("network.cookie.cookieBehavior",       0); // Keep the old default of accep
 #endif
 pref("network.cookie.thirdparty.sessionOnly", false);
 pref("network.cookie.lifetimePolicy",       0); // 0-accept, 1-dontUse 2-acceptForSession, 3-acceptForNDays
-pref("network.cookie.alwaysAcceptSessionCookies", false);
 pref("network.cookie.prefsMigrated",        false);
 pref("network.cookie.lifetime.days",        90); // Ignored unless network.cookie.lifetimePolicy is 3.
 
@@ -2011,6 +2030,10 @@ pref("security.cert_pinning.enforcement_level", 0);
 // for tests.
 pref("security.cert_pinning.process_headers_from_non_builtin_roots", false);
 
+// If set to true, allow view-source URIs to be opened from URIs that share
+// their protocol with the inner URI of the view-source URI
+pref("security.view-source.reachable-from-inner-protocol", false);
+
 // Modifier key prefs: default to Windows settings,
 // menu access key = alt, accelerator key = control.
 // Use 17 for Ctrl, 18 for Alt, 224 for Meta, 91 for Win, 0 for none. Mac settings in macprefs.js
@@ -2041,6 +2064,14 @@ pref("clipboard.autocopy", false);
 
 // Clipboard only supports text/plain
 pref("clipboard.plainTextOnly", false);
+
+#ifdef XP_WIN
+// Setting false you can disable 4th button and/or 5th button of your mouse.
+// 4th button is typically mapped to "Back" and 5th button is typically mapped
+// to "Forward" button.
+pref("mousebutton.4th.enabled", true);
+pref("mousebutton.5th.enabled", true);
+#endif
 
 // mouse wheel scroll transaction period of time (in milliseconds)
 pref("mousewheel.transaction.timeout", 1500);
@@ -2604,13 +2635,8 @@ pref("dom.ipc.plugins.reportCrashURL", true);
 // Defaults to 30 seconds.
 pref("dom.ipc.plugins.unloadTimeoutSecs", 30);
 
-// Asynchronous plugin initialization should only be enabled on non-e10s
-// channels until some remaining bugs are resolved.
-#ifdef E10S_TESTING_ONLY
+// Asynchronous plugin initialization is on hold.
 pref("dom.ipc.plugins.asyncInit.enabled", false);
-#else
-pref("dom.ipc.plugins.asyncInit.enabled", true);
-#endif
 
 // Allow the AsyncDrawing mode to be used for plugins.
 pref("dom.ipc.plugins.asyncdrawing.enabled", true);
@@ -4489,6 +4515,8 @@ pref("full-screen-api.pointer-lock.enabled", true);
 // transition duration of fade-to-black and fade-from-black, unit: ms
 pref("full-screen-api.transition-duration.enter", "200 200");
 pref("full-screen-api.transition-duration.leave", "200 200");
+// timeout for black screen in fullscreen transition, unit: ms
+pref("full-screen-api.transition.timeout", 500);
 // time for the warning box stays on the screen before sliding out, unit: ms
 pref("full-screen-api.warning.timeout", 3000);
 // delay for the warning box to show when pointer stays on the top, unit: ms
@@ -4602,8 +4630,9 @@ pref("dom.mozPermissionSettings.enabled", false);
 
 // W3C touch events
 // 0 - disabled, 1 - enabled, 2 - autodetect
-// Enabling it for Windows is tracked by bug 736048.
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_MACOSX)
+pref("dom.w3c_touch_events.enabled", 0);
+#elif defined(XP_WIN) && !defined(NIGHTLY_BUILD)
 pref("dom.w3c_touch_events.enabled", 0);
 #else
 pref("dom.w3c_touch_events.enabled", 2);
@@ -4914,6 +4943,9 @@ pref("layout.accessiblecaret.height", "36.0");
 pref("layout.accessiblecaret.margin-left", "-18.5");
 pref("layout.accessiblecaret.bar.width", "2.0");
 
+// Show the selection bars at the two ends of the selection highlight.
+pref("layout.accessiblecaret.bar.enabled", true);
+
 // Timeout in milliseconds to hide the accessiblecaret under cursor mode while
 // no one touches it. Set the value to 0 to disable this feature.
 pref("layout.accessiblecaret.timeout_ms", 3000);
@@ -4922,9 +4954,12 @@ pref("layout.accessiblecaret.timeout_ms", 3000);
 // or long tap events does not fired by APZ.
 pref("layout.accessiblecaret.use_long_tap_injector", true);
 
-// Selection change notifications generated by Javascript, or misc internal
-// events hide AccessibleCarets by default.
+// Use AccessibleCaret default behaviours.
 pref("layout.accessiblecaret.extendedvisibility", false);
+
+// Selection change notifications generated by Javascript hide
+// AccessibleCarets and close UI interaction by default.
+pref("layout.accessiblecaret.allow_script_change_updates", false);
 
 // Optionally provide haptic feedback on longPress selection events.
 pref("layout.accessiblecaret.hapticfeedback", false);

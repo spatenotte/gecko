@@ -32,9 +32,8 @@ using namespace mozilla::widget;
 static void
 InvalidateRegion(nsIWidget* aWidget, const LayoutDeviceIntRegion& aRegion)
 {
-  LayoutDeviceIntRegion::RectIterator it(aRegion);
-  while(const LayoutDeviceIntRect* r = it.Next()) {
-    aWidget->Invalidate(*r);
+  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+    aWidget->Invalidate(iter.Get());
   }
 }
 
@@ -355,29 +354,6 @@ PuppetWidget::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aStatus)
 nsEventStatus
 PuppetWidget::DispatchInputEvent(WidgetInputEvent* aEvent)
 {
-  if (!mTabChild) {
-    return nsEventStatus_eIgnore;
-  }
-
-  switch (aEvent->mClass) {
-    case eMouseEventClass:
-      Unused <<
-        mTabChild->SendDispatchMouseEvent(*aEvent->AsMouseEvent());
-      break;
-    case eKeyboardEventClass:
-      Unused <<
-        mTabChild->SendDispatchKeyboardEvent(*aEvent->AsKeyboardEvent());
-      break;
-    default:
-      MOZ_ASSERT_UNREACHABLE("unsupported event type");
-  }
-
-  return nsEventStatus_eIgnore;
-}
-
-nsEventStatus
-PuppetWidget::DispatchAPZAwareEvent(WidgetInputEvent* aEvent)
-{
   if (!AsyncPanZoomEnabled()) {
     nsEventStatus status = nsEventStatus_eIgnore;
     DispatchEvent(aEvent, status);
@@ -392,6 +368,14 @@ PuppetWidget::DispatchAPZAwareEvent(WidgetInputEvent* aEvent)
     case eWheelEventClass:
       Unused <<
         mTabChild->SendDispatchWheelEvent(*aEvent->AsWheelEvent());
+      break;
+    case eMouseEventClass:
+      Unused <<
+        mTabChild->SendDispatchMouseEvent(*aEvent->AsMouseEvent());
+      break;
+    case eKeyboardEventClass:
+      Unused <<
+        mTabChild->SendDispatchKeyboardEvent(*aEvent->AsKeyboardEvent());
       break;
     default:
       MOZ_ASSERT_UNREACHABLE("unsupported event type");
@@ -855,7 +839,7 @@ PuppetWidget::NotifyIMEOfTextChange(const IMENotification& aIMENotification)
   // if parent process doesn't request NOTIFY_TEXT_CHANGE.
   if (mIMEPreferenceOfParent.WantTextChange() &&
       (mIMEPreferenceOfParent.WantChangesCausedByComposition() ||
-       !aIMENotification.mTextChangeData.mCausedByComposition)) {
+       !aIMENotification.mTextChangeData.mCausedOnlyByComposition)) {
     mTabChild->SendNotifyIMETextChange(mContentCache, aIMENotification);
   } else {
     mTabChild->SendUpdateContentCache(mContentCache);
@@ -1182,13 +1166,13 @@ PuppetWidget::GetNativeData(uint32_t aDataType)
     }
     return (void*)nativeData;
   }
+  case NS_NATIVE_WINDOW:
   case NS_NATIVE_WIDGET:
   case NS_NATIVE_DISPLAY:
-    // These types are ignored (see bug 1183828).
+    // These types are ignored (see bug 1183828, bug 1240891).
     break;
   case NS_RAW_NATIVE_IME_CONTEXT:
     MOZ_CRASH("You need to call GetNativeIMEContext() instead");
-  case NS_NATIVE_WINDOW:
   case NS_NATIVE_PLUGIN_PORT:
   case NS_NATIVE_GRAPHIC:
   case NS_NATIVE_SHELLWIDGET:
@@ -1422,6 +1406,19 @@ PuppetWidget::SetCandidateWindowForPlugin(int32_t aX, int32_t aY)
   }
 
   mTabChild->SendSetCandidateWindowForPlugin(aX, aY);
+}
+
+void
+PuppetWidget::ZoomToRect(const uint32_t& aPresShellId,
+                         const FrameMetrics::ViewID& aViewId,
+                         const CSSRect& aRect,
+                         const uint32_t& aFlags)
+{
+  if (!mTabChild) {
+    return;
+  }
+
+  mTabChild->SendZoomToRect(aPresShellId, aViewId, aRect, aFlags);
 }
 
 } // namespace widget

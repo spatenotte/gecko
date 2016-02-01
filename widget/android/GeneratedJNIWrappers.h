@@ -3982,6 +3982,23 @@ protected:
     NativePanZoomController(jobject instance) : Class(instance) {}
 
 public:
+    struct AdjustScrollForSurfaceShift_t {
+        typedef NativePanZoomController Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                float,
+                float> Args;
+        static constexpr char name[] = "adjustScrollForSurfaceShift";
+        static constexpr char signature[] =
+                "(FF)V";
+        static const bool isStatic = false;
+        static const bool isMultithreaded = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+public:
     struct Destroy_t {
         typedef NativePanZoomController Owner;
         typedef void ReturnType;
@@ -4091,6 +4108,44 @@ public:
     };
 
     auto RequestContentRepaintWrapper(float, float, float, float, float) const -> void;
+
+public:
+    struct UpdateOverscrollOffset_t {
+        typedef NativePanZoomController Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                float,
+                float> Args;
+        static constexpr char name[] = "updateOverscrollOffset";
+        static constexpr char signature[] =
+                "(FF)V";
+        static const bool isStatic = false;
+        static const bool isMultithreaded = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    auto UpdateOverscrollOffset(float, float) const -> void;
+
+public:
+    struct UpdateOverscrollVelocity_t {
+        typedef NativePanZoomController Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                float,
+                float> Args;
+        static constexpr char name[] = "updateOverscrollVelocity";
+        static constexpr char signature[] =
+                "(FF)V";
+        static const bool isStatic = false;
+        static const bool isMultithreaded = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    auto UpdateOverscrollVelocity(float, float) const -> void;
 
 public:
     template<class Impl> class Natives;
@@ -4674,6 +4729,40 @@ public:
     };
 
     static auto SetClipboardText(mozilla::jni::String::Param) -> void;
+
+};
+
+class HardwareCodecCapabilityUtils : public mozilla::jni::Class<HardwareCodecCapabilityUtils>
+{
+public:
+    typedef mozilla::jni::Ref<HardwareCodecCapabilityUtils> Ref;
+    typedef mozilla::jni::LocalRef<HardwareCodecCapabilityUtils> LocalRef;
+    typedef mozilla::jni::GlobalRef<HardwareCodecCapabilityUtils> GlobalRef;
+    typedef const mozilla::jni::Param<HardwareCodecCapabilityUtils>& Param;
+
+    static constexpr char name[] =
+            "org/mozilla/gecko/util/HardwareCodecCapabilityUtils";
+
+protected:
+    HardwareCodecCapabilityUtils(jobject instance) : Class(instance) {}
+
+public:
+    struct FindDecoderCodecInfoForMimeType_t {
+        typedef HardwareCodecCapabilityUtils Owner;
+        typedef bool ReturnType;
+        typedef bool SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "findDecoderCodecInfoForMimeType";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;)Z";
+        static const bool isStatic = true;
+        static const bool isMultithreaded = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto FindDecoderCodecInfoForMimeType(mozilla::jni::String::Param) -> bool;
 
 };
 

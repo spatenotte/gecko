@@ -26,6 +26,7 @@
 #include "LayersTypes.h"
 #include "mozilla/gfx/Matrix.h"
 #include "nsRegion.h"
+#include "PotentialCheckerboardDurationTracker.h"
 
 #include "base/message_loop.h"
 
@@ -126,7 +127,7 @@ public:
    * in. The actual animation is done on the compositor thread after being set
    * up.
    */
-  void ZoomToRect(CSSRect aRect);
+  void ZoomToRect(CSSRect aRect, const uint32_t aFlags);
 
   /**
    * Updates any zoom constraints contained in the <meta name="viewport"> tag.
@@ -313,6 +314,15 @@ public:
    * See CancelAnimationFlags.
    */
   void CancelAnimation(CancelAnimationFlags aFlags = Default);
+
+  /**
+   * Adjusts the scroll position to compensate for a shift in the surface, such
+   * that the content appears to remain visually in the same position. i.e. if
+   * the surface moves up by 10 screenpixels, the scroll position should also
+   * move up by 10 pixels so that what used to be at the top of the surface is
+   * now 10 pixels down the surface.
+   */
+  void AdjustScrollForSurfaceShift(const ScreenPoint& aShift);
 
   /**
    * Clear any overscroll on this APZC.
@@ -1101,10 +1111,16 @@ private:
    * recording.
    */
 private:
+  // Mutex protecting mCheckerboardEvent
+  Mutex mCheckerboardEventLock;
   // This is created when this APZC instance is first included as part of a
   // composite. If a checkerboard event takes place, this is destroyed at the
   // end of the event, and a new one is created on the next composite.
   UniquePtr<CheckerboardEvent> mCheckerboardEvent;
+  // This is used to track the total amount of time that we could reasonably
+  // be checkerboarding. Combined with other info, this allows us to meaningfully
+  // say how frequently users actually encounter checkerboarding.
+  PotentialCheckerboardDurationTracker mPotentialCheckerboardTracker;
 };
 
 } // namespace layers

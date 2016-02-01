@@ -1442,6 +1442,9 @@ auto LayerView::updateZoomedView(mozilla::jni::Object::Param a0) -> void
 
 constexpr char NativePanZoomController::name[];
 
+constexpr char NativePanZoomController::AdjustScrollForSurfaceShift_t::name[];
+constexpr char NativePanZoomController::AdjustScrollForSurfaceShift_t::signature[];
+
 constexpr char NativePanZoomController::Destroy_t::name[];
 constexpr char NativePanZoomController::Destroy_t::signature[];
 
@@ -1468,6 +1471,22 @@ constexpr char NativePanZoomController::RequestContentRepaintWrapper_t::signatur
 auto NativePanZoomController::RequestContentRepaintWrapper(float a0, float a1, float a2, float a3, float a4) const -> void
 {
     return mozilla::jni::Method<RequestContentRepaintWrapper_t>::Call(this, nullptr, a0, a1, a2, a3, a4);
+}
+
+constexpr char NativePanZoomController::UpdateOverscrollOffset_t::name[];
+constexpr char NativePanZoomController::UpdateOverscrollOffset_t::signature[];
+
+auto NativePanZoomController::UpdateOverscrollOffset(float a0, float a1) const -> void
+{
+    return mozilla::jni::Method<UpdateOverscrollOffset_t>::Call(this, nullptr, a0, a1);
+}
+
+constexpr char NativePanZoomController::UpdateOverscrollVelocity_t::name[];
+constexpr char NativePanZoomController::UpdateOverscrollVelocity_t::signature[];
+
+auto NativePanZoomController::UpdateOverscrollVelocity(float a0, float a1) const -> void
+{
+    return mozilla::jni::Method<UpdateOverscrollVelocity_t>::Call(this, nullptr, a0, a1);
 }
 
 constexpr char ProgressiveUpdateData::name[];
@@ -1759,6 +1778,16 @@ constexpr char Clipboard::SetClipboardText_t::signature[];
 auto Clipboard::SetClipboardText(mozilla::jni::String::Param a0) -> void
 {
     return mozilla::jni::Method<SetClipboardText_t>::Call(nullptr, nullptr, a0);
+}
+
+constexpr char HardwareCodecCapabilityUtils::name[];
+
+constexpr char HardwareCodecCapabilityUtils::FindDecoderCodecInfoForMimeType_t::name[];
+constexpr char HardwareCodecCapabilityUtils::FindDecoderCodecInfoForMimeType_t::signature[];
+
+auto HardwareCodecCapabilityUtils::FindDecoderCodecInfoForMimeType(mozilla::jni::String::Param a0) -> bool
+{
+    return mozilla::jni::Method<FindDecoderCodecInfoForMimeType_t>::Call(nullptr, nullptr, a0);
 }
 
 constexpr char NativeJSContainer::name[];

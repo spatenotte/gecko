@@ -206,6 +206,7 @@ static void DestroyTextureData(TextureData* aTextureData, ISurfaceAllocator* aAl
 void
 TextureChild::ActorDestroy(ActorDestroyReason why)
 {
+  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::GRAPHICS);
   mWaitForRecycle = nullptr;
 
   if (mTextureData) {
@@ -645,7 +646,9 @@ TextureClient::RecycleTexture(TextureFlags aFlags)
 void
 TextureClient::WaitForCompositorRecycle()
 {
-  mActor->WaitForCompositorRecycle();
+  if (IsSharedWithCompositor()) {
+    mActor->WaitForCompositorRecycle();
+  }
 }
 
 void

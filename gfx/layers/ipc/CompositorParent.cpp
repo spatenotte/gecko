@@ -75,6 +75,7 @@
 
 #ifdef MOZ_WIDGET_GONK
 #include "GeckoTouchDispatcher.h"
+#include "nsScreenManagerGonk.h"
 #endif
 
 #include "LayerScope.h"
@@ -286,13 +287,20 @@ CompositorVsyncScheduler::Observer::Destroy()
 CompositorVsyncScheduler::CompositorVsyncScheduler(CompositorParent* aCompositorParent, nsIWidget* aWidget)
   : mCompositorParent(aCompositorParent)
   , mLastCompose(TimeStamp::Now())
-  , mCurrentCompositeTask(nullptr)
   , mIsObservingVsync(false)
   , mNeedsComposite(0)
   , mVsyncNotificationsSkipped(0)
   , mCurrentCompositeTaskMonitor("CurrentCompositeTaskMonitor")
+  , mCurrentCompositeTask(nullptr)
   , mSetNeedsCompositeMonitor("SetNeedsCompositeMonitor")
   , mSetNeedsCompositeTask(nullptr)
+#ifdef MOZ_WIDGET_GONK
+#if ANDROID_VERSION >= 19
+  , mDisplayEnabled(false)
+  , mSetDisplayMonitor("SetDisplayMonitor")
+  , mSetDisplayTask(nullptr)
+#endif
+#endif
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWidget != nullptr);
@@ -300,6 +308,11 @@ CompositorVsyncScheduler::CompositorVsyncScheduler(CompositorParent* aCompositor
   mCompositorVsyncDispatcher = aWidget->GetCompositorVsyncDispatcher();
 #ifdef MOZ_WIDGET_GONK
   GeckoTouchDispatcher::GetInstance()->SetCompositorVsyncScheduler(this);
+
+#if ANDROID_VERSION >= 19
+  RefPtr<nsScreenManagerGonk> screenManager = nsScreenManagerGonk::GetInstance();
+  screenManager->SetCompositorVsyncScheduler(this);
+#endif
 #endif
 
   // mAsapScheduling is set on the main thread during init,
@@ -317,6 +330,54 @@ CompositorVsyncScheduler::~CompositorVsyncScheduler()
   mCompositorVsyncDispatcher = nullptr;
 }
 
+#ifdef MOZ_WIDGET_GONK
+#if ANDROID_VERSION >= 19
+void
+CompositorVsyncScheduler::SetDisplay(bool aDisplayEnable)
+{
+  // SetDisplay() is usually called from nsScreenManager at main thread. Post
+  // to compositor thread if needs.
+  if (!CompositorParent::IsInCompositorThread()) {
+    MOZ_ASSERT(NS_IsMainThread());
+    MonitorAutoLock lock(mSetDisplayMonitor);
+    mSetDisplayTask = NewRunnableMethod(this,
+                                        &CompositorVsyncScheduler::SetDisplay,
+                                        aDisplayEnable);
+    ScheduleTask(mSetDisplayTask, 0);
+    return;
+  } else {
+    MonitorAutoLock lock(mSetDisplayMonitor);
+    mSetDisplayTask = nullptr;
+  }
+
+  if (mDisplayEnabled == aDisplayEnable) {
+    return;
+  }
+
+  mDisplayEnabled = aDisplayEnable;
+  if (!mDisplayEnabled) {
+    CancelCurrentSetNeedsCompositeTask();
+    CancelCurrentCompositeTask();
+  }
+}
+
+void
+CompositorVsyncScheduler::CancelSetDisplayTask()
+{
+  MOZ_ASSERT(CompositorParent::IsInCompositorThread());
+  MonitorAutoLock lock(mSetDisplayMonitor);
+  if (mSetDisplayTask) {
+    mSetDisplayTask->Cancel();
+    mSetDisplayTask = nullptr;
+  }
+
+  // CancelSetDisplayTask is only be called in clean-up process, so
+  // mDisplayEnabled could be false there.
+  mDisplayEnabled = false;
+}
+#endif //ANDROID_VERSION >= 19
+#endif //MOZ_WIDGET_GONK
+
 void
 CompositorVsyncScheduler::Destroy()
 {
@@ -324,6 +385,12 @@ CompositorVsyncScheduler::Destroy()
   UnobserveVsync();
   mVsyncObserver->Destroy();
   mVsyncObserver = nullptr;
+
+#ifdef MOZ_WIDGET_GONK
+#if ANDROID_VERSION >= 19
+  CancelSetDisplayTask();
+#endif
+#endif
   CancelCurrentSetNeedsCompositeTask();
   CancelCurrentCompositeTask();
 }
@@ -336,7 +403,7 @@ CompositorVsyncScheduler::PostCompositeTask(TimeStamp aCompositeTimestamp)
   if (mCurrentCompositeTask == nullptr) {
     mCurrentCompositeTask = NewRunnableMethod(this,
                                               &CompositorVsyncScheduler::Composite,
-                                              aCompositeTimestamp, nullptr, nullptr);
+                                              aCompositeTimestamp);
     ScheduleTask(mCurrentCompositeTask, 0);
   }
 }
@@ -396,6 +463,15 @@ CompositorVsyncScheduler::SetNeedsComposite()
     mSetNeedsCompositeTask = nullptr;
   }
 
+#ifdef MOZ_WIDGET_GONK
+#if ANDROID_VERSION >= 19
+  // Skip composition when display off.
+  if (!mDisplayEnabled) {
+    return;
+  }
+#endif
+#endif
+
   mNeedsComposite++;
   if (!mIsObservingVsync && mNeedsComposite) {
     ObserveVsync();
@@ -424,19 +500,12 @@ CompositorVsyncScheduler::CancelCurrentCompositeTask()
 }
 
 void
-CompositorVsyncScheduler::Composite(TimeStamp aVsyncTimestamp, gfx::DrawTarget* aTarget, const IntRect* aRect)
+CompositorVsyncScheduler::Composite(TimeStamp aVsyncTimestamp)
 {
   MOZ_ASSERT(CompositorParent::IsInCompositorThread());
   {
     MonitorAutoLock lock(mCurrentCompositeTaskMonitor);
     mCurrentCompositeTask = nullptr;
-  }
-
-  if (aVsyncTimestamp < mLastCompose) {
-    // We can sometimes get vsync timestamps that are in the past
-    // compared to the last compose with force composites.
-    // In those cases, normalize to now.
-    aVsyncTimestamp = TimeStamp::Now();
   }
 
   DispatchTouchEvents(aVsyncTimestamp);
@@ -445,7 +514,7 @@ CompositorVsyncScheduler::Composite(TimeStamp aVsyncTimestamp, gfx::DrawTarget* 
   if (mNeedsComposite || mAsapScheduling) {
     mNeedsComposite = 0;
     mLastCompose = aVsyncTimestamp;
-    ComposeToTarget(aTarget, aRect);
+    ComposeToTarget(nullptr);
     mVsyncNotificationsSkipped = 0;
 
     TimeDuration compositeFrameTotal = TimeStamp::Now() - aVsyncTimestamp;
@@ -476,10 +545,9 @@ CompositorVsyncScheduler::OnForceComposeToTarget()
 void
 CompositorVsyncScheduler::ForceComposeToTarget(gfx::DrawTarget* aTarget, const IntRect* aRect)
 {
-  MOZ_ASSERT(CompositorParent::IsInCompositorThread());
   OnForceComposeToTarget();
-  SetNeedsComposite();
-  Composite(TimeStamp::Now(), aTarget, aRect);
+  mLastCompose = TimeStamp::Now();
+  ComposeToTarget(aTarget, aRect);
 }
 
 bool
@@ -564,9 +632,8 @@ CompositorVsyncScheduler::ScheduleTask(CancelableTask* aTask, int aTime)
 void
 CompositorVsyncScheduler::ResumeComposition()
 {
-  MOZ_ASSERT(CompositorParent::IsInCompositorThread());
-  SetNeedsComposite();
-  Composite(TimeStamp::Now());
+  mLastCompose = TimeStamp::Now();
+  ComposeToTarget(nullptr);
 }
 
 void
@@ -2360,11 +2427,10 @@ CrossProcessCompositorParent::SetConfirmedTargetAPZC(const LayerTransactionParen
   uint64_t id = aLayerTree->GetId();
   MOZ_ASSERT(id != 0);
   const CompositorParent::LayerTreeState* state = CompositorParent::GetIndirectShadowTree(id);
-  if (!state) {
+  if (!state || !state->mParent) {
     return;
   }
 
-  MOZ_ASSERT(state->mParent);
   state->mParent->SetConfirmedTargetAPZC(aLayerTree, aInputBlockId, aTargets);
 }
 

@@ -9,6 +9,7 @@
 #include "builtin/SelfHostingDefines.h"
 #include "frontend/ParseNode.h"
 #include "frontend/SharedContext.h"
+#include "gc/Policy.h"
 #include "gc/Tracer.h"
 
 #include "jsobjinlines.h"
@@ -381,7 +382,7 @@ ModuleNamespaceObject::ProxyHandler::preventExtensions(JSContext* cx, HandleObje
 bool
 ModuleNamespaceObject::ProxyHandler::getOwnPropertyDescriptor(JSContext* cx, HandleObject proxy,
                                                               HandleId id,
-                                                              MutableHandle<JSPropertyDescriptor> desc) const
+                                                              MutableHandle<PropertyDescriptor> desc) const
 {
     Rooted<ModuleNamespaceObject*> ns(cx, &proxy->as<ModuleNamespaceObject>());
     if (JSID_IS_SYMBOL(id)) {
@@ -421,7 +422,7 @@ ModuleNamespaceObject::ProxyHandler::getOwnPropertyDescriptor(JSContext* cx, Han
 
 bool
 ModuleNamespaceObject::ProxyHandler::defineProperty(JSContext* cx, HandleObject proxy, HandleId id,
-                                                    Handle<JSPropertyDescriptor> desc,
+                                                    Handle<PropertyDescriptor> desc,
                                                     ObjectOpResult& result) const
 {
     return result.failReadOnly();

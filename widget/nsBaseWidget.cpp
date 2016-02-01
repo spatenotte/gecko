@@ -757,9 +757,8 @@ void
 nsBaseWidget::ArrayFromRegion(const LayoutDeviceIntRegion& aRegion,
                               nsTArray<LayoutDeviceIntRect>& aRects)
 {
-  const LayoutDeviceIntRect* r;
-  for (LayoutDeviceIntRegion::RectIterator iter(aRegion); (r = iter.Next()); ) {
-    aRects.AppendElement(*r);
+  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+    aRects.AppendElement(iter.Get());
   }
 }
 
@@ -1013,14 +1012,13 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
   MOZ_ASSERT(NS_IsMainThread());
   InputAPZContext context(aGuid, aInputBlockId, aApzResponse);
 
-  // If this is a touch event and APZ has targeted it to an APZC in the root
+  // If this is an event that the APZ has targeted to an APZC in the root
   // process, apply that APZC's callback-transform before dispatching the
   // event. If the event is instead targeted to an APZC in the child process,
   // the transform will be applied in the child process before dispatching
   // the event there (see e.g. TabChild::RecvRealTouchEvent()).
-  // TODO: Do other types of events (than touch) need this?
-  if (aEvent->AsTouchEvent() && aGuid.mLayersId == mCompositorParent->RootLayerTreeId()) {
-    APZCCallbackHelper::ApplyCallbackTransform(*aEvent->AsTouchEvent(), aGuid,
+  if (aGuid.mLayersId == mCompositorParent->RootLayerTreeId()) {
+    APZCCallbackHelper::ApplyCallbackTransform(*aEvent, aGuid,
         GetDefaultScale());
   }
 
@@ -1031,7 +1029,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
   UniquePtr<WidgetEvent> original(aEvent->Duplicate());
   DispatchEvent(aEvent, status);
 
-  if (mAPZC && !context.WasRoutedToChildProcess()) {
+  if (mAPZC && !context.WasRoutedToChildProcess() && aInputBlockId) {
     // EventStateManager did not route the event into the child process.
     // It's safe to communicate to APZ that the event has been processed.
     // TODO: Eventually we'll be able to move the SendSetTargetAPZCNotification
@@ -1062,21 +1060,6 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
     }
   }
 
-  return status;
-}
-
-nsEventStatus
-nsBaseWidget::DispatchInputEvent(WidgetInputEvent* aEvent)
-{
-  if (mAPZC) {
-    nsEventStatus result = mAPZC->ReceiveInputEvent(*aEvent, nullptr, nullptr);
-    if (result == nsEventStatus_eConsumeNoDefault) {
-      return result;
-    }
-  }
-
-  nsEventStatus status;
-  DispatchEvent(aEvent, status);
   return status;
 }
 
@@ -1147,7 +1130,7 @@ private:
 };
 
 nsEventStatus
-nsBaseWidget::DispatchAPZAwareEvent(WidgetInputEvent* aEvent)
+nsBaseWidget::DispatchInputEvent(WidgetInputEvent* aEvent)
 {
   MOZ_ASSERT(NS_IsMainThread());
   if (mAPZC) {
@@ -1527,51 +1510,6 @@ nsBaseWidget::ShowsResizeIndicator(LayoutDeviceIntRect* aResizerRect)
   return false;
 }
 
-NS_IMETHODIMP
-nsBaseWidget::OverrideSystemMouseScrollSpeed(double aOriginalDeltaX,
-                                             double aOriginalDeltaY,
-                                             double& aOverriddenDeltaX,
-                                             double& aOverriddenDeltaY)
-{
-  aOverriddenDeltaX = aOriginalDeltaX;
-  aOverriddenDeltaY = aOriginalDeltaY;
-
-  static bool sInitialized = false;
-  static bool sIsOverrideEnabled = false;
-  static int32_t sIntFactorX = 0;
-  static int32_t sIntFactorY = 0;
-
-  if (!sInitialized) {
-    Preferences::AddBoolVarCache(&sIsOverrideEnabled,
-      "mousewheel.system_scroll_override_on_root_content.enabled", false);
-    Preferences::AddIntVarCache(&sIntFactorX,
-      "mousewheel.system_scroll_override_on_root_content.horizontal.factor", 0);
-    Preferences::AddIntVarCache(&sIntFactorY,
-      "mousewheel.system_scroll_override_on_root_content.vertical.factor", 0);
-    sIntFactorX = std::max(sIntFactorX, 0);
-    sIntFactorY = std::max(sIntFactorY, 0);
-    sInitialized = true;
-  }
-
-  if (!sIsOverrideEnabled) {
-    return NS_OK;
-  }
-
-  // The pref value must be larger than 100, otherwise, we don't override the
-  // delta value.
-  if (sIntFactorX > 100) {
-    double factor = static_cast<double>(sIntFactorX) / 100;
-    aOverriddenDeltaX *= factor;
-  }
-  if (sIntFactorY > 100) {
-    double factor = static_cast<double>(sIntFactorY) / 100;
-    aOverriddenDeltaY *= factor;
-  }
-
-  return NS_OK;
-}
-
-
 /**
  * Modifies aFile to point at an icon file with the given name and suffix.  The
  * suffix may correspond to a file extension with leading '.' if appropriate.
@@ -1748,7 +1686,7 @@ nsBaseWidget::NotifyUIStateChanged(UIStateChangeType aShowAccelerators,
                                    UIStateChangeType aShowFocusRings)
 {
   if (nsIDocument* doc = GetDocument()) {
-    nsPIDOMWindow* win = doc->GetWindow();
+    nsPIDOMWindowOuter* win = doc->GetWindow();
     if (win) {
       win->SetKeyboardIndicators(aShowAccelerators, aShowFocusRings);
     }
@@ -1801,6 +1739,19 @@ nsBaseWidget::GetTextEventDispatcher()
     mTextEventDispatcher = new TextEventDispatcher(this);
   }
   return mTextEventDispatcher;
+}
+
+void
+nsBaseWidget::ZoomToRect(const uint32_t& aPresShellId,
+                         const FrameMetrics::ViewID& aViewId,
+                         const CSSRect& aRect,
+                         const uint32_t& aFlags)
+{
+  if (!mCompositorParent || !mAPZC) {
+    return;
+  }
+  uint64_t layerId = mCompositorParent->RootLayerTreeId();
+  mAPZC->ZoomToRect(ScrollableLayerGuid(layerId, aPresShellId, aViewId), aRect, aFlags);
 }
 
 #ifdef ACCESSIBILITY
@@ -2198,14 +2149,35 @@ IMENotification::TextChangeDataBase::MergeWith(
   const TextChangeDataBase& newData = aOther;
   const TextChangeDataBase oldData = *this;
 
-  // mCausedByComposition should be true only when all changes are caused by
-  // composition.
-  mCausedByComposition =
-    newData.mCausedByComposition && oldData.mCausedByComposition;
-  // mOccurredDuringComposition should be true only when all changes occurred
-  // during composition.
-  mOccurredDuringComposition =
-    newData.mOccurredDuringComposition && oldData.mOccurredDuringComposition;
+  // mCausedOnlyByComposition should be true only when all changes are caused
+  // by composition.
+  mCausedOnlyByComposition =
+    newData.mCausedOnlyByComposition && oldData.mCausedOnlyByComposition;
+
+  // mIncludingChangesWithoutComposition should be true if at least one of
+  // merged changes occurred without composition.
+  mIncludingChangesWithoutComposition =
+    newData.mIncludingChangesWithoutComposition ||
+      oldData.mIncludingChangesWithoutComposition;
+
+  // mIncludingChangesDuringComposition should be true when at least one of
+  // the merged non-composition changes occurred during the latest composition.
+  if (!newData.mCausedOnlyByComposition &&
+      !newData.mIncludingChangesDuringComposition) {
+    MOZ_ASSERT(newData.mIncludingChangesWithoutComposition);
+    MOZ_ASSERT(mIncludingChangesWithoutComposition);
+    // If new change is neither caused by composition nor occurred during
+    // composition, set mIncludingChangesDuringComposition to false because
+    // IME doesn't want outdated text changes as text change during current
+    // composition.
+    mIncludingChangesDuringComposition = false;
+  } else {
+    // Otherwise, set mIncludingChangesDuringComposition to true if either
+    // oldData or newData includes changes during composition.
+    mIncludingChangesDuringComposition =
+      newData.mIncludingChangesDuringComposition ||
+        oldData.mIncludingChangesDuringComposition;
+  }
 
   if (newData.mStartOffset >= oldData.mAddedEndOffset) {
     // Case 1:

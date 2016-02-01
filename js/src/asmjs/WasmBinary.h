@@ -20,6 +20,7 @@
 #define wasm_binary_h
 
 #include "asmjs/WasmTypes.h"
+#include "builtin/SIMD.h"
 
 namespace js {
 
@@ -27,7 +28,29 @@ class PropertyName;
 
 namespace wasm {
 
-enum class Expr : uint8_t
+// Module generator limits
+static const unsigned MaxSigs        =   4 * 1024;
+static const unsigned MaxFuncs       = 512 * 1024;
+static const unsigned MaxImports     =   4 * 1024;
+static const unsigned MaxExports     =   4 * 1024;
+static const unsigned MaxArgsPerFunc =   4 * 1024;
+
+// Module header constants
+static const uint32_t MagicNumber = 0x6d736100; // "\0asm"
+static const uint32_t EncodingVersion = -1;     // experimental
+
+// Module section names:
+static const char SigSection[] =     "sig";
+static const char DeclSection[] =    "decl";
+static const char ImportSection[] =  "import";
+static const char ExportSection[] =  "export";
+static const char CodeSection[] =    "code";
+static const char EndSection[] =     "";
+
+// Subsection names:
+static const char FuncSubsection[] = "func";
+
+enum class Expr : uint16_t
 {
     // Control opcodes
     Nop,
@@ -43,7 +66,7 @@ enum class Expr : uint8_t
     Unreachable,
 
     // Calls
-    CallInternal,
+    Call,
     CallIndirect,
     CallImport,
 
@@ -186,16 +209,10 @@ enum class Expr : uint8_t
     Break,
     BreakLabel,
 
-    I32Expr,        // to be removed
-    F32Expr,
-    F64Expr,
-
     Id,
 
     InterruptCheckHead,
     InterruptCheckLoop,
-
-    DebugCheckPoint,
 
     I32Min,
     I32Max,
@@ -209,57 +226,23 @@ enum class Expr : uint8_t
     I32AtomicsBinOp,
 
     // SIMD
-    I32X4Const,
-    B32X4Const,
-    F32X4Const,
-
-    I32X4Expr,
-    F32X4Expr,
-    B32X4Expr,
-
-    I32I32X4ExtractLane,
-    I32B32X4ExtractLane,
-    I32B32X4AllTrue,
-    I32B32X4AnyTrue,
-
-    F32F32X4ExtractLane,
-
-    I32X4Ctor,
-    I32X4Unary,
-    I32X4Binary,
-    I32X4BinaryBitwise,
-    I32X4BinaryShift,
-    I32X4ReplaceLane,
-    I32X4FromF32X4,
-    I32X4FromF32X4Bits,
-    I32X4Swizzle,
-    I32X4Shuffle,
-    I32X4Select,
-    I32X4Splat,
-    I32X4Load,
-    I32X4Store,
-
-    F32X4Ctor,
-    F32X4Unary,
-    F32X4Binary,
-    F32X4ReplaceLane,
-    F32X4FromI32X4,
-    F32X4FromI32X4Bits,
-    F32X4Swizzle,
-    F32X4Shuffle,
-    F32X4Select,
-    F32X4Splat,
-    F32X4Load,
-    F32X4Store,
-
-    B32X4Ctor,
-    B32X4Unary,
-    B32X4Binary,
-    B32X4BinaryCompI32X4,
-    B32X4BinaryCompF32X4,
-    B32X4BinaryBitwise,
-    B32X4ReplaceLane,
-    B32X4Splat,
+#define SIMD_OPCODE(TYPE, OP) TYPE##OP,
+#define _(OP) SIMD_OPCODE(I32x4, OP)
+    FORALL_INT32X4_ASMJS_OP(_)
+    I32x4Constructor,
+    I32x4Const,
+#undef _
+#define _(OP) SIMD_OPCODE(F32x4, OP)
+    FORALL_FLOAT32X4_ASMJS_OP(_)
+    F32x4Constructor,
+    F32x4Const,
+#undef _
+#define _(OP) SIMD_OPCODE(B32x4, OP)
+    FORALL_BOOL_SIMD_OP(_)
+    B32x4Constructor,
+    B32x4Const,
+#undef _
+#undef OPCODE
 
     // I32 asm.js opcodes
     I32Not,
@@ -292,7 +275,9 @@ enum class Expr : uint8_t
     F64FromS32,
     F64FromU32,
 
-    F64StoreMemF32
+    F64StoreMemF32,
+
+    Limit
 };
 
 enum NeedsBoundsCheck : uint8_t
@@ -304,45 +289,60 @@ enum NeedsBoundsCheck : uint8_t
 typedef Vector<uint8_t, 0, SystemAllocPolicy> Bytecode;
 typedef UniquePtr<Bytecode> UniqueBytecode;
 
-// The Encoder class recycles (through its constructor) or creates a new Bytecode (through its
-// init() method). Its Bytecode is released when it's done building the wasm IR in finish().
+// The Encoder class appends bytes to the Bytecode object it is given during
+// construction. The client is responsible for the Bytecode's lifetime and must
+// keep the Bytecode alive as long as the Encoder is used.
 class Encoder
 {
-    UniqueBytecode bytecode_;
-    DebugOnly<bool> done_;
+    Bytecode& bytecode_;
 
-    template<class T>
+    template <class T>
     MOZ_WARN_UNUSED_RESULT
     bool write(T v, size_t* offset) {
         if (offset)
-            *offset = bytecode_->length();
-        return bytecode_->append(reinterpret_cast<uint8_t*>(&v), sizeof(T));
+            *offset = bytecode_.length();
+        return bytecode_.append(reinterpret_cast<uint8_t*>(&v), sizeof(T));
     }
+
+    template <class IntT, class T>
+    MOZ_WARN_UNUSED_RESULT
+    bool writeEnum(T v, size_t* offset) {
+        // For now, just write a u16 instead of a variable-length integer.
+        // Variable-length is somewhat annoying at the moment due to the
+        // pre-order encoding and back-patching; let's see if we switch to
+        // post-order first.
+        static_assert(mozilla::IsEnum<T>::value, "is an enum");
+        MOZ_ASSERT(uint64_t(v) < IntT(-1));
+        MOZ_ASSERT(v != T::Limit);
+        return write<IntT>(IntT(v), offset);
+    }
+
+    template <class IntT, class T>
+    void patchEnum(size_t pc, T v) {
+        // See writeEnum comment.
+        static_assert(mozilla::IsEnum<T>::value, "is an enum");
+        MOZ_ASSERT(uint64_t(v) < UINT16_MAX);
+        memcpy(&bytecode_[pc], &v, sizeof(IntT));
+    }
+
+    template <class T>
+    static const T load(const uint8_t* p) {
+        T t;
+        memcpy(&t, p, sizeof(T));
+        return t;
+    }
+
+    static const uint32_t BadSectionLength = uint32_t(-1);
 
   public:
-    Encoder()
-      : bytecode_(nullptr),
-        done_(false)
-    {}
-
-    bool init(UniqueBytecode bytecode = UniqueBytecode()) {
-        if (bytecode) {
-            bytecode_ = Move(bytecode);
-            bytecode_->clear();
-            return true;
-        }
-        bytecode_ = MakeUnique<Bytecode>();
-        return !!bytecode_;
+    explicit Encoder(Bytecode& bytecode)
+      : bytecode_(bytecode)
+    {
+        MOZ_ASSERT(empty());
     }
 
-    size_t bytecodeOffset() const { return bytecode_->length(); }
+    size_t bytecodeOffset() const { return bytecode_.length(); }
     bool empty() const { return bytecodeOffset() == 0; }
-
-    UniqueBytecode finish() {
-        MOZ_ASSERT(!done_);
-        done_ = true;
-        return Move(bytecode_);
-    }
 
     MOZ_WARN_UNUSED_RESULT bool
     writeVarU32(uint32_t i) {
@@ -356,6 +356,13 @@ class Encoder
         } while(i != 0);
         return true;
     }
+
+    MOZ_WARN_UNUSED_RESULT bool
+    writeExpr(Expr expr, size_t* offset = nullptr)         { return writeEnum<uint16_t>(expr, offset); }
+    MOZ_WARN_UNUSED_RESULT bool
+    writeValType(ValType type, size_t* offset = nullptr)   { return writeEnum<uint8_t>(type, offset); }
+    MOZ_WARN_UNUSED_RESULT bool
+    writeExprType(ExprType type, size_t* offset = nullptr) { return writeEnum<uint8_t>(type, offset); }
 
     MOZ_WARN_UNUSED_RESULT bool
     writeU8(uint8_t i, size_t* offset = nullptr)   { return write<uint8_t>(i, offset); }
@@ -389,26 +396,48 @@ class Encoder
         return true;
     }
 
+    MOZ_WARN_UNUSED_RESULT bool writeCString(const char* cstr) {
+        MOZ_ASSERT(cstr);
+        return bytecode_.append(reinterpret_cast<const uint8_t*>(cstr), strlen(cstr) + 1);
+    }
+
+    MOZ_WARN_UNUSED_RESULT bool startSection(size_t* offset) {
+        if (!writeU32(BadSectionLength))
+            return false;
+        *offset = bytecode_.length();
+        return true;
+    }
+    void finishSection(size_t offset) {
+        uint8_t* patchAt = bytecode_.begin() + offset - sizeof(uint32_t);
+        MOZ_ASSERT(patchAt <= bytecode_.end() - sizeof(uint32_t));
+        MOZ_ASSERT(load<uint32_t>(patchAt) == BadSectionLength);
+        uint32_t numBytes = bytecode_.length() - offset;
+        memcpy(patchAt, &numBytes, sizeof(uint32_t));
+    }
+
 #ifdef DEBUG
     bool pcIsPatchable(size_t pc, unsigned size) const {
         bool patchable = true;
         for (unsigned i = 0; patchable && i < size; i++)
-            patchable &= Expr((*bytecode_)[pc]) == Expr::Unreachable;
+            patchable &= Expr(bytecode_[pc]) == Expr::Unreachable;
         return patchable;
     }
 #endif
-
     void patchU8(size_t pc, uint8_t i) {
         MOZ_ASSERT(pcIsPatchable(pc, sizeof(uint8_t)));
-        (*bytecode_)[pc] = i;
+        bytecode_[pc] = i;
     }
-
+    void patchExpr(size_t pc, Expr expr) {
+        // See comment in writeEnum
+        MOZ_ASSERT(pcIsPatchable(pc, sizeof(uint16_t)));
+        patchEnum<uint16_t>(pc, expr);
+    }
     template<class T>
     void patch32(size_t pc, T i) {
         static_assert(sizeof(T) == sizeof(uint32_t),
                       "patch32 must be used with 32-bits wide types");
         MOZ_ASSERT(pcIsPatchable(pc, sizeof(uint32_t)));
-        memcpy(&(*bytecode_)[pc], &i, sizeof(uint32_t));
+        memcpy(&bytecode_[pc], &i, sizeof(uint32_t));
     }
 };
 
@@ -418,26 +447,67 @@ class Decoder
     const uint8_t* const end_;
     const uint8_t* cur_;
 
-    template<class T>
+    template <class T>
     MOZ_WARN_UNUSED_RESULT bool
     read(T* out) {
         if (uintptr_t(end_ - cur_) < sizeof(T))
             return false;
-        memcpy((void*)out, cur_, sizeof(T));
+        if (out)
+            memcpy((void*)out, cur_, sizeof(T));
         cur_ += sizeof(T);
         return true;
     }
 
-    template<class T>
-    T uncheckedRead() {
+    template <class IntT, class T>
+    MOZ_WARN_UNUSED_RESULT bool
+    readEnum(T* out) {
+        static_assert(mozilla::IsEnum<T>::value, "is an enum");
+        // See Encoder::writeEnum.
+        IntT i;
+        if (!read(&i) || i >= IntT(T::Limit))
+            return false;
+        if (out)
+            *out = T(i);
+        return true;
+    }
+
+    template <class T>
+    T uncheckedPeek() const {
         MOZ_ASSERT(uintptr_t(end_ - cur_) >= sizeof(T));
         T ret;
         memcpy(&ret, cur_, sizeof(T));
+        return ret;
+    }
+
+    template <class IntT, class T>
+    T uncheckedPeekEnum() const {
+        // See Encoder::writeEnum.
+        static_assert(mozilla::IsEnum<T>::value, "is an enum");
+        return (T)uncheckedPeek<IntT>();
+    }
+
+    template <class T>
+    T uncheckedRead() {
+        T ret = uncheckedPeek<T>();
         cur_ += sizeof(T);
         return ret;
     }
 
+    template <class IntT, class T>
+    T uncheckedReadEnum() {
+        // See Encoder::writeEnum.
+        static_assert(mozilla::IsEnum<T>::value, "is an enum");
+        return (T)uncheckedRead<IntT>();
+    }
+
   public:
+    Decoder(const uint8_t* begin, const uint8_t* end)
+      : beg_(begin),
+        end_(end),
+        cur_(begin)
+    {
+        MOZ_ASSERT(begin <= end);
+    }
     explicit Decoder(const Bytecode& bytecode)
       : beg_(bytecode.begin()),
         end_(bytecode.end()),
@@ -449,54 +519,122 @@ class Decoder
         return cur_ == end_;
     }
 
+    const uint8_t* currentPosition() const {
+        return cur_;
+    }
+    size_t currentOffset() const {
+        return cur_ - beg_;
+    }
+    size_t offsetOfLastExpr() const {
+        return currentOffset() - sizeof(uint16_t);
+    }
     void assertCurrentIs(const DebugOnly<size_t> offset) const {
-        MOZ_ASSERT(size_t(cur_ - beg_) == offset);
+        MOZ_ASSERT(currentOffset() == offset);
     }
 
     // The fallible unpacking API should be used when we're not assuming
     // anything about the bytecode, in particular if it is well-formed.
-    MOZ_WARN_UNUSED_RESULT bool readU8 (uint8_t* i)         { return read(i); }
-    MOZ_WARN_UNUSED_RESULT bool readI32(int32_t* i)         { return read(i); }
-    MOZ_WARN_UNUSED_RESULT bool readF32(float* f)           { return read(f); }
-    MOZ_WARN_UNUSED_RESULT bool readU32(uint32_t* u)        { return read(u); }
-    MOZ_WARN_UNUSED_RESULT bool readF64(double* d)          { return read(d); }
+    MOZ_WARN_UNUSED_RESULT bool readU8 (uint8_t* i = nullptr)  { return read(i); }
+    MOZ_WARN_UNUSED_RESULT bool readI32(int32_t* i = nullptr)  { return read(i); }
+    MOZ_WARN_UNUSED_RESULT bool readF32(float* f = nullptr)    { return read(f); }
+    MOZ_WARN_UNUSED_RESULT bool readU32(uint32_t* u = nullptr) { return read(u); }
+    MOZ_WARN_UNUSED_RESULT bool readF64(double* d = nullptr)   { return read(d); }
 
-    MOZ_WARN_UNUSED_RESULT bool readI32X4(jit::SimdConstant* c) {
+    MOZ_WARN_UNUSED_RESULT bool readI32X4(jit::SimdConstant* c = nullptr) {
         int32_t v[4] = { 0, 0, 0, 0 };
         for (size_t i = 0; i < 4; i++) {
             if (!readI32(&v[i]))
                 return false;
         }
-        *c = jit::SimdConstant::CreateX4(v[0], v[1], v[2], v[3]);
+        if (c)
+            *c = jit::SimdConstant::CreateX4(v[0], v[1], v[2], v[3]);
         return true;
     }
-    MOZ_WARN_UNUSED_RESULT bool readF32X4(jit::SimdConstant* c) {
+    MOZ_WARN_UNUSED_RESULT bool readF32X4(jit::SimdConstant* c = nullptr) {
         float v[4] = { 0., 0., 0., 0. };
         for (size_t i = 0; i < 4; i++) {
             if (!readF32(&v[i]))
                 return false;
         }
-        *c = jit::SimdConstant::CreateX4(v[0], v[1], v[2], v[3]);
+        if (c)
+            *c = jit::SimdConstant::CreateX4(v[0], v[1], v[2], v[3]);
         return true;
     }
 
-    MOZ_WARN_UNUSED_RESULT bool readVarU32(uint32_t* decoded) {
-        *decoded = 0;
+    MOZ_WARN_UNUSED_RESULT bool readVarU32(uint32_t* out = nullptr) {
+        uint32_t u32 = 0;
         uint8_t byte;
         uint32_t shift = 0;
         do {
             if (!readU8(&byte))
                 return false;
             if (!(byte & 0x80)) {
-                *decoded |= uint32_t(byte & 0x7F) << shift;
+                if (out)
+                    *out = u32 | uint32_t(byte & 0x7F) << shift;
                 return true;
             }
-            *decoded |= uint32_t(byte & 0x7F) << shift;
+            u32 |= uint32_t(byte & 0x7F) << shift;
             shift += 7;
         } while (shift != 28);
         if (!readU8(&byte) || (byte & 0xF0))
             return false;
-        *decoded |= uint32_t(byte) << 28;
+        if (out)
+            *out = u32 | uint32_t(byte) << 28;
+        return true;
+    }
+    MOZ_WARN_UNUSED_RESULT bool readExpr(Expr* expr = nullptr) {
+        return readEnum<uint16_t>(expr);
+    }
+    MOZ_WARN_UNUSED_RESULT bool readValType(ValType* type = nullptr) {
+        return readEnum<uint8_t>(type);
+    }
+    MOZ_WARN_UNUSED_RESULT bool readExprType(ExprType* type = nullptr) {
+        return readEnum<uint8_t>(type);
+    }
+
+    MOZ_WARN_UNUSED_RESULT bool readCString(const char** cstr = nullptr) {
+        if (cstr)
+            *cstr = reinterpret_cast<const char*>(cur_);
+        for (; cur_ != end_; cur_++) {
+            if (!*cur_) {
+                cur_++;
+                return true;
+            }
+        }
+        return false;
+    }
+    MOZ_WARN_UNUSED_RESULT bool readCStringIf(const char* tag) {
+        for (const uint8_t* p = cur_; p != end_; p++, tag++) {
+            if (*p != *tag)
+                return false;
+            if (!*p) {
+                cur_ = p + 1;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    MOZ_WARN_UNUSED_RESULT bool startSection(uint32_t* offset) {
+        uint32_t unused;
+        if (!readU32(&unused))
+            return false;
+        *offset = currentOffset();
+        return true;
+    }
+    MOZ_WARN_UNUSED_RESULT bool finishSection(uint32_t offset) {
+        const uint8_t* start = beg_ + offset;
+        uint32_t numBytes;
+        memcpy(&numBytes, start - sizeof(uint32_t), sizeof(uint32_t));
+        return numBytes == uintptr_t(cur_ - start);
+    }
+    MOZ_WARN_UNUSED_RESULT bool skipSection() {
+        uint32_t numBytes;
+        if (!readU32(&numBytes))
+            return false;
+        if (uintptr_t(end_ - cur_) < numBytes)
+            return false;
+        cur_ += numBytes;
         return true;
     }
 
@@ -539,73 +677,60 @@ class Decoder
         decoded |= uint32_t(byte) << 28;
         return decoded;
     }
+    Expr uncheckedReadExpr() {
+        return uncheckedReadEnum<uint16_t, Expr>();
+    }
+    Expr uncheckedPeekExpr() const {
+        return uncheckedPeekEnum<uint16_t, Expr>();
+    }
 };
 
-// Source coordinates for a call site. As they're read sequentially, we
-// don't need to store the call's bytecode offset, unless we want to
-// check its correctness in debug mode.
-struct SourceCoords {
-    DebugOnly<size_t> offset; // after call opcode
-    uint32_t line;
-    uint32_t column;
-};
-
-typedef Vector<SourceCoords, 0, SystemAllocPolicy> SourceCoordsVector;
+typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
 
 // The FuncBytecode class contains the intermediate representation of a
 // parsed/decoded and validated asm.js/WebAssembly function. The FuncBytecode
 // lives only until it is fully compiled.
 class FuncBytecode
 {
-    // Note: this unrooted field assumes AutoKeepAtoms via TokenStream via
-    // asm.js compilation.
-    PropertyName* name_;
-    unsigned line_;
-    unsigned column_;
-
-    SourceCoordsVector callSourceCoords_;
-
-    uint32_t index_;
+    // Function metadata
     const DeclaredSig& sig_;
-    UniqueBytecode bytecode_;
-    ValTypeVector localVars_;
+    ValTypeVector locals_;
+    uint32_t lineOrBytecode_;
+    Uint32Vector callSiteLineNums_;
+
+    // Compilation bookkeeping
+    uint32_t index_;
     unsigned generateTime_;
 
+    UniqueBytecode bytecode_;
+
   public:
-    FuncBytecode(PropertyName* name,
-                 unsigned line,
-                 unsigned column,
-                 SourceCoordsVector&& sourceCoords,
-                 uint32_t index,
+    FuncBytecode(uint32_t index,
                  const DeclaredSig& sig,
                  UniqueBytecode bytecode,
-                 ValTypeVector&& localVars,
+                 ValTypeVector&& locals,
+                 uint32_t lineOrBytecode,
+                 Uint32Vector&& callSiteLineNums,
                  unsigned generateTime)
-      : name_(name),
-        line_(line),
-        column_(column),
-        callSourceCoords_(Move(sourceCoords)),
+      : sig_(sig),
+        locals_(Move(locals)),
+        lineOrBytecode_(lineOrBytecode),
+        callSiteLineNums_(Move(callSiteLineNums)),
         index_(index),
-        sig_(sig),
-        bytecode_(Move(bytecode)),
-        localVars_(Move(localVars)),
-        generateTime_(generateTime)
+        generateTime_(generateTime),
+        bytecode_(Move(bytecode))
     {}
 
     UniqueBytecode recycleBytecode() { return Move(bytecode_); }
 
-    PropertyName* name() const { return name_; }
-    unsigned line() const { return line_; }
-    unsigned column() const { return column_; }
-    const SourceCoords& sourceCoords(size_t i) const { return callSourceCoords_[i]; }
-
+    uint32_t lineOrBytecode() const { return lineOrBytecode_; }
+    const Uint32Vector& callSiteLineNums() const { return callSiteLineNums_; }
     uint32_t index() const { return index_; }
     const DeclaredSig& sig() const { return sig_; }
     const Bytecode& bytecode() const { return *bytecode_; }
 
-    size_t numLocalVars() const { return localVars_.length(); }
-    ValType localVarType(size_t i) const { return localVars_[i]; }
-    size_t numLocals() const { return sig_.args().length() + numLocalVars(); }
+    size_t numLocals() const { return locals_.length(); }
+    ValType localType(size_t i) const { return locals_[i]; }
 
     unsigned generateTime() const { return generateTime_; }
 };
