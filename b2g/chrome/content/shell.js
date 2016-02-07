@@ -19,6 +19,7 @@ Cu.import('resource://gre/modules/ErrorPage.jsm');
 Cu.import('resource://gre/modules/AlertsHelper.jsm');
 Cu.import('resource://gre/modules/RequestSyncService.jsm');
 Cu.import('resource://gre/modules/SystemUpdateService.jsm');
+Cu.import('resource://gre/modules/PrivacyMonitorService.jsm');
 
 if (isGonk) {
   Cu.import('resource://gre/modules/MultiscreenHandler.jsm');

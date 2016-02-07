@@ -51,6 +51,7 @@
 #include "nsProxyRelease.h"
 #include "nsNullPrincipal.h"
 #include "nsVariant.h"
+ #include "nsIPrivacyMonitor.h"
 
 // For PR_snprintf
 #include "prprf.h"
@@ -2185,6 +2186,11 @@ MediaManager::GetUserMedia(nsPIDOMWindowInner* aWindow,
   }, [onFailure](MediaStreamError*& reason) mutable {
     onFailure->OnError(reason);
   });
+
+	nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("media-capture");
+
   return NS_OK;
 }
 
@@ -2279,7 +2285,7 @@ MediaManager::EnumerateDevicesImpl(uint64_t aWindowId,
                                    bool aFake, bool aFakeTracks)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  nsPIDOMWindowInner* window = 
+  nsPIDOMWindowInner* window =
     nsGlobalWindow::GetInnerWindowWithId(aWindowId)->AsInner();
 
   // This function returns a pledge, a promise-like object with the future result

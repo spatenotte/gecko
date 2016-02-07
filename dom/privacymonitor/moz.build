@@ -4,3 +4,7 @@ EXTRA_COMPONENTS += [
  'PrivacyMonitor.js',
  'PrivacyMonitor.manifest',
 ]
+
+EXTRA_JS_MODULES += [
+    'PrivacyMonitorService.jsm',
+]

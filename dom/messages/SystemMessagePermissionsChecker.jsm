@@ -22,7 +22,7 @@ this.EXPORTED_SYMBOLS = ["SystemMessagePermissionsChecker",
                          "SystemMessagePermissionsTable"];
 
 function debug(aStr) {
-  dump("SystemMessagePermissionsChecker.jsm: " + aStr + "\n");
+  //dump("SystemMessagePermissionsChecker.jsm: " + aStr + "\n");
 }
 
 // This table maps system message to permission(s), indicating only

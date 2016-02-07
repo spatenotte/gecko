@@ -50,7 +50,7 @@ const kMessages =["SystemMessageManager:GetPendingMessages",
                   "child-process-shutdown"];
 
 function debug(aMsg) {
-  dump("-- SystemMessageInternal " + Date.now() + " : " + aMsg + "\n");
+  //dump("-- SystemMessageInternal " + Date.now() + " : " + aMsg + "\n");
 }
 
 var defaultMessageConfigurator = {
@@ -203,6 +203,7 @@ SystemMessageInternal.prototype = {
     // Buffer system messages until the webapps' registration is ready,
     // so that we can know the correct pages registered to be sent.
     if (!this._webappsRegistryReady) {
+    	debug("Webapps registry not ready");
       this._bufferedSysMsgs.push({ how: "send",
                                    type: aType,
                                    msg: aMessage,

@@ -154,6 +154,7 @@ MediaDevices::GetUserMedia(const MediaStreamConstraints& aConstraints,
 
   aRv = MediaManager::Get()->GetUserMedia(window, aConstraints,
                                           resolver, rejecter);
+
   return p.forget();
 }
 

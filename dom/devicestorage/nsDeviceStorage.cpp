@@ -55,6 +55,7 @@
 #include <algorithm>
 #include "private/pprio.h"
 #include "nsContentPermissionHelper.h"
+#include "nsIPrivacyMonitor.h"
 
 #include "mozilla/dom/DeviceStorageBinding.h"
 
@@ -3104,6 +3105,10 @@ nsDOMDeviceStorage::AddOrAppendNamed(Blob* aBlob, const nsAString& aPath,
     }
   }
 
+  nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("device-storage");
+
   RefPtr<DeviceStorageRequest> request;
   if (aCreate) {
     request = new DeviceStorageCreateRequest();
@@ -3119,6 +3124,10 @@ already_AddRefed<DOMRequest>
 nsDOMDeviceStorage::GetInternal(const nsAString& aPath, bool aEditable,
                                 ErrorResult& aRv)
 {
+	nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("device-storage");
+
   MOZ_ASSERT(IsOwningThread());
 
   if (IsFullPath(aPath)) {
@@ -3154,6 +3163,11 @@ nsDOMDeviceStorage::GetInternal(const nsAString& aPath, bool aEditable,
 already_AddRefed<DOMRequest>
 nsDOMDeviceStorage::Delete(const nsAString& aPath, ErrorResult& aRv)
 {
+
+	nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("device-storage");
+
   MOZ_ASSERT(IsOwningThread());
 
   if (IsFullPath(aPath)) {
@@ -3489,6 +3503,10 @@ nsDOMDeviceStorage::EnumerateInternal(const nsAString& aPath,
     request->Initialize(mManager, dsf.forget(), id, since);
     aRv = CheckPermission(request.forget());
   }
+
+  nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("device-storage");
 
   return cursor.forget();
 }

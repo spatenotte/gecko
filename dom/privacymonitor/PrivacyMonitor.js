@@ -9,20 +9,20 @@ Cu.import("resource://gre/modules/Services.jsm");
 const manifestURL = Services.io.newURI("app://test-app.gaiamobile.org/manifest.webapp", null, null);
 const pageURL = Services.io.newURI("app://test-app.gaiamobile.org/index.html", null, null);
 
-XPCOMUtils.defineLazyGetter(this, "messenger", function() {
-  return Cc["@mozilla.org/system-message-internal;1"]
-           .getService(Ci.nsISystemMessagesInternal);
-});
+var cpmm = Cc["@mozilla.org/childprocessmessagemanager;1"]
+                   .getService(Ci.nsISyncMessageSender);
 
 var contentWindow = Components.classes["@mozilla.org/embedcomp/window-watcher;1"]
                    .getService(Components.interfaces.nsIWindowWatcher);
+
+var windowMediator = Components.classes["@mozilla.org/appshell/window-mediator;1"]
+                     .getService(Components.interfaces.nsIWindowMediator);
 
 function debug(str) {
   dump("-*- PrivacyMonitor: " + str + "\n");
 }
 
 function PrivacyMonitor() {
-  //this.wrappedJSObject = this;
 }
 
 PrivacyMonitor.prototype = {
@@ -37,22 +37,25 @@ PrivacyMonitor.prototype = {
                                     flags: Ci.nsIClassInfo.DOM_OBJECT}),
 
   notifyListener: function(permission) {
-    debug("Permission: " + JSON.stringify(permission));
-
     let appName = this.getAppName();
+
+    debug(appName + " requested " + JSON.stringify(permission) + " permission");
 
     let message = {name: appName, permission: permission};
     debug("Sending Async Message");
-    //messenger.broadcastMessage("privacy-request-notification", message);
-    messenger.sendMessage("privacy-request-notification", message, pageURL, manifestURL);
+    cpmm.sendAsyncMessage("PrivacyMonitor::Notify", message);
   },
 
   getAppName: function() {
-    let principal = contentWindow.activeWindow.document.nodePrincipal;
+    let principal;
+    if(contentWindow.activeWindow == null) {
+      let activeWindow = windowMediator.getMostRecentWindow(null);
+      principal = activeWindow.document.nodePrincipal;
+    }
+    else {
+      principal = contentWindow.activeWindow.document.nodePrincipal;
+    }
     let app = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService).getAppByLocalId(principal.appId);
-
-    debug("App name: " + app.name + ", manifest URL: " + app.manifestURL);
-    debug("Page URL: " + principal.URI.spec);
     return app.name;
   }
 };
