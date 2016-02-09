@@ -1546,10 +1546,6 @@ Geolocation::GetCurrentPosition(PositionCallback& aCallback,
     aRv.Throw(rv);
   }
 
-	nsresult result;
-  privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("geolocation");
-
   return;
 }
 
@@ -1571,6 +1567,11 @@ Geolocation::GetCurrentPosition(GeoPositionCallback& callback,
                                 GeoPositionErrorCallback& errorCallback,
                                 PositionOptions *options)
 {
+
+	nsresult result;
+  privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("geolocation");
+
   if (mPendingCallbacks.Length() > MAX_GEO_REQUESTS_PER_WINDOW) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -1639,10 +1640,6 @@ Geolocation::WatchPosition(PositionCallback& aCallback,
     aRv.Throw(rv);
   }
 
-	nsresult result;
-  privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("geolocation");
-
   return ret;
 }
 
@@ -1666,6 +1663,11 @@ Geolocation::WatchPosition(GeoPositionCallback& aCallback,
                            PositionOptions* aOptions,
                            int32_t* aRv)
 {
+
+	nsresult result;
+  privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("geolocation");
+
   if (mWatchingCallbacks.Length() > MAX_GEO_REQUESTS_PER_WINDOW) {
     return NS_ERROR_NOT_AVAILABLE;
   }
