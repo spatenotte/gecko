@@ -43,10 +43,6 @@ this.PrivacyMonitorService = {
   },
 
   receiveMessage: function receiveMessage(aMessage) {
-    debug("receiveMessage(): " + aMessage.name);
-    debug("Message: " + JSON.stringify(aMessage.data));
-
-
     switch (aMessage.name) {
       case "PrivacyMonitor::Notify":
       	this._fireSystemMessage(aMessage.data);
@@ -59,8 +55,6 @@ this.PrivacyMonitorService = {
   },
 
   _fireSystemMessage: function _fireSystemMessage(aMessage) {
-    debug("Fire system message: " + JSON.stringify(aMessage));
-
     messenger.broadcastMessage("privacy-request-notification", aMessage);
   },
 

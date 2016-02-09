@@ -3202,6 +3202,11 @@ nsDOMDeviceStorage::Delete(const nsAString& aPath, ErrorResult& aRv)
 already_AddRefed<DOMRequest>
 nsDOMDeviceStorage::FreeSpace(ErrorResult& aRv)
 {
+
+	nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("device-storage");
+
   MOZ_ASSERT(IsOwningThread());
 
   RefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(mStorageType,
