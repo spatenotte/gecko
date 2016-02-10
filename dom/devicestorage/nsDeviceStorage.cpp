@@ -3107,7 +3107,22 @@ nsDOMDeviceStorage::AddOrAppendNamed(Blob* aBlob, const nsAString& aPath,
 
   nsresult result;
   nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("device-storage");
+
+  if (mStorageType.EqualsLiteral(DEVICESTORAGE_PICTURES)) {
+    privacyMonitor->NotifyListener("device-storage:pictures");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_VIDEOS)) {
+    privacyMonitor->NotifyListener("device-storage:videos");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_MUSIC)) {
+    privacyMonitor->NotifyListener("device-storage:music");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_SDCARD)) {
+    privacyMonitor->NotifyListener("device-storage:sdcard");
+  }
 
   RefPtr<DeviceStorageRequest> request;
   if (aCreate) {
@@ -3126,7 +3141,22 @@ nsDOMDeviceStorage::GetInternal(const nsAString& aPath, bool aEditable,
 {
 	nsresult result;
   nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("device-storage");
+
+  if (mStorageType.EqualsLiteral(DEVICESTORAGE_PICTURES)) {
+    privacyMonitor->NotifyListener("device-storage:pictures");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_VIDEOS)) {
+    privacyMonitor->NotifyListener("device-storage:videos");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_MUSIC)) {
+    privacyMonitor->NotifyListener("device-storage:music");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_SDCARD)) {
+    privacyMonitor->NotifyListener("device-storage:sdcard");
+  }
 
   MOZ_ASSERT(IsOwningThread());
 
@@ -3166,7 +3196,22 @@ nsDOMDeviceStorage::Delete(const nsAString& aPath, ErrorResult& aRv)
 
 	nsresult result;
   nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("device-storage");
+
+  if (mStorageType.EqualsLiteral(DEVICESTORAGE_PICTURES)) {
+    privacyMonitor->NotifyListener("device-storage:pictures");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_VIDEOS)) {
+    privacyMonitor->NotifyListener("device-storage:videos");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_MUSIC)) {
+    privacyMonitor->NotifyListener("device-storage:music");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_SDCARD)) {
+    privacyMonitor->NotifyListener("device-storage:sdcard");
+  }
 
   MOZ_ASSERT(IsOwningThread());
 
@@ -3203,9 +3248,24 @@ already_AddRefed<DOMRequest>
 nsDOMDeviceStorage::FreeSpace(ErrorResult& aRv)
 {
 
-	nsresult result;
+  nsresult result;
   nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("device-storage");
+
+  if (mStorageType.EqualsLiteral(DEVICESTORAGE_PICTURES)) {
+    privacyMonitor->NotifyListener("device-storage:pictures");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_VIDEOS)) {
+    privacyMonitor->NotifyListener("device-storage:videos");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_MUSIC)) {
+    privacyMonitor->NotifyListener("device-storage:music");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_SDCARD)) {
+    privacyMonitor->NotifyListener("device-storage:sdcard");
+  }
 
   MOZ_ASSERT(IsOwningThread());
 
@@ -3511,7 +3571,22 @@ nsDOMDeviceStorage::EnumerateInternal(const nsAString& aPath,
 
   nsresult result;
   nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("device-storage");
+
+  if (mStorageType.EqualsLiteral(DEVICESTORAGE_PICTURES)) {
+    privacyMonitor->NotifyListener("device-storage:pictures");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_VIDEOS)) {
+    privacyMonitor->NotifyListener("device-storage:videos");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_MUSIC)) {
+    privacyMonitor->NotifyListener("device-storage:music");
+  }
+
+  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_SDCARD)) {
+    privacyMonitor->NotifyListener("device-storage:sdcard");
+  }
 
   return cursor.forget();
 }

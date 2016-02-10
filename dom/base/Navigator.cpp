@@ -78,6 +78,7 @@
 #include "mozIApplication.h"
 #include "WidgetUtils.h"
 #include "nsIPresentationService.h"
+#include "nsIPrivacyMonitor.h"
 
 #ifdef MOZ_MEDIA_NAVIGATOR
 #include "mozilla/dom/MediaDevices.h"
@@ -1844,6 +1845,10 @@ Navigator::GetMobileIdAssertion(const MobileIdOptions& aOptions,
   aRv = service->GetMobileIdAssertion(mWindow,
                                       optionsValue,
                                       getter_AddRefs(promise));
+
+  nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("mobileid");
 
   RefPtr<Promise> p = static_cast<Promise*>(promise.get());
   return p.forget();
