@@ -2187,9 +2187,16 @@ MediaManager::GetUserMedia(nsPIDOMWindowInner* aWindow,
     onFailure->OnError(reason);
   });
 
-	nsresult result;
-  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-  privacyMonitor->NotifyListener("media-capture");
+  if(!IsOn(c.mVideo)) {
+    nsresult result;
+    nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+    privacyMonitor->NotifyListener("audio-capture");
+  }
+  else {
+    nsresult result;
+    nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+    privacyMonitor->NotifyListener("video-capture");
+  }
 
   return NS_OK;
 }

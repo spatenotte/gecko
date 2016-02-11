@@ -3569,25 +3569,6 @@ nsDOMDeviceStorage::EnumerateInternal(const nsAString& aPath,
     aRv = CheckPermission(request.forget());
   }
 
-  nsresult result;
-  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
-
-  if (mStorageType.EqualsLiteral(DEVICESTORAGE_PICTURES)) {
-    privacyMonitor->NotifyListener("device-storage:pictures");
-  }
-
-  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_VIDEOS)) {
-    privacyMonitor->NotifyListener("device-storage:videos");
-  }
-
-  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_MUSIC)) {
-    privacyMonitor->NotifyListener("device-storage:music");
-  }
-
-  else if (mStorageType.EqualsLiteral(DEVICESTORAGE_SDCARD)) {
-    privacyMonitor->NotifyListener("device-storage:sdcard");
-  }
-
   return cursor.forget();
 }
 

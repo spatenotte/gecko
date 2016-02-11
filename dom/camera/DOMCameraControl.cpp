@@ -42,6 +42,7 @@
 #include "DOMCameraDetectedFace.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "nsPrintfCString.h"
+#include "nsIPrivacyMonitor.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -830,6 +831,11 @@ nsDOMCameraControl::StartRecording(const CameraStartRecordingOptions& aOptions,
                                    const nsAString& aFilename,
                                    ErrorResult& aRv)
 {
+
+  nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("camera");
+
   DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, this);
 
   RefPtr<Promise> promise = CreatePromise(aRv);
@@ -1038,6 +1044,11 @@ already_AddRefed<Promise>
 nsDOMCameraControl::TakePicture(const CameraPictureOptions& aOptions,
                                 ErrorResult& aRv)
 {
+
+  nsresult result;
+  nsCOMPtr<nsIPrivacyMonitor> privacyMonitor = do_CreateInstance("@mozilla.org/privacy-monitor;1", &result);
+  privacyMonitor->NotifyListener("camera");
+
   DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, this);
   THROW_IF_NO_CAMERACONTROL(nullptr);
 
