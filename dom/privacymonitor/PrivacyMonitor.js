@@ -42,14 +42,14 @@ PrivacyMonitor.prototype = {
 
     debug(appName + " requested " + JSON.stringify(permission) + " permission at: " + date.toString());
 
-    let message = {name: appName, permission: permission, date: date};
+    let message = {appname: appName, permission: permission, timestamp: date};
     cpmm.sendAsyncMessage("PrivacyMonitor::Notify", message);
   },
 
   getAppName: function() {
     let principal;
     if(contentWindow.activeWindow == null) {
-      let activeWindow = windowMediator.getMostRecentWindow(null);
+      let activeWindow = windowMediator.getMostRecentWindow("navigator:browser");
       principal = activeWindow.document.nodePrincipal;
     }
     else {
