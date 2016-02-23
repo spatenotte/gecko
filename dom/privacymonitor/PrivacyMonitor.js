@@ -40,8 +40,6 @@ PrivacyMonitor.prototype = {
     let appName = this.getAppName();
     let date = Date.now();
 
-    debug(appName + " requested " + JSON.stringify(permission) + " permission at: " + date.toString());
-
     let message = {appname: appName, permission: permission, timestamp: date};
     cpmm.sendAsyncMessage("PrivacyMonitor::Notify", message);
   },
