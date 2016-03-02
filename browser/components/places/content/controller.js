@@ -970,9 +970,9 @@ PlacesController.prototype = {
       while (aURIs.length) {
         let URIslice = aURIs.splice(0, REMOVE_PAGES_CHUNKLEN);
         PlacesUtils.bhistory.removePages(URIslice, URIslice.length);
-        Services.tm.mainThread.dispatch(() => gen.next(), 
+        Services.tm.mainThread.dispatch(() => gen.next(),
                                         Ci.nsIThread.DISPATCH_NORMAL);
-        yield unefined;
+        yield undefined;
       }
     }
     let gen = pagesChunkGenerator(URIs);

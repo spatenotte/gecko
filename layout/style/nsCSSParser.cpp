@@ -56,6 +56,7 @@
 #include "gfxFontFamilyList.h"
 
 using namespace mozilla;
+using namespace mozilla::css;
 
 typedef nsCSSProps::KTableEntry KTableEntry;
 
@@ -118,9 +119,9 @@ struct CSSParserInputState {
   bool mHavePushBack;
 };
 
-static_assert(eAuthorSheetFeatures == 0 &&
-              eUserSheetFeatures == 1 &&
-              eAgentSheetFeatures == 2,
+static_assert(css::eAuthorSheetFeatures == 0 &&
+              css::eUserSheetFeatures == 1 &&
+              css::eAgentSheetFeatures == 2,
               "sheet parsing mode constants won't fit "
               "in CSSParserImpl::mParsingMode");
 
@@ -148,8 +149,8 @@ public:
                       nsIURI*          aBaseURI,
                       nsIPrincipal*    aSheetPrincipal,
                       uint32_t         aLineNumber,
-                      SheetParsingMode aParsingMode,
-                      LoaderReusableStyleSheets* aReusableSheets);
+                      css::SheetParsingMode aParsingMode,
+                      css::LoaderReusableStyleSheets* aReusableSheets);
 
   already_AddRefed<css::Declaration>
            ParseStyleAttribute(const nsAString&  aAttributeValue,
@@ -185,6 +186,10 @@ public:
                              nsIURI* aBaseURL,
                              nsIPrincipal* aSheetPrincipal,
                              nsCSSValue& aValue);
+
+  bool ParseTransformProperty(const nsAString& aPropValue,
+                              bool aDisallowRelativeValues,
+                              nsCSSValue& aResult);
 
   void ParseMediaList(const nsSubstring& aBuffer,
                       nsIURI* aURL, // for error reporting
@@ -340,11 +345,11 @@ public:
                                            uint32_t aLineOffset);
 
   bool AgentRulesEnabled() const {
-    return mParsingMode == eAgentSheetFeatures;
+    return mParsingMode == css::eAgentSheetFeatures;
   }
   bool UserRulesEnabled() const {
-    return mParsingMode == eAgentSheetFeatures ||
-           mParsingMode == eUserSheetFeatures;
+    return mParsingMode == css::eAgentSheetFeatures ||
+           mParsingMode == css::eUserSheetFeatures;
   }
 
   nsCSSProps::EnabledState PropertyEnabledState() const {
@@ -619,7 +624,7 @@ protected:
   void SkipUntilOneOf(const char16_t* aStopSymbolChars);
   // For each character in aStopSymbolChars from the end of the array
   // to the start, calls SkipUntil with that character.
-  typedef nsAutoTArray<char16_t, 16> StopSymbolCharStack;
+  typedef AutoTArray<char16_t, 16> StopSymbolCharStack;
   void SkipUntilAllOf(const StopSymbolCharStack& aStopSymbolChars);
   // returns true if the stop symbol or EOF is found, and false for an
   // unexpected ')', ']' or '}'; this not safe to call outside variable
@@ -749,7 +754,7 @@ protected:
                                               bool           aIsNegated,
                                               nsIAtom**      aPseudoElement,
                                               nsAtomList**   aPseudoElementArgs,
-                                              nsCSSPseudoElements::Type* aPseudoElementType);
+                                              CSSPseudoElementType* aPseudoElementType);
 
   nsSelectorParsingStatus ParseAttributeSelector(int32_t&       aDataMask,
                                                  nsCSSSelector& aSelector);
@@ -910,13 +915,13 @@ protected:
   bool ParseBorderStyle();
   bool ParseBorderWidth();
 
-  bool ParseCalc(nsCSSValue &aValue, int32_t aVariantMask);
+  bool ParseCalc(nsCSSValue &aValue, uint32_t aVariantMask);
   bool ParseCalcAdditiveExpression(nsCSSValue& aValue,
-                                     int32_t& aVariantMask);
+                                   uint32_t& aVariantMask);
   bool ParseCalcMultiplicativeExpression(nsCSSValue& aValue,
-                                           int32_t& aVariantMask,
-                                           bool *aHadFinalWS);
-  bool ParseCalcTerm(nsCSSValue& aValue, int32_t& aVariantMask);
+                                         uint32_t& aVariantMask,
+                                         bool *aHadFinalWS);
+  bool ParseCalcTerm(nsCSSValue& aValue, uint32_t& aVariantMask);
   bool RequireWhitespace();
 
   // For "flex" shorthand property, defined in CSS Flexbox spec
@@ -1028,7 +1033,7 @@ protected:
   bool ParseListStyleType(nsCSSValue& aValue);
   bool ParseMargin();
   bool ParseClipPath();
-  bool ParseTransform(bool aIsPrefixed);
+  bool ParseTransform(bool aIsPrefixed, bool aDisallowRelativeValues = false);
   bool ParseObjectPosition();
   bool ParseOutline();
   bool ParseOverflow();
@@ -1153,7 +1158,7 @@ protected:
 
   // Variant parsing methods
   CSSParseResult ParseVariant(nsCSSValue& aValue,
-                              int32_t aVariantMask,
+                              uint32_t aVariantMask,
                               const KTableEntry aKeywordTable[]);
   CSSParseResult ParseVariantWithRestrictions(nsCSSValue& aValue,
                                               int32_t aVariantMask,
@@ -1249,7 +1254,7 @@ protected:
   bool ParseAttr(nsCSSValue& aValue);
   bool ParseSymbols(nsCSSValue& aValue);
   bool SetValueToURL(nsCSSValue& aValue, const nsString& aURL);
-  bool TranslateDimension(nsCSSValue& aValue, int32_t aVariantMask,
+  bool TranslateDimension(nsCSSValue& aValue, uint32_t aVariantMask,
                             float aNumber, const nsString& aUnit);
   bool ParseImageOrientation(nsCSSValue& aAngle);
   bool ParseImageRect(nsCSSValue& aImage);
@@ -1302,12 +1307,13 @@ protected:
   bool ParseInsetFunction(nsCSSValue& aValue);
 
   /* Functions for transform Parsing */
-  bool ParseSingleTransform(bool aIsPrefixed, nsCSSValue& aValue);
-  bool ParseFunction(nsCSSKeyword aFunction, const int32_t aAllowedTypes[],
-                     int32_t aVariantMaskAll, uint16_t aMinElems,
+  bool ParseSingleTransform(bool aIsPrefixed, bool aDisallowRelativeValues,
+                            nsCSSValue& aValue);
+  bool ParseFunction(nsCSSKeyword aFunction, const uint32_t aAllowedTypes[],
+                     uint32_t aVariantMaskAll, uint16_t aMinElems,
                      uint16_t aMaxElems, nsCSSValue &aValue);
-  bool ParseFunctionInternals(const int32_t aVariantMask[],
-                              int32_t aVariantMaskAll,
+  bool ParseFunctionInternals(const uint32_t aVariantMask[],
+                              uint32_t aVariantMaskAll,
                               uint16_t aMinElems,
                               uint16_t aMaxElems,
                               InfallibleTArray<nsCSSValue>& aOutput);
@@ -1351,10 +1357,10 @@ protected:
   RefPtr<CSSStyleSheet> mSheet;
 
   // Used for @import rules
-  mozilla::css::Loader* mChildLoader; // not ref counted, it owns us
+  css::Loader* mChildLoader; // not ref counted, it owns us
 
   // Any sheets we may reuse when parsing an @import.
-  LoaderReusableStyleSheets* mReusableSheets;
+  css::LoaderReusableStyleSheets* mReusableSheets;
 
   // Sheet section we're in.  This is used to enforce correct ordering of the
   // various rule types (eg the fact that a @charset rule must come before
@@ -1388,7 +1394,7 @@ protected:
   // useful in user sheets.  The only values stored in this field are
   // 0, 1, and 2; three bits are allocated to avoid issues should the
   // enum type be signed.
-  SheetParsingMode mParsingMode : 3;
+  css::SheetParsingMode mParsingMode : 3;
 
   // True if we are in parsing rules for the chrome.
   bool mIsChrome : 1;
@@ -1518,7 +1524,7 @@ CSSParserImpl::CSSParserImpl()
     mNavQuirkMode(false),
     mHashlessColorQuirk(false),
     mUnitlessLengthQuirk(false),
-    mParsingMode(eAuthorSheetFeatures),
+    mParsingMode(css::eAuthorSheetFeatures),
     mIsChrome(false),
     mViewportUnitsEnabled(true),
     mHTMLMediaMode(false),
@@ -1625,8 +1631,8 @@ CSSParserImpl::ParseSheet(const nsAString& aInput,
                           nsIURI*          aBaseURI,
                           nsIPrincipal*    aSheetPrincipal,
                           uint32_t         aLineNumber,
-                          SheetParsingMode aParsingMode,
-                          LoaderReusableStyleSheets* aReusableSheets)
+                          css::SheetParsingMode aParsingMode,
+                          css::LoaderReusableStyleSheets* aReusableSheets)
 {
   NS_PRECONDITION(aSheetPrincipal, "Must have principal here!");
   NS_PRECONDITION(aBaseURI, "need base URI");
@@ -1696,7 +1702,7 @@ CSSParserImpl::ParseSheet(const nsAString& aInput,
   }
   ReleaseScanner();
 
-  mParsingMode = eAuthorSheetFeatures;
+  mParsingMode = css::eAuthorSheetFeatures;
   mIsChrome = false;
   mReusableSheets = nullptr;
 
@@ -1848,7 +1854,7 @@ CSSParserImpl::ParseLonghandProperty(const nsCSSProperty aPropID,
   MOZ_ASSERT(aPropID < eCSSProperty_COUNT_no_shorthands,
              "ParseLonghandProperty must only take a longhand property");
 
-  RefPtr<Declaration> declaration = new Declaration;
+  RefPtr<css::Declaration> declaration = new css::Declaration;
   declaration->InitializeEmpty();
 
   bool changed;
@@ -1862,6 +1868,48 @@ CSSParserImpl::ParseLonghandProperty(const nsCSSProperty aPropID,
   } else {
     aValue.Reset();
   }
+}
+
+bool
+CSSParserImpl::ParseTransformProperty(const nsAString& aPropValue,
+                                      bool aDisallowRelativeValues,
+                                      nsCSSValue& aValue)
+{
+  RefPtr<css::Declaration> declaration = new css::Declaration();
+  declaration->InitializeEmpty();
+
+  mData.AssertInitialState();
+  mTempData.AssertInitialState();
+
+  nsCSSScanner scanner(aPropValue, 0);
+  css::ErrorReporter reporter(scanner, mSheet, mChildLoader, nullptr);
+  InitScanner(scanner, reporter, nullptr, nullptr, nullptr);
+
+  bool parsedOK = ParseTransform(false, aDisallowRelativeValues);
+  // We should now be at EOF
+  if (parsedOK && GetToken(true)) {
+    parsedOK = false;
+  }
+
+  bool changed = false;
+  if (parsedOK) {
+    declaration->ExpandTo(&mData);
+    changed = mData.TransferFromBlock(mTempData, eCSSProperty_transform,
+                                      PropertyEnabledState(), false,
+                                      true, false, declaration,
+                                      GetDocument());
+    declaration->CompressFrom(&mData);
+  }
+
+  if (changed) {
+    aValue = *declaration->GetNormalBlock()->ValueFor(eCSSProperty_transform);
+  } else {
+    aValue.Reset();
+  }
+
+  ReleaseScanner();
+
+  return parsedOK;
 }
 
 void
@@ -2421,7 +2469,7 @@ SeparatorRequiredBetweenTokens(nsCSSTokenSerializationType aToken1,
                  aToken1 == eCSSTokenSerialization_Symbol_Equals ||
                  aToken1 == eCSSTokenSerialization_Symbol_Bar ||
                  aToken1 == eCSSTokenSerialization_Symbol_Slash ||
-                 aToken1 == eCSSTokenSerialization_Other ||
+                 aToken1 == eCSSTokenSerialization_Other,
                  "unexpected nsCSSTokenSerializationType value");
       return false;
   }
@@ -2490,7 +2538,7 @@ CSSParserImpl::ResolveValueWithVariableReferencesRec(
   MOZ_ASSERT(aResult.IsEmpty());
 
   // Stack of closing characters for currently open constructs.
-  nsAutoTArray<char16_t, 16> stack;
+  AutoTArray<char16_t, 16> stack;
 
   // The resolved value for this ResolveValueWithVariableReferencesRec call.
   nsString value;
@@ -4126,7 +4174,7 @@ CSSParserImpl::ParseFontFeatureValueSet(nsCSSFontFeatureValuesRule
   }
 
   // -- ident integer+ [, ident integer+]
-  nsAutoTArray<gfxFontFeatureValueSet::ValueList, 5> values;
+  AutoTArray<gfxFontFeatureValueSet::ValueList, 5> values;
 
   // list of font-feature-values-declaration's
   for (;;) {
@@ -4169,7 +4217,7 @@ CSSParserImpl::ParseFontFeatureValueSet(nsCSSFontFeatureValuesRule
     }
 
     // value list
-    nsAutoTArray<uint32_t,4>   featureSelectors;
+    AutoTArray<uint32_t,4>   featureSelectors;
 
     nsCSSValue intValue;
     while (ParseNonNegativeInteger(intValue)) {
@@ -5008,7 +5056,7 @@ bool
 CSSParserImpl::SkipUntil(char16_t aStopSymbol)
 {
   nsCSSToken* tk = &mToken;
-  nsAutoTArray<char16_t, 16> stack;
+  AutoTArray<char16_t, 16> stack;
   stack.AppendElement(aStopSymbol);
   for (;;) {
     if (!GetToken(true)) {
@@ -5044,7 +5092,7 @@ bool
 CSSParserImpl::SkipBalancedContentUntil(char16_t aStopSymbol)
 {
   nsCSSToken* tk = &mToken;
-  nsAutoTArray<char16_t, 16> stack;
+  AutoTArray<char16_t, 16> stack;
   stack.AppendElement(aStopSymbol);
   for (;;) {
     if (!GetToken(true)) {
@@ -5780,7 +5828,7 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
                                    bool           aIsNegated,
                                    nsIAtom**      aPseudoElement,
                                    nsAtomList**   aPseudoElementArgs,
-                                   nsCSSPseudoElements::Type* aPseudoElementType)
+                                   CSSPseudoElementType* aPseudoElementType)
 {
   NS_ASSERTION(aIsNegated || (aPseudoElement && aPseudoElementArgs),
                "expected location to store pseudo element");
@@ -5820,7 +5868,7 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
 
   // stash away some info about this pseudo so we only have to get it once.
   bool isTreePseudo = false;
-  nsCSSPseudoElements::Type pseudoElementType =
+  CSSPseudoElementType pseudoElementType =
     nsCSSPseudoElements::GetPseudoType(pseudo);
   nsCSSPseudoClasses::Type pseudoClassType =
     nsCSSPseudoClasses::GetPseudoType(pseudo);
@@ -5828,7 +5876,7 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
     nsCSSPseudoClasses::IsUserActionPseudoClass(pseudoClassType);
 
   if (!AgentRulesEnabled() &&
-      ((pseudoElementType < nsCSSPseudoElements::ePseudo_PseudoElementCount &&
+      ((pseudoElementType < CSSPseudoElementType::Count &&
         nsCSSPseudoElements::PseudoElementIsUASheetOnly(pseudoElementType)) ||
        (pseudoClassType != nsCSSPseudoClasses::ePseudoClass_NotPseudoClass &&
         nsCSSPseudoClasses::PseudoClassIsUASheetOnly(pseudoClassType)))) {
@@ -5840,17 +5888,17 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
 
   // We currently allow :-moz-placeholder and ::-moz-placeholder. We have to
   // be a bit stricter regarding the pseudo-element parsing rules.
-  if (pseudoElementType == nsCSSPseudoElements::ePseudo_mozPlaceholder &&
+  if (pseudoElementType == CSSPseudoElementType::mozPlaceholder &&
       pseudoClassType == nsCSSPseudoClasses::ePseudoClass_mozPlaceholder) {
     if (parsingPseudoElement) {
       pseudoClassType = nsCSSPseudoClasses::ePseudoClass_NotPseudoClass;
     } else {
-      pseudoElementType = nsCSSPseudoElements::ePseudo_NotPseudoElement;
+      pseudoElementType = CSSPseudoElementType::NotPseudo;
     }
   }
 
 #ifdef MOZ_XUL
-  isTreePseudo = (pseudoElementType == nsCSSPseudoElements::ePseudo_XULTree);
+  isTreePseudo = (pseudoElementType == CSSPseudoElementType::XULTree);
   // If a tree pseudo-element is using the function syntax, it will
   // get isTree set here and will pass the check below that only
   // allows functions if they are in our list of things allowed to be
@@ -5860,18 +5908,17 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
   // desired.
   bool isTree = (eCSSToken_Function == mToken.mType) && isTreePseudo;
 #endif
-  bool isPseudoElement =
-    (pseudoElementType < nsCSSPseudoElements::ePseudo_PseudoElementCount);
+  bool isPseudoElement = (pseudoElementType < CSSPseudoElementType::Count);
   // anonymous boxes are only allowed if they're the tree boxes or we have
   // enabled agent rules
   bool isAnonBox = isTreePseudo ||
-    (pseudoElementType == nsCSSPseudoElements::ePseudo_AnonBox &&
+    (pseudoElementType == CSSPseudoElementType::AnonBox &&
      AgentRulesEnabled());
   bool isPseudoClass =
     (pseudoClassType != nsCSSPseudoClasses::ePseudoClass_NotPseudoClass);
 
   NS_ASSERTION(!isPseudoClass ||
-               pseudoElementType == nsCSSPseudoElements::ePseudo_NotPseudoElement,
+               pseudoElementType == CSSPseudoElementType::NotPseudo,
                "Why is this atom both a pseudo-class and a pseudo-element?");
   NS_ASSERTION(isPseudoClass + isPseudoElement + isAnonBox <= 1,
                "Shouldn't be more than one of these");
@@ -5925,7 +5972,7 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
   }
   else if (!parsingPseudoElement && isPseudoClass) {
     if (aSelector.IsPseudoElement()) {
-      nsCSSPseudoElements::Type type = aSelector.PseudoType();
+      CSSPseudoElementType type = aSelector.PseudoType();
       if (!nsCSSPseudoElements::PseudoElementSupportsUserActionState(type)) {
         // We only allow user action pseudo-classes on certain pseudo-elements.
         REPORT_UNEXPECTED_TOKEN(PEPseudoSelNoUserActionPC);
@@ -6366,8 +6413,7 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
   nsCSSSelector* selector = aList->AddSelector(aPrevCombinator);
   nsCOMPtr<nsIAtom> pseudoElement;
   nsAutoPtr<nsAtomList> pseudoElementArgs;
-  nsCSSPseudoElements::Type pseudoElementType =
-    nsCSSPseudoElements::ePseudo_NotPseudoElement;
+  CSSPseudoElementType pseudoElementType = CSSPseudoElementType::NotPseudo;
 
   int32_t dataMask = 0;
   nsSelectorParsingStatus parsingStatus =
@@ -6386,7 +6432,7 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
                                           getter_Transfers(pseudoElementArgs),
                                           &pseudoElementType);
       if (pseudoElement &&
-          pseudoElementType != nsCSSPseudoElements::ePseudo_AnonBox) {
+          pseudoElementType != CSSPseudoElementType::AnonBox) {
         // Pseudo-elements other than anonymous boxes are represented with
         // a special ':' combinator.
 
@@ -6434,7 +6480,7 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
     return false;
   }
 
-  if (pseudoElementType == nsCSSPseudoElements::ePseudo_AnonBox) {
+  if (pseudoElementType == CSSPseudoElementType::AnonBox) {
     // We got an anonymous box pseudo-element; it must be the only
     // thing in this selector group.
     if (selector->mNext || !IsUniversalSelector(*selector)) {
@@ -7348,7 +7394,7 @@ const UnitInfo UnitData[] = {
 
 bool
 CSSParserImpl::TranslateDimension(nsCSSValue& aValue,
-                                  int32_t aVariantMask,
+                                  uint32_t aVariantMask,
                                   float aNumber,
                                   const nsString& aUnit)
 {
@@ -7377,6 +7423,11 @@ CSSParserImpl::TranslateDimension(nsCSSValue& aValue,
          eCSSUnit_ViewportMax == units)) {
       // Viewport units aren't allowed right now, probably because we're
       // inside an @page declaration. Fail.
+      return false;
+    }
+
+    if ((VARIANT_ABSOLUTE_DIMENSION & aVariantMask) != 0 &&
+        !nsCSSValue::IsPixelLengthUnit(units)) {
       return false;
     }
   } else {
@@ -7524,7 +7575,7 @@ CSSParserImpl::ParseOneOrLargerVariant(nsCSSValue& aValue,
 // Assigns to aValue iff it returns CSSParseResult::Ok.
 CSSParseResult
 CSSParserImpl::ParseVariant(nsCSSValue& aValue,
-                            int32_t aVariantMask,
+                            uint32_t aVariantMask,
                             const KTableEntry aKeywordTable[])
 {
   NS_ASSERTION(!(mHashlessColorQuirk && (aVariantMask & VARIANT_COLOR)) ||
@@ -11392,6 +11443,7 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSProperty aPropID)
     return ParseClipPath();
   case eCSSProperty_scroll_snap_type:
     return ParseScrollSnapType();
+#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
   case eCSSProperty_mask:
     return ParseImageLayers(nsStyleImageLayers::kMaskLayerTable);
   case eCSSProperty_mask_repeat:
@@ -11400,6 +11452,7 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSProperty aPropID)
     return ParseImageLayerPosition(eCSSProperty_mask_position);
   case eCSSProperty_mask_size:
     return ParseImageLayerSize(eCSSProperty_mask_size);
+#endif
   case eCSSProperty_all:
     return ParseAll();
   default:
@@ -11810,7 +11863,7 @@ CSSParserImpl::ParseImageLayersItem(
   aState.mSize->mYValue.SetAutoValue();
   aState.mComposite->mValue.SetIntValue(NS_STYLE_MASK_COMPOSITE_ADD,
                                         eCSSUnit_Enumerated);
-  aState.mMode->mValue.SetIntValue(NS_STYLE_MASK_MODE_AUTO,
+  aState.mMode->mValue.SetIntValue(NS_STYLE_MASK_MODE_MATCH_SOURCE,
                                    eCSSUnit_Enumerated);
   bool haveColor = false,
        haveImage = false,
@@ -12899,7 +12952,7 @@ CSSParserImpl::ParseBorderColors(nsCSSProperty aProperty)
 
 // Parse the top level of a calc() expression.
 bool
-CSSParserImpl::ParseCalc(nsCSSValue &aValue, int32_t aVariantMask)
+CSSParserImpl::ParseCalc(nsCSSValue &aValue, uint32_t aVariantMask)
 {
   // Parsing calc expressions requires, in a number of cases, looking
   // for a token that is *either* a value of the property or a number.
@@ -12947,7 +13000,7 @@ CSSParserImpl::ParseCalc(nsCSSValue &aValue, int32_t aVariantMask)
 // data structure.
 bool
 CSSParserImpl::ParseCalcAdditiveExpression(nsCSSValue& aValue,
-                                           int32_t& aVariantMask)
+                                           uint32_t& aVariantMask)
 {
   MOZ_ASSERT(aVariantMask != 0, "unexpected variant mask");
   nsCSSValue *storage = &aValue;
@@ -13007,7 +13060,7 @@ struct ReduceNumberCalcOps : public mozilla::css::BasicFloatCalcOps,
 // aHadFinalWS parameter.
 bool
 CSSParserImpl::ParseCalcMultiplicativeExpression(nsCSSValue& aValue,
-                                                 int32_t& aVariantMask,
+                                                 uint32_t& aVariantMask,
                                                  bool *aHadFinalWS)
 {
   MOZ_ASSERT(aVariantMask != 0, "unexpected variant mask");
@@ -13016,7 +13069,7 @@ CSSParserImpl::ParseCalcMultiplicativeExpression(nsCSSValue& aValue,
 
   nsCSSValue *storage = &aValue;
   for (;;) {
-    int32_t variantMask;
+    uint32_t variantMask;
     if (afterDivision || gotValue) {
       variantMask = VARIANT_NUMBER;
     } else {
@@ -13104,7 +13157,7 @@ CSSParserImpl::ParseCalcMultiplicativeExpression(nsCSSValue& aValue,
 //    aVariantMask*** to reflect which one it has parsed by either
 //    removing VARIANT_NUMBER or removing all other bits.
 bool
-CSSParserImpl::ParseCalcTerm(nsCSSValue& aValue, int32_t& aVariantMask)
+CSSParserImpl::ParseCalcTerm(nsCSSValue& aValue, uint32_t& aVariantMask)
 {
   MOZ_ASSERT(aVariantMask != 0, "unexpected variant mask");
   if (!GetToken(true))
@@ -14837,7 +14890,7 @@ CSSParserImpl::ParseTextAlign(nsCSSValue& aValue, const KTableEntry aTable[])
     return false;
   }
 
-  if (!nsLayoutUtils::IsTextAlignTrueValueEnabled()) {
+  if (!nsLayoutUtils::IsTextAlignUnsafeValueEnabled()) {
     aValue = left;
     return true;
   }
@@ -14845,14 +14898,14 @@ CSSParserImpl::ParseTextAlign(nsCSSValue& aValue, const KTableEntry aTable[])
   nsCSSValue right;
   if (ParseSingleTokenVariant(right, VARIANT_KEYWORD, aTable)) {
     // 'true' must be combined with some other value than 'true'.
-    if (left.GetIntValue() == NS_STYLE_TEXT_ALIGN_TRUE &&
-        right.GetIntValue() == NS_STYLE_TEXT_ALIGN_TRUE) {
+    if (left.GetIntValue() == NS_STYLE_TEXT_ALIGN_UNSAFE &&
+        right.GetIntValue() == NS_STYLE_TEXT_ALIGN_UNSAFE) {
       return false;
     }
     aValue.SetPairValue(left, right);
   } else {
     // Single value 'true' is not allowed.
-    if (left.GetIntValue() == NS_STYLE_TEXT_ALIGN_TRUE) {
+    if (left.GetIntValue() == NS_STYLE_TEXT_ALIGN_UNSAFE) {
       return false;
     }
     aValue = left;
@@ -15027,8 +15080,8 @@ CSSParserImpl::ParseTextCombineUpright(nsCSSValue& aValue)
  * ParseFunction.
  */
 bool
-CSSParserImpl::ParseFunctionInternals(const int32_t aVariantMask[],
-                                      int32_t aVariantMaskAll,
+CSSParserImpl::ParseFunctionInternals(const uint32_t aVariantMask[],
+                                      uint32_t aVariantMaskAll,
                                       uint16_t aMinElems,
                                       uint16_t aMaxElems,
                                       InfallibleTArray<nsCSSValue> &aOutput)
@@ -15039,7 +15092,7 @@ CSSParserImpl::ParseFunctionInternals(const int32_t aVariantMask[],
 
   for (uint16_t index = 0; index < aMaxElems; ++index) {
     nsCSSValue newValue;
-    int32_t m = aVariantMaskAll ? aVariantMaskAll : aVariantMask[index];
+    uint32_t m = aVariantMaskAll ? aVariantMaskAll : aVariantMask[index];
     if (ParseVariant(newValue, m, nullptr) != CSSParseResult::Ok) {
       break;
     }
@@ -15087,8 +15140,8 @@ CSSParserImpl::ParseFunctionInternals(const int32_t aVariantMask[],
  */
 bool
 CSSParserImpl::ParseFunction(nsCSSKeyword aFunction,
-                             const int32_t aAllowedTypes[],
-                             int32_t aAllowedTypesAll,
+                             const uint32_t aAllowedTypes[],
+                             uint32_t aAllowedTypesAll,
                              uint16_t aMinElems, uint16_t aMaxElems,
                              nsCSSValue &aValue)
 {
@@ -15110,7 +15163,7 @@ CSSParserImpl::ParseFunction(nsCSSKeyword aFunction,
    * functions.  The number 16 is coming from the number of arguments that
    * matrix3d() accepts.
    */
-  AutoInfallibleTArray<nsCSSValue, 16> foundValues;
+  AutoTArray<nsCSSValue, 16> foundValues;
   if (!ParseFunctionInternals(aAllowedTypes, aAllowedTypesAll, aMinElems,
                               aMaxElems, foundValues)) {
     return false;
@@ -15139,6 +15192,10 @@ CSSParserImpl::ParseFunction(nsCSSKeyword aFunction,
  * returns an error.
  *
  * @param aToken The token identifying the function.
+ * @param aIsPrefixed If true, parse matrices using the matrix syntax
+ *   for -moz-transform.
+ * @param aDisallowRelativeValues If true, only allow variants that are
+ *   numbers or have non-relative dimensions.
  * @param aMinElems [out] The minimum number of elements to read.
  * @param aMaxElems [out] The maximum number of elements to read
  * @param aVariantMask [out] The variant mask to use during parsing
@@ -15146,9 +15203,10 @@ CSSParserImpl::ParseFunction(nsCSSKeyword aFunction,
  */
 static bool GetFunctionParseInformation(nsCSSKeyword aToken,
                                         bool aIsPrefixed,
+                                        bool aDisallowRelativeValues,
                                         uint16_t &aMinElems,
                                         uint16_t &aMaxElems,
-                                        const int32_t *& aVariantMask)
+                                        const uint32_t *& aVariantMask)
 {
 /* These types represent the common variant masks that will be used to
    * parse out the individual functions.  The order in the enumeration
@@ -15156,12 +15214,16 @@ static bool GetFunctionParseInformation(nsCSSKeyword aToken,
    */
   enum { eLengthPercentCalc,
          eLengthCalc,
+         eAbsoluteLengthCalc,
          eTwoLengthPercentCalcs,
+         eTwoAbsoluteLengthCalcs,
          eTwoLengthPercentCalcsOneLengthCalc,
+         eThreeAbsoluteLengthCalc,
          eAngle,
          eTwoAngles,
          eNumber,
          ePositiveLength,
+         ePositiveAbsoluteLength,
          eTwoNumbers,
          eThreeNumbers,
          eThreeNumbersOneAngle,
@@ -15171,15 +15233,19 @@ static bool GetFunctionParseInformation(nsCSSKeyword aToken,
          eMatrix3dPrefixed,
          eNumVariantMasks };
   static const int32_t kMaxElemsPerFunction = 16;
-  static const int32_t kVariantMasks[eNumVariantMasks][kMaxElemsPerFunction] = {
+  static const uint32_t kVariantMasks[eNumVariantMasks][kMaxElemsPerFunction] = {
     {VARIANT_LPCALC},
-    {VARIANT_LENGTH|VARIANT_CALC},
+    {VARIANT_LCALC},
+    {VARIANT_LB},
     {VARIANT_LPCALC, VARIANT_LPCALC},
-    {VARIANT_LPCALC, VARIANT_LPCALC, VARIANT_LENGTH|VARIANT_CALC},
+    {VARIANT_LBCALC, VARIANT_LBCALC},
+    {VARIANT_LPCALC, VARIANT_LPCALC, VARIANT_LCALC},
+    {VARIANT_LBCALC, VARIANT_LBCALC, VARIANT_LBCALC},
     {VARIANT_ANGLE_OR_ZERO},
     {VARIANT_ANGLE_OR_ZERO, VARIANT_ANGLE_OR_ZERO},
     {VARIANT_NUMBER},
     {VARIANT_LENGTH|VARIANT_POSITIVE_DIMENSION},
+    {VARIANT_LB|VARIANT_POSITIVE_DIMENSION},
     {VARIANT_NUMBER, VARIANT_NUMBER},
     {VARIANT_NUMBER, VARIANT_NUMBER, VARIANT_NUMBER},
     {VARIANT_NUMBER, VARIANT_NUMBER, VARIANT_NUMBER, VARIANT_ANGLE_OR_ZERO},
@@ -15195,10 +15261,31 @@ static bool GetFunctionParseInformation(nsCSSKeyword aToken,
      VARIANT_NUMBER, VARIANT_NUMBER, VARIANT_NUMBER, VARIANT_NUMBER,
      VARIANT_NUMBER, VARIANT_NUMBER, VARIANT_NUMBER, VARIANT_NUMBER,
      VARIANT_LPNCALC, VARIANT_LPNCALC, VARIANT_LNCALC, VARIANT_NUMBER}};
+  // Map from a mask to a congruent mask that excludes relative variants.
+  static const int32_t kNonRelativeVariantMap[eNumVariantMasks] = {
+    eAbsoluteLengthCalc,
+    eAbsoluteLengthCalc,
+    eAbsoluteLengthCalc,
+    eTwoAbsoluteLengthCalcs,
+    eTwoAbsoluteLengthCalcs,
+    eThreeAbsoluteLengthCalc,
+    eThreeAbsoluteLengthCalc,
+    eAngle,
+    eTwoAngles,
+    eNumber,
+    ePositiveAbsoluteLength,
+    ePositiveAbsoluteLength,
+    eTwoNumbers,
+    eThreeNumbers,
+    eThreeNumbersOneAngle,
+    eMatrix,
+    eMatrix,
+    eMatrix3d,
+    eMatrix3d };
 
 #ifdef DEBUG
   static const uint8_t kVariantMaskLengths[eNumVariantMasks] =
-    {1, 1, 2, 3, 1, 2, 1, 1, 2, 3, 4, 6, 6, 16, 16};
+    {1, 1, 1, 2, 2, 3, 3, 1, 2, 1, 1, 1, 2, 3, 4, 6, 6, 16, 16};
 #endif
 
   int32_t variantIndex = eNumVariantMasks;
@@ -15304,6 +15391,10 @@ static bool GetFunctionParseInformation(nsCSSKeyword aToken,
     return false;
   }
 
+  if (aDisallowRelativeValues) {
+    variantIndex = kNonRelativeVariantMap[variantIndex];
+  }
+
   NS_ASSERTION(aMinElems > 0, "Didn't update minimum elements!");
   NS_ASSERTION(aMaxElems > 0, "Didn't update maximum elements!");
   NS_ASSERTION(aMinElems <= aMaxElems, "aMinElems > aMaxElems!");
@@ -15376,7 +15467,9 @@ bool CSSParserImpl::ParseWillChange()
  * error if something goes wrong.
  */
 bool
-CSSParserImpl::ParseSingleTransform(bool aIsPrefixed, nsCSSValue& aValue)
+CSSParserImpl::ParseSingleTransform(bool aIsPrefixed,
+                                    bool aDisallowRelativeValues,
+                                    nsCSSValue& aValue)
 {
   if (!GetToken(true))
     return false;
@@ -15386,12 +15479,14 @@ CSSParserImpl::ParseSingleTransform(bool aIsPrefixed, nsCSSValue& aValue)
     return false;
   }
 
-  const int32_t* variantMask;
+  const uint32_t* variantMask;
   uint16_t minElems, maxElems;
   nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(mToken.mIdent);
 
   if (!GetFunctionParseInformation(keyword, aIsPrefixed,
-                                   minElems, maxElems, variantMask))
+                                   aDisallowRelativeValues,
+                                   minElems, maxElems,
+                                   variantMask))
     return false;
 
   return ParseFunction(keyword, variantMask, 0, minElems, maxElems, aValue);
@@ -15400,7 +15495,8 @@ CSSParserImpl::ParseSingleTransform(bool aIsPrefixed, nsCSSValue& aValue)
 /* Parses a transform property list by continuously reading in properties
  * and constructing a matrix from it.
  */
-bool CSSParserImpl::ParseTransform(bool aIsPrefixed)
+bool
+CSSParserImpl::ParseTransform(bool aIsPrefixed, bool aDisallowRelativeValues)
 {
   nsCSSValue value;
   // 'inherit', 'initial', 'unset' and 'none' must be alone
@@ -15411,7 +15507,8 @@ bool CSSParserImpl::ParseTransform(bool aIsPrefixed)
     list->mHead = new nsCSSValueList;
     nsCSSValueList* cur = list->mHead;
     for (;;) {
-      if (!ParseSingleTransform(aIsPrefixed, cur->mValue)) {
+      if (!ParseSingleTransform(aIsPrefixed, aDisallowRelativeValues,
+                                cur->mValue)) {
         return false;
       }
       if (CheckEndProperty()) {
@@ -15785,7 +15882,7 @@ CSSParserImpl::ParseSingleFilter(nsCSSValue* aValue)
   }
 
   // Set up the parsing rules based on the filter function.
-  int32_t variantMask = VARIANT_PN;
+  uint32_t variantMask = VARIANT_PN;
   bool rejectNegativeArgument = true;
   bool clampArgumentToOne = false;
   switch (functionName) {
@@ -16794,7 +16891,7 @@ CSSParserImpl::ParseValueWithVariables(CSSVariableDeclarations::Type* aType,
   // Indexes into ')' characters in |stack| that correspond to "var(".  This
   // is used to stop parsing when we encounter a '!' or ';' at the top level
   // of a variable reference's fallback.
-  nsAutoTArray<uint32_t, 16> references;
+  AutoTArray<uint32_t, 16> references;
 
   if (!GetToken(false)) {
     // Variable value was empty since we reached EOF.
@@ -17119,8 +17216,8 @@ nsCSSParser::ParseSheet(const nsAString& aInput,
                         nsIURI*          aBaseURI,
                         nsIPrincipal*    aSheetPrincipal,
                         uint32_t         aLineNumber,
-                        SheetParsingMode aParsingMode,
-                        LoaderReusableStyleSheets* aReusableSheets)
+                        css::SheetParsingMode aParsingMode,
+                        css::LoaderReusableStyleSheets* aReusableSheets)
 {
   return static_cast<CSSParserImpl*>(mImpl)->
     ParseSheet(aInput, aSheetURI, aBaseURI, aSheetPrincipal, aLineNumber,
@@ -17189,6 +17286,15 @@ nsCSSParser::ParseLonghandProperty(const nsCSSProperty aPropID,
   static_cast<CSSParserImpl*>(mImpl)->
     ParseLonghandProperty(aPropID, aPropValue, aSheetURI, aBaseURI,
                           aSheetPrincipal, aResult);
+}
+
+bool
+nsCSSParser::ParseTransformProperty(const nsAString& aPropValue,
+                                    bool             aDisallowRelativeValues,
+                                    nsCSSValue&      aResult)
+{
+  return static_cast<CSSParserImpl*>(mImpl)->
+    ParseTransformProperty(aPropValue, aDisallowRelativeValues, aResult);
 }
 
 void

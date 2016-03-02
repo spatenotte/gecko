@@ -152,14 +152,6 @@ public:
   void RemoveVariableDeclaration(const nsAString& aName);
 
   /**
-   * Returns whether a custom property declaration for a variable with
-   * a given name exists on this object.
-   *
-   * @param aName The variable name (i.e., without the "--" prefix).
-   */
-  bool HasVariableDeclaration(const nsAString& aName) const;
-
-  /**
    * Gets the string value for a custom property declaration of a variable
    * with a given name.
    *
@@ -419,7 +411,7 @@ private:
   // Subtracting eCSSProperty_COUNT from those values that represent custom
   // properties results in an index into mVariableOrder, which identifies the
   // specific variable the custom property declaration is for.
-  nsAutoTArray<uint32_t, 8> mOrder;
+  AutoTArray<uint32_t, 8> mOrder;
 
   // variable names of custom properties found in mOrder
   nsTArray<nsString> mVariableOrder;

@@ -295,6 +295,7 @@ StructuredCloneHolder::Read(nsISupports* aParent,
 {
   MOZ_ASSERT_IF(mSupportedContext == SameProcessSameThread,
                 mCreationThread == NS_GetCurrentThread());
+  MOZ_ASSERT(aParent);
 
   mozilla::AutoRestore<nsISupports*> guard(mParent);
   mParent = aParent;
@@ -417,7 +418,8 @@ StructuredCloneHolder::ReadFullySerializableObjects(JSContext* aCx,
 
   if (aTag == SCTAG_DOM_NULL_PRINCIPAL ||
       aTag == SCTAG_DOM_SYSTEM_PRINCIPAL ||
-      aTag == SCTAG_DOM_CONTENT_PRINCIPAL) {
+      aTag == SCTAG_DOM_CONTENT_PRINCIPAL ||
+      aTag == SCTAG_DOM_EXPANDED_PRINCIPAL) {
     JSPrincipals* prin;
     if (!nsJSPrincipals::ReadKnownPrincipalType(aCx, aReader, aTag, &prin)) {
       return nullptr;
@@ -1040,16 +1042,14 @@ StructuredCloneHolder::CustomReadTransferHandler(JSContext* aCx,
   MOZ_ASSERT(mSupportsTransferring);
 
   if (aTag == SCTAG_DOM_MAP_MESSAGEPORT) {
-    // This can be null.
-    nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(mParent);
-
     MOZ_ASSERT(aExtraData < mPortIdentifiers.Length());
     const MessagePortIdentifier& portIdentifier = mPortIdentifiers[aExtraData];
 
-    // aExtraData is the index of this port identifier.
+    nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(mParent);
+
     ErrorResult rv;
     RefPtr<MessagePort> port =
-      MessagePort::Create(window, portIdentifier, rv);
+      MessagePort::Create(global, portIdentifier, rv);
     if (NS_WARN_IF(rv.Failed())) {
       return false;
     }

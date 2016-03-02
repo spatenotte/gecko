@@ -338,7 +338,7 @@ FetchDriver::HttpFetch()
   // nsCORSListenerProxy. We just inform it which unsafe headers are included
   // in the request.
   if (mRequest->Mode() == RequestMode::Cors) {
-    nsAutoTArray<nsCString, 5> unsafeHeaders;
+    AutoTArray<nsCString, 5> unsafeHeaders;
     mRequest->Headers()->GetUnsafeHeaders(unsafeHeaders);
     nsCOMPtr<nsILoadInfo> loadInfo = chan->GetLoadInfo();
     loadInfo->SetCorsPreflightInfo(unsafeHeaders, false);
@@ -392,7 +392,7 @@ FetchDriver::BeginAndGetFilteredResponse(InternalResponse* aResponse,
   return filteredResponse.forget();
 }
 
-nsresult
+void
 FetchDriver::FailWithNetworkError()
 {
   workers::AssertIsOnMainThread();
@@ -403,7 +403,6 @@ FetchDriver::FailWithNetworkError()
     mObserver->OnResponseEnd();
     mObserver = nullptr;
   }
-  return NS_OK;
 }
 
 namespace {
@@ -709,7 +708,7 @@ FetchDriver::SetRequestHeaders(nsIHttpChannel* aChannel) const
 {
   MOZ_ASSERT(aChannel);
 
-  nsAutoTArray<InternalHeaders::Entry, 5> headers;
+  AutoTArray<InternalHeaders::Entry, 5> headers;
   mRequest->Headers()->GetEntries(headers);
   bool hasAccept = false;
   for (uint32_t i = 0; i < headers.Length(); ++i) {

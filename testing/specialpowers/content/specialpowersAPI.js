@@ -14,7 +14,6 @@ var Cu = Components.utils;
 Cu.import("chrome://specialpowers/content/MockFilePicker.jsm");
 Cu.import("chrome://specialpowers/content/MockColorPicker.jsm");
 Cu.import("chrome://specialpowers/content/MockPermissionPrompt.jsm");
-Cu.import("chrome://specialpowers/content/MockPaymentsUIGlue.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -295,13 +294,6 @@ SpecialPowersHandler.prototype = {
     return props;
   },
 
-  enumerate(target) {
-    return (function*() {
-      for (let property in this.wrappedObject)
-        yield property;
-    }).call(this);
-  },
-
   preventExtensions(target) {
     throw "Can't call preventExtensions on SpecialPowers wrapped object";
   }
@@ -459,10 +451,6 @@ SpecialPowersAPI.prototype = {
 
   get MockPermissionPrompt() {
     return MockPermissionPrompt;
-  },
-
-  get MockPaymentsUIGlue() {
-    return MockPaymentsUIGlue;
   },
 
   loadChromeScript: function (url) {
@@ -1858,10 +1846,6 @@ SpecialPowersAPI.prototype = {
       'observerData': data
     };
     this._sendSyncMessage('SPObserverService', msg);
-  },
-
-  createDOMFile: function(path, options) {
-    return new File(path, options);
   },
 
   removeAllServiceWorkerData: function() {

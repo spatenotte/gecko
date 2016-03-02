@@ -251,10 +251,8 @@
 @BINPATH@/components/toolkit_finalizationwitness.xpt
 @BINPATH@/components/toolkit_formautofill.xpt
 @BINPATH@/components/toolkit_osfile.xpt
-@RESPATH@/components/toolkit_securityreporter.xpt
-#ifdef NIGHTLY_BUILD
+@BINPATH@/components/toolkit_securityreporter.xpt
 @BINPATH@/components/toolkit_perfmonitoring.xpt
-#endif
 @BINPATH@/components/toolkit_xulstore.xpt
 @BINPATH@/components/toolkitprofile.xpt
 #ifdef MOZ_ENABLE_XREMOTE
@@ -468,8 +466,8 @@
 #endif
 
 ; Security Reports
-@RESPATH@/components/SecurityReporter.manifest
-@RESPATH@/components/SecurityReporter.js
+@BINPATH@/components/SecurityReporter.manifest
+@BINPATH@/components/SecurityReporter.js
 
 ; [Browser Chrome Files]
 @BINPATH@/chrome/browser@JAREXT@
@@ -531,20 +529,6 @@
 @BINPATH@/res/html/*
 @BINPATH@/res/language.properties
 @BINPATH@/res/entityTables/*
-#ifdef NIGHTLY_BUILD
-@BINPATH@/res/accessiblecaret.png
-@BINPATH@/res/accessiblecaret@1.5x.png
-@BINPATH@/res/accessiblecaret@2.25x.png
-@BINPATH@/res/accessiblecaret@2x.png
-@BINPATH@/res/accessiblecaret_tilt_left.png
-@BINPATH@/res/accessiblecaret_tilt_left@1.5x.png
-@BINPATH@/res/accessiblecaret_tilt_left@2.25x.png
-@BINPATH@/res/accessiblecaret_tilt_left@2x.png
-@BINPATH@/res/accessiblecaret_tilt_right.png
-@BINPATH@/res/accessiblecaret_tilt_right@1.5x.png
-@BINPATH@/res/accessiblecaret_tilt_right@2.25x.png
-@BINPATH@/res/accessiblecaret_tilt_right@2x.png
-#endif
 
 #ifndef MOZ_ANDROID_EXCLUDE_FONTS
 @BINPATH@/res/fonts/*

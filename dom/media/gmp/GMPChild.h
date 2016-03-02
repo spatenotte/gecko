@@ -31,9 +31,6 @@ public:
             base::ProcessId aParentPid,
             MessageLoop* aIOLoop,
             IPC::Channel* aChannel);
-#ifdef XP_WIN
-  bool PreLoadLibraries(const nsAString& aPluginPath);
-#endif
   MessageLoop* GMPMessageLoop();
 
   // Main thread only.
@@ -57,6 +54,7 @@ private:
 
   bool RecvSetNodeId(const nsCString& aNodeId) override;
   bool AnswerStartPlugin() override;
+  bool RecvPreloadLibs(const nsCString& aLibs) override;
 
   PCrashReporterChild* AllocPCrashReporterChild(const NativeThreadId& aThread) override;
   bool DeallocPCrashReporterChild(PCrashReporterChild*) override;

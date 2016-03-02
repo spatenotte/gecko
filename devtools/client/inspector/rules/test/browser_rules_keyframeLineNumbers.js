@@ -14,13 +14,10 @@ add_task(function*() {
   let { inspector, view } = yield openRuleView();
   yield selectNode("#outer", inspector);
 
-  // Insert a new property, which will affect the line numbers.
-  let elementRuleEditor = getRuleViewRuleEditor(view, 1);
-  yield createNewRuleViewProperty(elementRuleEditor, "font-size: 72px");
+  info("Insert a new property, which will affect the line numbers");
+  yield addProperty(view, 1, "font-size", "72px");
 
-  let onRefresh = view.once("ruleview-refreshed");
   yield selectNode("#inner", inspector);
-  yield onRefresh;
 
   let value = getRuleViewLinkTextByIndex(view, 3);
   // Note that this is relative to the <style>.

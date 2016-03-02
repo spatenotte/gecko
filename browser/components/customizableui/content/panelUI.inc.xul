@@ -84,11 +84,6 @@
                        label="&appMenuHistory.clearRecent.label;"
                        class="subviewbutton"
                        command="Tools:Sanitize"/>
-        <toolbarbutton id="sync-tabs-menuitem2"
-                       class="syncTabsMenuItem subviewbutton"
-                       label="&syncTabsMenu3.label;"
-                       oncommand="BrowserOpenSyncTabs();"
-                       hidden="true"/>
         <toolbarbutton id="appMenuRestoreLastSession"
                        label="&appMenuHistory.restoreSession.label;"
                        class="subviewbutton"
@@ -246,7 +241,7 @@
     <panelview id="PanelUI-loopapi" flex="1"/>
 
     <panelview id="PanelUI-feeds" flex="1" oncommand="FeedHandler.subscribeToFeed(null, event);">
-      <label value="&feedsMenu.label;" class="panel-subview-header"/>
+      <label value="&feedsMenu2.label;" class="panel-subview-header"/>
     </panelview>
 
     <panelview id="PanelUI-helpView" flex="1" class="PanelUI-subView">

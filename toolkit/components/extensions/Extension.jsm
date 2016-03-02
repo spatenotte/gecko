@@ -52,6 +52,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
                                   "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
                                   "resource://gre/modules/MessageChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
+                                  "resource://gre/modules/AddonManager.jsm");
 
 Cu.import("resource://gre/modules/ExtensionManagement.jsm");
 
@@ -60,6 +62,7 @@ Cu.import("resource://gre/modules/ExtensionManagement.jsm");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-alarms.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-backgroundPage.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-cookies.js");
+ExtensionManagement.registerScript("chrome://extensions/content/ext-downloads.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-notifications.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-i18n.js");
 ExtensionManagement.registerScript("chrome://extensions/content/ext-idle.js");
@@ -73,11 +76,14 @@ ExtensionManagement.registerScript("chrome://extensions/content/ext-test.js");
 const BASE_SCHEMA = "chrome://extensions/content/schemas/manifest.json";
 
 ExtensionManagement.registerSchema("chrome://extensions/content/schemas/cookies.json");
+ExtensionManagement.registerSchema("chrome://extensions/content/schemas/downloads.json");
 ExtensionManagement.registerSchema("chrome://extensions/content/schemas/extension.json");
 ExtensionManagement.registerSchema("chrome://extensions/content/schemas/extension_types.json");
 ExtensionManagement.registerSchema("chrome://extensions/content/schemas/i18n.json");
 ExtensionManagement.registerSchema("chrome://extensions/content/schemas/idle.json");
 ExtensionManagement.registerSchema("chrome://extensions/content/schemas/runtime.json");
+ExtensionManagement.registerSchema("chrome://extensions/content/schemas/storage.json");
+ExtensionManagement.registerSchema("chrome://extensions/content/schemas/test.json");
 ExtensionManagement.registerSchema("chrome://extensions/content/schemas/web_navigation.json");
 ExtensionManagement.registerSchema("chrome://extensions/content/schemas/web_request.json");
 
@@ -309,6 +315,21 @@ ExtensionPage = class extends BaseContext {
   }
 };
 
+// For extensions that have called setUninstallURL(), send an event
+// so the browser can display the URL.
+let UninstallObserver = {
+  init: function() {
+    AddonManager.addAddonListener(this);
+  },
+
+  onUninstalling: function(addon) {
+    let extension = GlobalManager.extensionMap.get(addon.id);
+    if (extension) {
+      Management.emit("uninstall", extension);
+    }
+  },
+};
+
 // Responsible for loading extension APIs into the right globals.
 GlobalManager = {
   // Number of extensions currently enabled.
@@ -324,6 +345,7 @@ GlobalManager = {
   init(extension) {
     if (this.count == 0) {
       Services.obs.addObserver(this, "content-document-global-created", false);
+      UninstallObserver.init();
     }
     this.count++;
 
@@ -351,42 +373,97 @@ GlobalManager = {
 
   observe(contentWindow, topic, data) {
     let inject = (extension, context) => {
-      let chromeObj = Cu.createObjectIn(contentWindow, {defineAs: "browser"});
-      contentWindow.wrappedJSObject.chrome = contentWindow.wrappedJSObject.browser;
-      let api = Management.generateAPIs(extension, context, Management.apis);
-      injectAPI(api, chromeObj);
+      // We create two separate sets of bindings, one for the `chrome`
+      // global, and one for the `browser` global. The latter returns
+      // Promise objects if a callback is not passed, while the former
+      // does not.
+      let injectObject = (name, defaultCallback) => {
+        let browserObj = Cu.createObjectIn(contentWindow, {defineAs: name});
 
-      let schemaApi = Management.generateAPIs(extension, context, Management.schemaApis);
-      let schemaWrapper = {
-        callFunction(ns, name, args) {
-          return schemaApi[ns][name].apply(null, args);
-        },
+        let api = Management.generateAPIs(extension, context, Management.apis);
+        injectAPI(api, browserObj);
 
-        getProperty(ns, name) {
-          return schemaApi[ns][name];
-        },
+        let schemaApi = Management.generateAPIs(extension, context, Management.schemaApis);
 
-        setProperty(ns, name, value) {
-          schemaApi[ns][name] = value;
-        },
+        // Add in any extra API namespaces which do not have implementations
+        // outside of their schema file.
+        schemaApi.extensionTypes = {};
 
-        addListener(ns, name, listener, args) {
-          return schemaApi[ns][name].addListener.call(null, listener, ...args);
-        },
-        removeListener(ns, name, listener) {
-          return schemaApi[ns][name].removeListener.call(null, listener);
-        },
-        hasListener(ns, name, listener) {
-          return schemaApi[ns][name].hasListener.call(null, listener);
-        },
+        function findPath(path) {
+          let obj = schemaApi;
+          for (let elt of path) {
+            if (!(elt in obj)) {
+              return null;
+            }
+            obj = obj[elt];
+          }
+          return obj;
+        }
+        let schemaWrapper = {
+          get cloneScope() {
+            return context.cloneScope;
+          },
+
+          callFunction(path, name, args) {
+            return findPath(path)[name](...args);
+          },
+
+          callAsyncFunction(path, name, args, callback) {
+            // We pass an empty stub function as a default callback for
+            // the `chrome` API, so promise objects are not returned,
+            // and lastError values are reported immediately.
+            if (callback === null) {
+              callback = defaultCallback;
+            }
+
+            let promise;
+            try {
+              promise = findPath(path)[name](...args);
+            } catch (e) {
+              if (e instanceof context.cloneScope.Error) {
+                promise = Promise.reject(e);
+              } else {
+                Cu.reportError(e);
+                promise = Promise.reject({message: "An unexpected error occurred"});
+              }
+            }
+
+            return context.wrapPromise(promise || Promise.resolve(), callback);
+          },
+
+          shouldInject(path, name) {
+            return findPath(path) != null;
+          },
+
+          getProperty(path, name) {
+            return findPath(path)[name];
+          },
+
+          setProperty(path, name, value) {
+            findPath(path)[name] = value;
+          },
+
+          addListener(path, name, listener, args) {
+            return findPath(path)[name].addListener.call(null, listener, ...args);
+          },
+          removeListener(path, name, listener) {
+            return findPath(path)[name].removeListener.call(null, listener);
+          },
+          hasListener(path, name, listener) {
+            return findPath(path)[name].hasListener.call(null, listener);
+          },
+        };
+        Schemas.inject(browserObj, schemaWrapper);
       };
-      Schemas.inject(chromeObj, schemaWrapper);
+
+      injectObject("browser", null);
+      injectObject("chrome", () => {});
     };
 
     let id = ExtensionManagement.getAddonIdForWindow(contentWindow);
 
     // We don't inject privileged APIs into sub-frames of a UI page.
-    const { FULL_PRIVILEGES } = ExtensionManagement.API_LEVELS;
+    const {FULL_PRIVILEGES} = ExtensionManagement.API_LEVELS;
     if (ExtensionManagement.getAPILevelForWindow(contentWindow, id) !== FULL_PRIVILEGES) {
       return;
     }
@@ -546,7 +623,7 @@ ExtensionData.prototype = {
         }
         try {
           let text = NetUtil.readInputStreamToString(inputStream, inputStream.available(),
-                                                     { charset: "utf-8" });
+                                                     {charset: "utf-8"});
           resolve(JSON.parse(text));
         } catch (e) {
           reject(e);
@@ -562,16 +639,32 @@ ExtensionData.prototype = {
       this.readJSON("manifest.json"),
       Management.lazyInit(),
     ]).then(([manifest]) => {
+      this.manifest = manifest;
+      this.rawManifest = manifest;
+
+      if (manifest && manifest.default_locale) {
+        return this.initLocale();
+      }
+    }).then(() => {
       let context = {
-        url: (this.baseURI || this.rootURI).spec,
+        url: this.baseURI && this.baseURI.spec,
 
         principal: this.principal,
+
+        logError: error => {
+          this.logger.warn(`Loading extension '${this.id}': Reading manifest: ${error}`);
+        },
+
+        preprocessors: {},
       };
 
-      let normalized = Schemas.normalize(manifest, "manifest.WebExtensionManifest", context);
+      if (this.localeData) {
+        context.preprocessors.localize = this.localize.bind(this);
+      }
+
+      let normalized = Schemas.normalize(this.manifest, "manifest.WebExtensionManifest", context);
       if (normalized.error) {
         this.manifestError(normalized.error);
-        this.manifest = manifest;
       } else {
         this.manifest = normalized.value;
       }
@@ -615,7 +708,7 @@ ExtensionData.prototype = {
   // stores its parsed contents in |this.localeMessages.get(locale)|.
   readLocaleFile: Task.async(function* (locale) {
     let locales = yield this.promiseLocales();
-    let dir = locales.get(locale);
+    let dir = locales.get(locale) || locale;
     let file = `_locales/${dir}/messages.json`;
 
     try {
@@ -699,7 +792,7 @@ ExtensionData.prototype = {
 
     let promises = [this.readLocaleFile(locale)];
 
-    let { defaultLocale } = this;
+    let {defaultLocale} = this;
     if (locale != defaultLocale && !this.localeData.has(defaultLocale)) {
       promises.push(this.readLocaleFile(defaultLocale));
     }
@@ -766,6 +859,8 @@ this.Extension = function(addonData) {
 
   this.hasShutdown = false;
   this.onShutdown = new Set();
+
+  this.uninstallURL = null;
 
   this.permissions = new Set();
   this.whiteListedHosts = null;
@@ -978,9 +1073,8 @@ Extension.prototype = extend(Object.create(ExtensionData.prototype), {
 
     let whitelist = [];
     for (let perm of permissions) {
-      if (/^\w+(\.\w+)*$/.test(perm)) {
-        this.permissions.add(perm);
-      } else {
+      this.permissions.add(perm);
+      if (!/^\w+(\.\w+)*$/.test(perm)) {
         whitelist.push(perm);
       }
     }
@@ -1030,7 +1124,7 @@ Extension.prototype = extend(Object.create(ExtensionData.prototype), {
       let locales = yield this.promiseLocales();
 
       let localeList = Array.from(locales.keys(), locale => {
-        return { name: locale, locales: [locale] };
+        return {name: locale, locales: [locale]};
       });
 
       let match = Locale.findClosestLocale(localeList);
@@ -1123,7 +1217,7 @@ Extension.prototype = extend(Object.create(ExtensionData.prototype), {
 
     Services.ppmm.broadcastAsyncMessage("Extension:Shutdown", {id: this.id});
 
-    MessageChannel.abortResponses({ extensionId: this.id });
+    MessageChannel.abortResponses({extensionId: this.id});
 
     ExtensionManagement.shutdownExtension(this.uuid);
 
@@ -1144,4 +1238,3 @@ Extension.prototype = extend(Object.create(ExtensionData.prototype), {
     return this.localize(this.manifest.name);
   },
 });
-

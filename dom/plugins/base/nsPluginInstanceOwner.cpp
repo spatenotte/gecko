@@ -212,6 +212,21 @@ AttachToContainerAsSurfaceTexture(ImageContainer* container,
 }
 #endif
 
+bool
+nsPluginInstanceOwner::NeedsScrollImageLayer()
+{
+#if defined(XP_WIN)
+  // If this is a windowed plugin and we're doing layout in the content
+  // process, force the creation of an image layer for the plugin. We'll
+  // paint to this when scrolling.
+  return XRE_IsContentProcess() &&
+         mPluginWindow &&
+         mPluginWindow->type == NPWindowTypeWindow;
+#else
+  return false;
+#endif
+}
+
 already_AddRefed<ImageContainer>
 nsPluginInstanceOwner::GetImageContainer()
 {
@@ -247,7 +262,15 @@ nsPluginInstanceOwner::GetImageContainer()
     container->SetCurrentImageInTransaction(img);
   }
 #else
-  mInstance->GetImageContainer(getter_AddRefs(container));
+  if (NeedsScrollImageLayer()) {
+    // windowed plugin under e10s
+#if defined(XP_WIN)
+    mInstance->GetScrollCaptureContainer(getter_AddRefs(container));
+#endif
+  } else {
+    // async windowless rendering
+    mInstance->GetImageContainer(getter_AddRefs(container));
+  }
 #endif
 
   return container.forget();
@@ -327,6 +350,21 @@ nsPluginInstanceOwner::GetCurrentImageSize()
   return size;
 }
 
+bool
+nsPluginInstanceOwner::UpdateScrollState(bool aIsScrolling)
+{
+#if defined(XP_WIN)
+  if (!mInstance) {
+    return false;
+  }
+  mScrollState = aIsScrolling;
+  nsresult rv = mInstance->UpdateScrollState(aIsScrolling);
+  return NS_SUCCEEDED(rv);
+#else
+  return false;
+#endif
+}
+
 nsPluginInstanceOwner::nsPluginInstanceOwner()
 {
   // create nsPluginNativeWindow object, it is derived from NPWindow
@@ -374,6 +412,7 @@ nsPluginInstanceOwner::nsPluginInstanceOwner()
   mGotCompositionData = false;
   mSentStartComposition = false;
   mPluginDidNotHandleIMEComposition = false;
+  mScrollState = false;
 #endif
 }
 
@@ -613,14 +652,18 @@ NS_IMETHODIMP nsPluginInstanceOwner::InvalidateRect(NPRect *invalidRect)
 #endif
 
 #ifndef XP_MACOSX
-  // Windowed plugins should not be calling NPN_InvalidateRect, but
-  // Silverlight does and expects it to "work"
+  // Silverlight calls invalidate for windowed plugins so this needs to work.
   if (mWidget) {
     mWidget->Invalidate(
       LayoutDeviceIntRect(invalidRect->left, invalidRect->top,
                           invalidRect->right - invalidRect->left,
                           invalidRect->bottom - invalidRect->top));
-    return NS_OK;
+    // Plugin instances also call invalidate when plugin windows are hidden
+    // during scrolling. In this case fall through so we invalidate the
+    // underlying layer.
+    if (!NeedsScrollImageLayer()) {
+      return NS_OK;
+    }
   }
 #endif
   nsIntRect rect(invalidRect->left,
@@ -903,7 +946,7 @@ nsPluginInstanceOwner::GetCompositionString(uint32_t aType,
         *aLength = aDist->Length();
         return true;
       }
-      nsAutoTArray<uint32_t, 16> clauses;
+      AutoTArray<uint32_t, 16> clauses;
       clauses.AppendElement(0);
       for (TextRange& range : *ranges) {
         if (!range.IsClause()) {
@@ -941,7 +984,8 @@ nsPluginInstanceOwner::GetCompositionString(uint32_t aType,
 }
 
 bool
-nsPluginInstanceOwner::SetCandidateWindow(int32_t aX, int32_t aY)
+nsPluginInstanceOwner::SetCandidateWindow(
+    const widget::CandidateWindowPosition& aPosition)
 {
   if (NS_WARN_IF(!mPluginFrame)) {
     return false;
@@ -955,7 +999,7 @@ nsPluginInstanceOwner::SetCandidateWindow(int32_t aX, int32_t aY)
     }
   }
 
-  widget->SetCandidateWindowForPlugin(aX, aY);
+  widget->SetCandidateWindowForPlugin(aPosition);
   return true;
 }
 
@@ -1664,7 +1708,7 @@ nsresult nsPluginInstanceOwner::DispatchFocusToPlugin(nsIDOMEvent* aFocusEvent)
   }
 #endif
 
-  WidgetEvent* theEvent = aFocusEvent->GetInternalNSEvent();
+  WidgetEvent* theEvent = aFocusEvent->WidgetEventPtr();
   if (theEvent) {
     WidgetGUIEvent focusEvent(theEvent->mFlags.mIsTrusted, theEvent->mMessage,
                               nullptr);
@@ -1706,7 +1750,7 @@ nsresult nsPluginInstanceOwner::DispatchKeyToPlugin(nsIDOMEvent* aKeyEvent)
 
   if (mInstance) {
     WidgetKeyboardEvent* keyEvent =
-      aKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
+      aKeyEvent->WidgetEventPtr()->AsKeyboardEvent();
     if (keyEvent && keyEvent->mClass == eKeyboardEventClass) {
       nsEventStatus rv = ProcessEvent(*keyEvent);
       if (nsEventStatus_eConsumeNoDefault == rv) {
@@ -1741,7 +1785,7 @@ nsPluginInstanceOwner::ProcessMouseDown(nsIDOMEvent* aMouseEvent)
   }
 
   WidgetMouseEvent* mouseEvent =
-    aMouseEvent->GetInternalNSEvent()->AsMouseEvent();
+    aMouseEvent->WidgetEventPtr()->AsMouseEvent();
   if (mouseEvent && mouseEvent->mClass == eMouseEventClass) {
     mLastMouseDownButtonType = mouseEvent->button;
     nsEventStatus rv = ProcessEvent(*mouseEvent);
@@ -1766,7 +1810,7 @@ nsresult nsPluginInstanceOwner::DispatchMouseToPlugin(nsIDOMEvent* aMouseEvent,
     return NS_OK;
 
   WidgetMouseEvent* mouseEvent =
-    aMouseEvent->GetInternalNSEvent()->AsMouseEvent();
+    aMouseEvent->WidgetEventPtr()->AsMouseEvent();
   if (mouseEvent && mouseEvent->mClass == eMouseEventClass) {
     nsEventStatus rv = ProcessEvent(*mouseEvent);
     if (nsEventStatus_eConsumeNoDefault == rv) {
@@ -1881,7 +1925,7 @@ nsPluginInstanceOwner::DispatchCompositionToPlugin(nsIDOMEvent* aEvent)
     return NS_OK;
   }
   WidgetCompositionEvent* compositionEvent =
-    aEvent->GetInternalNSEvent()->AsCompositionEvent();
+    aEvent->WidgetEventPtr()->AsCompositionEvent();
   if (NS_WARN_IF(!compositionEvent)) {
       return NS_ERROR_INVALID_ARG;
   }
@@ -2024,7 +2068,7 @@ nsPluginInstanceOwner::HandleEvent(nsIDOMEvent* aEvent)
 
   nsCOMPtr<nsIDOMDragEvent> dragEvent(do_QueryInterface(aEvent));
   if (dragEvent && mInstance) {
-    WidgetEvent* ievent = aEvent->GetInternalNSEvent();
+    WidgetEvent* ievent = aEvent->WidgetEventPtr();
     if (ievent && ievent->mFlags.mIsTrusted &&
         ievent->mMessage != eDragEnter && ievent->mMessage != eDragOver) {
       aEvent->PreventDefault();

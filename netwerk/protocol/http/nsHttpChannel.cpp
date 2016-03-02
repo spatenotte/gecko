@@ -19,6 +19,8 @@
 #include "nsICaptivePortalService.h"
 #include "nsICryptoHash.h"
 #include "nsINetworkInterceptController.h"
+#include "nsINSSErrorsService.h"
+#include "nsISecurityReporter.h"
 #include "nsIStringBundle.h"
 #include "nsIStreamListenerTee.h"
 #include "nsISeekableStream.h"
@@ -1323,6 +1325,56 @@ nsHttpChannel::ProcessSecurityHeaders()
     return NS_OK;
 }
 
+/**
+ * Decide whether or not to send a security report and, if so, give the
+ * SecurityReporter the information required to send such a report.
+ */
+void
+nsHttpChannel::ProcessSecurityReport(nsresult status) {
+    uint32_t errorClass;
+    nsCOMPtr<nsINSSErrorsService> errSvc =
+            do_GetService("@mozilla.org/nss_errors_service;1");
+    // getErrorClass will throw a generic NS_ERROR_FAILURE if the error code is
+    // not in the set of errors covered by the NSS errors service.
+    nsresult rv = errSvc->GetErrorClass(status, &errorClass);
+    if (!NS_SUCCEEDED(rv)) {
+        return;
+    }
+
+    // if the content was not loaded succesfully and we have security info,
+    // send a TLS error report - we must do this early as other parts of
+    // OnStopRequest can return early
+    bool reportingEnabled =
+            Preferences::GetBool("security.ssl.errorReporting.enabled");
+    bool reportingAutomatic =
+            Preferences::GetBool("security.ssl.errorReporting.automatic");
+    if (!mSecurityInfo || !reportingEnabled || !reportingAutomatic) {
+        return;
+    }
+
+    nsCOMPtr<nsITransportSecurityInfo> secInfo =
+            do_QueryInterface(mSecurityInfo);
+    nsCOMPtr<nsISecurityReporter> errorReporter =
+            do_GetService("@mozilla.org/securityreporter;1");
+
+    if (!secInfo || !mURI) {
+        return;
+    }
+
+    nsAutoCString hostStr;
+    int32_t port;
+    rv = mURI->GetHost(hostStr);
+    if (!NS_SUCCEEDED(rv)) {
+        return;
+    }
+
+    rv = mURI->GetPort(&port);
+
+    if (NS_SUCCEEDED(rv)) {
+        errorReporter->ReportTLSError(secInfo, hostStr, port);
+    }
+}
+
 bool
 nsHttpChannel::IsHTTPS()
 {
@@ -1516,6 +1568,39 @@ nsHttpChannel::ProcessResponse()
         LOG(("  continuation state has been reset"));
     }
 
+    if (mAPIRedirectToURI && !mCanceled) {
+        MOZ_ASSERT(!mOnStartRequestCalled);
+        nsCOMPtr<nsIURI> redirectTo;
+        mAPIRedirectToURI.swap(redirectTo);
+
+        PushRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse1);
+        rv = StartRedirectChannelToURI(redirectTo, nsIChannelEventSink::REDIRECT_TEMPORARY);
+        if (NS_SUCCEEDED(rv)) {
+            return NS_OK;
+        }
+        PopRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse1);
+    }
+
+    // Hack: ContinueProcessResponse1 uses NS_OK to detect successful
+    // redirects, so we distinguish this codepath (a non-redirect that's
+    // processing normally) by passing in a bogus error code.
+    return ContinueProcessResponse1(NS_BINDING_FAILED);
+}
+
+nsresult
+nsHttpChannel::ContinueProcessResponse1(nsresult rv)
+{
+    if (NS_SUCCEEDED(rv)) {
+        // redirectTo() has passed through, we don't want to go on with
+        // this channel.  It will now be canceled by the redirect handling
+        // code that called this function.
+        return NS_OK;
+    }
+
+    rv = NS_OK;
+
+    uint32_t httpStatus = mResponseHead->Status();
+
     bool successfulReval = false;
 
     // handle different server response categories.  Note that we handle
@@ -1558,10 +1643,10 @@ nsHttpChannel::ProcessResponse()
 #endif
         // don't store the response body for redirects
         MaybeInvalidateCacheEntryForSubsequentGet();
-        PushRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse);
+        PushRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse2);
         rv = AsyncProcessRedirection(httpStatus);
         if (NS_FAILED(rv)) {
-            PopRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse);
+            PopRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse2);
             LOG(("AsyncProcessRedirection failed [rv=%x]\n", rv));
             // don't cache failed redirect responses.
             if (mCacheEntry)
@@ -1570,7 +1655,7 @@ nsHttpChannel::ProcessResponse()
                 mStatus = rv;
                 DoNotifyListener();
             } else {
-                rv = ContinueProcessResponse(rv);
+                rv = ContinueProcessResponse2(rv);
             }
         }
         break;
@@ -1645,7 +1730,7 @@ nsHttpChannel::ProcessResponse()
 }
 
 nsresult
-nsHttpChannel::ContinueProcessResponse(nsresult rv)
+nsHttpChannel::ContinueProcessResponse2(nsresult rv)
 {
     bool doNotRender = DoNotRender3xxBody(rv);
 
@@ -1661,7 +1746,7 @@ nsHttpChannel::ContinueProcessResponse(nsresult rv)
             // redirecting to another protocol (perhaps javascript:)
             // In that case we want to throw an error instead of displaying the
             // non-redirected response body.
-            LOG(("ContinueProcessResponse detected rejected Non-HTTP Redirection"));
+            LOG(("ContinueProcessResponse2 detected rejected Non-HTTP Redirection"));
             doNotRender = true;
             rv = NS_ERROR_CORRUPTED_CONTENT;
         }
@@ -1687,7 +1772,7 @@ nsHttpChannel::ContinueProcessResponse(nsresult rv)
         return NS_OK;
     }
 
-    LOG(("ContinueProcessResponse got failure result [rv=%x]\n", rv));
+    LOG(("ContinueProcessResponse2 got failure result [rv=%x]\n", rv));
     if (mTransaction->ProxyConnectFailed()) {
         return ProcessFailedProxyConnect(mRedirectType);
     }
@@ -1957,8 +2042,13 @@ nsHttpChannel::StartRedirectChannelToURI(nsIURI *upgradedURI, uint32_t flags)
 nsresult
 nsHttpChannel::ContinueAsyncRedirectChannelToURI(nsresult rv)
 {
-    if (NS_SUCCEEDED(rv))
+    // Since we handle mAPIRedirectToURI also after on-examine-response handler
+    // rather drop it here to avoid any redirect loops, even just hypothetical.
+    mAPIRedirectToURI = nullptr;
+
+    if (NS_SUCCEEDED(rv)) {
         rv = OpenRedirectChannel(rv);
+    }
 
     if (NS_FAILED(rv)) {
         // Fill the failure status here, the update to https had been vetoed
@@ -1967,8 +2057,9 @@ nsHttpChannel::ContinueAsyncRedirectChannelToURI(nsresult rv)
         mStatus = rv;
     }
 
-    if (mLoadGroup)
+    if (mLoadGroup) {
         mLoadGroup->RemoveRequest(this, nullptr, mStatus);
+    }
 
     if (NS_FAILED(rv)) {
         // We have to manually notify the listener because there is not any pump
@@ -1985,7 +2076,8 @@ nsHttpChannel::OpenRedirectChannel(nsresult rv)
 {
     AutoRedirectVetoNotifier notifier(this);
 
-    // Make sure to do this _after_ calling OnChannelRedirect
+    // Make sure to do this after we received redirect veto answer,
+    // i.e. after all sinks had been notified
     mRedirectChannel->SetOriginalURI(mOriginalURI);
 
     // And now, notify observers the deprecated way
@@ -2065,7 +2157,8 @@ nsHttpChannel::ContinueDoReplaceWithProxy(nsresult rv)
 
     NS_PRECONDITION(mRedirectChannel, "No redirect channel?");
 
-    // Make sure to do this _after_ calling OnChannelRedirect
+    // Make sure to do this after we received redirect veto answer,
+    // i.e. after all sinks had been notified
     mRedirectChannel->SetOriginalURI(mOriginalURI);
 
     // open new channel
@@ -2326,12 +2419,13 @@ nsHttpChannel::IsResumable(int64_t partialLen, int64_t contentLength,
                            bool ignoreMissingPartialLen) const
 {
     bool hasContentEncoding =
-        mCachedResponseHead->PeekHeader(nsHttp::Content_Encoding)
-        != nullptr;
+        (mCachedResponseHead->PeekHeader(nsHttp::Content_Encoding) != nullptr);
+    const char *etag = mCachedResponseHead->PeekHeader(nsHttp::ETag);
+    bool hasWeakEtag = etag && !strncmp(etag, "W/", 2);
 
     return (partialLen < contentLength) &&
            (partialLen > 0 || ignoreMissingPartialLen) &&
-           !hasContentEncoding &&
+           !hasContentEncoding && !hasWeakEtag &&
            mCachedResponseHead->IsResumable() &&
            !mCustomConditionalRequest &&
            !mCachedResponseHead->NoStore();
@@ -2732,7 +2826,8 @@ nsHttpChannel::ContinueProcessFallback(nsresult rv)
 
     NS_PRECONDITION(mRedirectChannel, "No redirect channel?");
 
-    // Make sure to do this _after_ calling OnChannelRedirect
+    // Make sure to do this after we received redirect veto answer,
+    // i.e. after all sinks had been notified
     mRedirectChannel->SetOriginalURI(mOriginalURI);
 
     if (mLoadInfo && mLoadInfo->GetEnforceSecurity()) {
@@ -2939,6 +3034,7 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
         intercepted->NotifyController();
     } else {
         if (mInterceptCache == INTERCEPTED) {
+            cacheEntryOpenFlags |= nsICacheStorage::OPEN_INTERCEPTED;
             DebugOnly<bool> exists;
             MOZ_ASSERT(NS_SUCCEEDED(cacheStorage->Exists(openURI, extension, &exists)) && exists,
                        "The entry must exist in the cache after we create it here");
@@ -4673,7 +4769,8 @@ nsHttpChannel::ContinueProcessRedirection(nsresult rv)
 
     NS_PRECONDITION(mRedirectChannel, "No redirect channel?");
 
-    // Make sure to do this _after_ calling OnChannelRedirect
+    // Make sure to do this after we received redirect veto answer,
+    // i.e. after all sinks had been notified
     mRedirectChannel->SetOriginalURI(mOriginalURI);
 
     // And now, the deprecated way
@@ -4927,6 +5024,12 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     nsresult rv;
 
     MOZ_ASSERT(NS_IsMainThread());
+
+    if (!gHttpHandler->Active()) {
+        LOG(("  after HTTP shutdown..."));
+        return NS_ERROR_NOT_AVAILABLE;
+    }
+
     if (gHttpHandler->PackagedAppsEnabled()) {
         nsAutoCString path;
         nsCOMPtr<nsIURL> url(do_QueryInterface(mURI));
@@ -5124,6 +5227,11 @@ nsHttpChannel::BeginConnect()
 
     // notify "http-on-modify-request" observers
     CallOnModifyRequestObservers();
+
+    // If mLoadGroup is null, e10s is enabled and this will be handled by HttpChannelChild.
+    if (mLoadGroup) {
+      HttpBaseChannel::SetLoadGroupUserAgentOverride();
+    }
 
     // Check to see if we should redirect this channel elsewhere by
     // nsIHttpChannel.redirectTo API request
@@ -5650,6 +5758,8 @@ nsHttpChannel::OnStartSignedPackageRequest(const nsACString& aPackageId)
 NS_IMETHODIMP
 nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
 {
+    nsresult rv;
+
     PROFILER_LABEL("nsHttpChannel", "OnStartRequest",
         js::ProfileEntry::Category::NETWORK);
 
@@ -5704,35 +5814,70 @@ nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
         return NS_OK;
     }
 
+    // before we start any content load, check for redirectTo being called
+    // this code is executed mainly before we start load from the cache
+    if (mAPIRedirectToURI && !mCanceled) {
+        nsAutoCString redirectToSpec;
+        mAPIRedirectToURI->GetAsciiSpec(redirectToSpec);
+        LOG(("  redirectTo called with uri=%s", redirectToSpec.BeginReading()));
+
+        MOZ_ASSERT(!mOnStartRequestCalled);
+
+        nsCOMPtr<nsIURI> redirectTo;
+        mAPIRedirectToURI.swap(redirectTo);
+
+        PushRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest1);
+        rv = StartRedirectChannelToURI(redirectTo, nsIChannelEventSink::REDIRECT_TEMPORARY);
+        if (NS_SUCCEEDED(rv)) {
+            return NS_OK;
+        }
+        PopRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest1);
+    }
+
+    // Hack: ContinueOnStartRequest1 uses NS_OK to detect successful redirects,
+    // so we distinguish this codepath (a non-redirect that's processing
+    // normally) by passing in a bogus error code.
+    return ContinueOnStartRequest1(NS_BINDING_FAILED);
+}
+
+nsresult
+nsHttpChannel::ContinueOnStartRequest1(nsresult result)
+{
+    if (NS_SUCCEEDED(result)) {
+        // Redirect has passed through, we don't want to go on with this
+        // channel.  It will now be canceled by the redirect handling code
+        // that called this function.
+        return NS_OK;
+    }
+
     // on proxy errors, try to failover
     if (mConnectionInfo->ProxyInfo() &&
        (mStatus == NS_ERROR_PROXY_CONNECTION_REFUSED ||
         mStatus == NS_ERROR_UNKNOWN_PROXY_HOST ||
         mStatus == NS_ERROR_NET_TIMEOUT)) {
 
-        PushRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest1);
+        PushRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest2);
         if (NS_SUCCEEDED(ProxyFailover()))
             return NS_OK;
-        PopRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest1);
+        PopRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest2);
     }
 
-    return ContinueOnStartRequest2(NS_OK);
-}
-
-nsresult
-nsHttpChannel::ContinueOnStartRequest1(nsresult result)
-{
-    // Success indicates we passed ProxyFailover, in that case we must not continue
-    // with this code chain.
-    if (NS_SUCCEEDED(result))
-        return NS_OK;
-
-    return ContinueOnStartRequest2(result);
+    // Hack: ContinueOnStartRequest2 uses NS_OK to detect successful redirects,
+    // so we distinguish this codepath (a non-redirect that's processing
+    // normally) by passing in a bogus error code.
+    return ContinueOnStartRequest2(NS_BINDING_FAILED);
 }
 
 nsresult
 nsHttpChannel::ContinueOnStartRequest2(nsresult result)
 {
+    if (NS_SUCCEEDED(result)) {
+        // Redirect has passed through, we don't want to go on with this
+        // channel.  It will now be canceled by the redirect handling code
+        // that called this function.
+        return NS_OK;
+    }
+
     // on other request errors, try to fall back
     if (NS_FAILED(mStatus)) {
         PushRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest3);
@@ -5763,6 +5908,13 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
 
     LOG(("nsHttpChannel::OnStopRequest [this=%p request=%p status=%x]\n",
         this, request, status));
+
+    MOZ_ASSERT(NS_IsMainThread(),
+               "OnStopRequest should only be called from the main thread");
+
+    if (NS_FAILED(status)) {
+        ProcessSecurityReport(status);
+    }
 
     if (mTimingEnabled && request == mCachePump) {
         mCacheReadEnd = TimeStamp::Now();
@@ -7066,14 +7218,11 @@ nsHttpChannel::MaybeWarnAboutAppCache()
     Telemetry::Accumulate(Telemetry::HTTP_OFFLINE_CACHE_DOCUMENT_LOAD,
                           true);
 
-    // Then, issue a deprecation warning if service worker interception is
-    // enabled.
-    if (nsContentUtils::ServiceWorkerInterceptionEnabled()) {
-        nsCOMPtr<nsIDeprecationWarner> warner;
-        GetCallback(warner);
-        if (warner) {
-            warner->IssueWarning(nsIDocument::eAppCache, false);
-        }
+    // Then, issue a deprecation warning.
+    nsCOMPtr<nsIDeprecationWarner> warner;
+    GetCallback(warner);
+    if (warner) {
+        warner->IssueWarning(nsIDocument::eAppCache, false);
     }
 }
 

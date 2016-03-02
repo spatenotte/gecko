@@ -20,6 +20,7 @@
 #include "nsStyleTransformMatrix.h"
 #include "nsTransitionManager.h"
 #include "nsDisplayList.h"
+#include "nsDOMCSSDeclaration.h"
 
 namespace mozilla {
 
@@ -262,13 +263,15 @@ IncrementScaleRestyleCountIfNeeded(nsIFrame* aFrame, LayerActivity* aActivity)
   // Compute the new scale due to the CSS transform property.
   nsPresContext* presContext = aFrame->PresContext();
   RuleNodeCacheConditions dummy;
+  bool dummyBool;
   nsStyleTransformMatrix::TransformReferenceBox refBox(aFrame);
   Matrix4x4 transform =
     nsStyleTransformMatrix::ReadTransforms(display->mSpecifiedTransform->mHead,
                                            aFrame->StyleContext(),
                                            presContext,
                                            dummy, refBox,
-                                           presContext->AppUnitsPerCSSPixel());
+                                           presContext->AppUnitsPerCSSPixel(),
+                                           &dummyBool);
   Matrix transform2D;
   if (!transform.Is2D(&transform2D)) {
     // We don't attempt to handle 3D transforms; just assume the scale changed.
@@ -309,12 +312,21 @@ ActiveLayerTracker::NotifyOffsetRestyle(nsIFrame* aFrame)
 }
 
 /* static */ void
-ActiveLayerTracker::NotifyAnimated(nsIFrame* aFrame, nsCSSProperty aProperty)
+ActiveLayerTracker::NotifyAnimated(nsIFrame* aFrame,
+                                   nsCSSProperty aProperty,
+                                   const nsAString& aNewValue,
+                                   nsDOMCSSDeclaration* aDOMCSSDecl)
 {
   LayerActivity* layerActivity = GetLayerActivityForUpdate(aFrame);
   uint8_t& mutationCount = layerActivity->RestyleCountForProperty(aProperty);
-  // We know this is animated, so just hack the mutation count.
-  mutationCount = 0xFF;
+  if (mutationCount != 0xFF) {
+    nsAutoString oldValue;
+    aDOMCSSDecl->GetPropertyValue(aProperty, oldValue);
+    if (aNewValue != oldValue) {
+      // We know this is animated, so just hack the mutation count.
+      mutationCount = 0xFF;
+    }
+  }
 }
 
 /* static */ void
@@ -352,10 +364,12 @@ IsPresContextInScriptAnimationCallback(nsPresContext* aPresContext)
 
 /* static */ void
 ActiveLayerTracker::NotifyInlineStyleRuleModified(nsIFrame* aFrame,
-                                                  nsCSSProperty aProperty)
+                                                  nsCSSProperty aProperty,
+                                                  const nsAString& aNewValue,
+                                                  nsDOMCSSDeclaration* aDOMCSSDecl)
 {
   if (IsPresContextInScriptAnimationCallback(aFrame->PresContext())) {
-    NotifyAnimated(aFrame, aProperty);
+    NotifyAnimated(aFrame, aProperty, aNewValue, aDOMCSSDecl);
   }
   if (gLayerActivityTracker &&
       gLayerActivityTracker->mCurrentScrollHandlerFrame.IsAlive()) {

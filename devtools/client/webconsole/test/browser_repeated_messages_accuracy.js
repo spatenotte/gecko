@@ -1,8 +1,7 @@
 /* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test that makes sure messages are not considered repeated when coming from
 // different lines of code, or from different severities, etc.
@@ -30,6 +29,7 @@ add_task(function* () {
   yield testCSSRepeats(hud);
   yield testCSSRepeatsAfterReload(hud);
   yield testConsoleRepeats(hud);
+  yield testConsoleFalsyValues(hud);
 
   Services.prefs.clearUserPref(PREF);
 });
@@ -121,6 +121,55 @@ function testConsoleRepeats(hud) {
         text: "undefined",
         category: CATEGORY_WEBDEV,
         repeats: 1,
+      },
+    ],
+  });
+}
+
+function testConsoleFalsyValues(hud) {
+  hud.jsterm.clearOutput(true);
+  hud.jsterm.execute("testConsoleFalsyValues()");
+
+  info("wait for repeats of falsy values with the console API");
+
+  return waitForMessages({
+    webconsole: hud,
+    messages: [
+      {
+        name: "console.log 'NaN' repeated once",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        repeats: 1,
+      },
+      {
+        name: "console.log 'undefined' repeated once",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        repeats: 1,
+      },
+      {
+        name: "console.log 'null' repeated once",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        repeats: 1,
+      },
+      {
+        name: "console.log 'NaN' repeated twice",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        repeats: 2,
+      },
+      {
+        name: "console.log 'undefined' repeated twice",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        repeats: 2,
+      },
+      {
+        name: "console.log 'null' repeated twice",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        repeats: 2,
       },
     ],
   });

@@ -110,9 +110,6 @@ enum BailoutKind
     // maps unshared memory.
     Bailout_NonSharedTypedArrayInput,
 
-    // For the initial snapshot when entering a function.
-    Bailout_InitialState,
-
     // We hit a |debugger;| statement.
     Bailout_Debugger,
 
@@ -222,8 +219,6 @@ BailoutKindString(BailoutKind kind)
         return "Bailout_NonSimdFloat32x4Input";
       case Bailout_NonSharedTypedArrayInput:
         return "Bailout_NonSharedTypedArrayInput";
-      case Bailout_InitialState:
-        return "Bailout_InitialState";
       case Bailout_Debugger:
         return "Bailout_Debugger";
       case Bailout_UninitializedThis:
@@ -399,6 +394,7 @@ enum MIRType
     MIRType_Null,
     MIRType_Boolean,
     MIRType_Int32,
+    MIRType_Int64,
     MIRType_Double,
     MIRType_Float32,
     MIRType_String,
@@ -420,6 +416,7 @@ enum MIRType
     MIRType_ObjectGroup,               // An ObjectGroup pointer.
     MIRType_Last = MIRType_ObjectGroup,
     MIRType_Float32x4 = MIRType_Float32 | (2 << VECTOR_SCALE_SHIFT),
+    // Representing both SIMD.Int32x4 and SIMD.Uint32x4.
     MIRType_Int32x4   = MIRType_Int32   | (2 << VECTOR_SCALE_SHIFT),
     MIRType_Bool32x4  = MIRType_Boolean | (2 << VECTOR_SCALE_SHIFT),
     MIRType_Doublex2  = MIRType_Double  | (1 << VECTOR_SCALE_SHIFT)
@@ -503,6 +500,8 @@ StringFromMIRType(MIRType type)
       return "Bool";
     case MIRType_Int32:
       return "Int32";
+    case MIRType_Int64:
+      return "Int64";
     case MIRType_Double:
       return "Double";
     case MIRType_Float32:
@@ -556,7 +555,18 @@ StringFromMIRType(MIRType type)
 static inline bool
 IsNumberType(MIRType type)
 {
-    return type == MIRType_Int32 || type == MIRType_Double || type == MIRType_Float32;
+    return type == MIRType_Int32 ||
+           type == MIRType_Double ||
+           type == MIRType_Float32 ||
+           type == MIRType_Int64;
+}
+
+static inline bool
+IsTypeRepresentableAsDouble(MIRType type)
+{
+    return type == MIRType_Int32 ||
+           type == MIRType_Double ||
+           type == MIRType_Float32;
 }
 
 static inline bool

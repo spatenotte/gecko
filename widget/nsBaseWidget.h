@@ -223,8 +223,9 @@ public:
                           { return NS_ERROR_NOT_IMPLEMENTED; }
   NS_IMETHOD              SetPluginFocused(bool& aFocused) override
                           { return NS_ERROR_NOT_IMPLEMENTED; }
-  virtual void            SetCandidateWindowForPlugin(int32_t aX,
-                                                      int32_t aY) override
+  virtual void            SetCandidateWindowForPlugin(
+                            const mozilla::widget::CandidateWindowPosition&
+                              aPosition) override
                           { }
   virtual void            DefaultProcOfPluginEvent(
                             const mozilla::WidgetPluginEvent& aEvent) override
@@ -485,6 +486,9 @@ protected:
   virtual void RegisterTouchWindow() {}
 
   nsIDocument* GetDocument() const;
+
+  // Notify the compositor that a device reset has occurred.
+  void OnRenderingDeviceReset();
 
 protected:
   /**

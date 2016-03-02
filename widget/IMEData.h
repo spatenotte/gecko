@@ -393,6 +393,18 @@ struct InputContextAction final
             (mCause == CAUSE_MOUSE || mCause == CAUSE_TOUCH));
   }
 
+  static bool IsUserAction(Cause aCause)
+  {
+    switch (aCause) {
+      case CAUSE_KEY:
+      case CAUSE_MOUSE:
+      case CAUSE_TOUCH:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   InputContextAction()
     : mCause(CAUSE_UNKNOWN)
     , mFocusChange(FOCUS_NOT_CHANGED)
@@ -857,6 +869,18 @@ struct IMENotification final
     MOZ_RELEASE_ASSERT(mMessage == NOTIFY_IME_OF_TEXT_CHANGE);
     mTextChangeData = aTextChangeData;
   }
+};
+
+struct CandidateWindowPosition
+{
+  // Upper left corner of the candidate window if mExcludeRect is false.
+  // Otherwise, the position currently interested.  E.g., caret position.
+  LayoutDeviceIntPoint mPoint;
+  // Rect which shouldn't be overlapped with the candidate window.
+  // This is valid only when mExcludeRect is true.
+  LayoutDeviceIntRect mRect;
+  // See explanation of mPoint and mRect.
+  bool mExcludeRect;
 };
 
 } // namespace widget

@@ -1652,7 +1652,6 @@ const static SECOidData oids[SEC_OID_TOTAL] = {
     OD( x520Name, SEC_OID_AVA_NAME,
     	"X520 Name",    CKM_INVALID_MECHANISM, INVALID_CERT_EXTENSION ),
 
-
     OD( aes128_GCM, SEC_OID_AES_128_GCM,
 	"AES-128-GCM", CKM_AES_GCM, INVALID_CERT_EXTENSION ),
     OD( aes192_GCM, SEC_OID_AES_192_GCM,
@@ -1710,6 +1709,8 @@ const static SECOidData oids[SEC_OID_TOTAL] = {
 	"TLS DH-ANON-EXPORT key exchange", CKM_INVALID_MECHANISM, INVALID_CERT_EXTENSION ),
     ODE( SEC_OID_APPLY_SSL_POLICY,
 	"Apply SSL policy (pseudo-OID)", CKM_INVALID_MECHANISM, INVALID_CERT_EXTENSION ),
+    ODE( SEC_OID_CHACHA20_POLY1305,
+	"ChaCha20-Poly1305", CKM_NSS_CHACHA20_POLY1305, INVALID_CERT_EXTENSION ),
 
 };
 
@@ -1990,7 +1991,7 @@ SECOID_Init(void)
 	return SECSuccess; /* already initialized */
     }
 
-    if (!PR_GetEnv("NSS_ALLOW_WEAK_SIGNATURE_ALG")) {
+    if (!PR_GetEnvSecure("NSS_ALLOW_WEAK_SIGNATURE_ALG")) {
 	/* initialize any policy flags that are disabled by default */
 	xOids[SEC_OID_MD2                           ].notPolicyFlags = ~0;
 	xOids[SEC_OID_MD4                           ].notPolicyFlags = ~0;
@@ -2005,7 +2006,7 @@ SECOID_Init(void)
     /* turn off NSS_USE_POLICY_IN_SSL by default */
     xOids[SEC_OID_APPLY_SSL_POLICY].notPolicyFlags = NSS_USE_POLICY_IN_SSL;
 
-    envVal = PR_GetEnv("NSS_HASH_ALG_SUPPORT");
+    envVal = PR_GetEnvSecure("NSS_HASH_ALG_SUPPORT");
     if (envVal)
     	handleHashAlgSupport(envVal);
 

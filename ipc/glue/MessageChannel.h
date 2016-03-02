@@ -120,13 +120,6 @@ class MessageChannel : HasResultCodes
     void SetChannelFlags(ChannelFlags aFlags) { mFlags = aFlags; }
     ChannelFlags GetChannelFlags() { return mFlags; }
 
-    void BlockScripts();
-
-    bool ShouldBlockScripts() const
-    {
-        return mBlockScripts;
-    }
-
     // Asynchronously send a message to the other side of the channel
     bool Send(Message* aMsg);
 
@@ -631,8 +624,9 @@ class MessageChannel : HasResultCodes
            if (!aMessage.is_sync())
                return;
 
-           MOZ_ASSERT_IF(mChan->mSide == ParentSide && mOldTransaction != aMessage.transaction_id(),
-                         !mOldTransaction || aMessage.priority() > mChan->AwaitingSyncReplyPriority());
+           MOZ_DIAGNOSTIC_ASSERT(
+               !(mChan->mSide == ParentSide && mOldTransaction != aMessage.transaction_id()) ||
+               !mOldTransaction || aMessage.priority() > mChan->AwaitingSyncReplyPriority());
            mChan->mCurrentTransaction = aMessage.transaction_id();
        }
        ~AutoEnterTransaction() {
@@ -776,9 +770,6 @@ class MessageChannel : HasResultCodes
     // a channel error occurs?
     bool mAbortOnError;
 
-    // Should we prevent scripts from running while dispatching urgent messages?
-    bool mBlockScripts;
-
     // See SetChannelFlags
     ChannelFlags mFlags;
 
@@ -786,7 +777,7 @@ class MessageChannel : HasResultCodes
     // safely.  This is necessary to be able to cancel notification if we are
     // closed at the same time.
     RefPtr<RefCountedTask> mOnChannelConnectedTask;
-    DebugOnly<bool> mPeerPidSet;
+    bool mPeerPidSet;
     int32_t mPeerPid;
 };
 

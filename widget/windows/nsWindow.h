@@ -261,7 +261,7 @@ public:
   virtual bool            AutoErase(HDC dc);
   bool ComputeShouldAccelerate() override;
 
-  static void             ClearCompositor(nsWindow* aWindow);
+  void                    ForcePresent();
 
   /**
    * AssociateDefaultIMC() associates or disassociates the default IMC for
@@ -305,8 +305,9 @@ public:
 
   const IMEContext& DefaultIMC() const { return mDefaultIMC; }
 
-  virtual void SetCandidateWindowForPlugin(int32_t aX,
-                                           int32_t aY) override;
+  virtual void SetCandidateWindowForPlugin(
+                 const mozilla::widget::CandidateWindowPosition&
+                   aPosition) override;
   virtual void DefaultProcOfPluginEvent(
                  const mozilla::WidgetPluginEvent& aEvent) override;
 

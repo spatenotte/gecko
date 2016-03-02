@@ -122,6 +122,8 @@ public:
   virtual nsresult RegisterIdleObserver(nsIIdleObserver* aIdleObserver) = 0;
   virtual nsresult UnregisterIdleObserver(nsIIdleObserver* aIdleObserver) = 0;
 
+  virtual bool IsTopLevelWindowActive() = 0;
+
   // Outer windows only.
   virtual void SetActive(bool aActive)
   {
@@ -149,32 +151,6 @@ public:
       UpdateParentTarget();
     }
     return mParentTarget;
-  }
-
-  bool HasMutationListeners(uint32_t aMutationEventType) const
-  {
-    MOZ_ASSERT(IsInnerWindow());
-
-    if (!mOuterWindow) {
-      NS_ERROR("HasMutationListeners() called on orphan inner window!");
-
-      return false;
-    }
-
-    return (mMutationBits & aMutationEventType) != 0;
-  }
-
-  void SetMutationListeners(uint32_t aType)
-  {
-    MOZ_ASSERT(IsInnerWindow());
-
-    if (!mOuterWindow) {
-      NS_ERROR("HasMutationListeners() called on orphan inner window!");
-
-      return;
-    }
-
-    mMutationBits |= aType;
   }
 
   virtual void MaybeUpdateTouchState() {}
@@ -241,14 +217,6 @@ public:
   virtual nsresult FireDelayedDOMEvents() = 0;
 
   virtual bool IsFrozen() const = 0;
-
-  // Add a timeout to this window.
-  virtual nsresult SetTimeoutOrInterval(nsIScriptTimeoutHandler *aHandler,
-                                        int32_t interval,
-                                        bool aIsInterval, int32_t *aReturn) = 0;
-
-  // Clear a timeout from this window.
-  virtual nsresult ClearTimeoutOrInterval(int32_t aTimerID) = 0;
 
   nsPIDOMWindowOuter* GetOuterWindow()
   {
@@ -382,43 +350,6 @@ public:
    * Outer windows only.
    */
   virtual void FinishFullscreenChange(bool aIsFullscreen) = 0;
-
-  /**
-   * Call this to check whether some node (this window, its document,
-   * or content in that document) has a mouseenter/leave event listener.
-   */
-  bool HasMouseEnterLeaveEventListeners()
-  {
-    return mMayHaveMouseEnterLeaveEventListener;
-  }
-
-  /**
-   * Call this to indicate that some node (this window, its document,
-   * or content in that document) has a mouseenter/leave event listener.
-   */
-  void SetHasMouseEnterLeaveEventListeners()
-  {
-    mMayHaveMouseEnterLeaveEventListener = true;
-  }
-
-  /**
-   * Call this to check whether some node (this window, its document,
-   * or content in that document) has a Pointerenter/leave event listener.
-   */
-  bool HasPointerEnterLeaveEventListeners()
-  {
-    return mMayHavePointerEnterLeaveEventListener;
-  }
-
-  /**
-   * Call this to indicate that some node (this window, its document,
-   * or content in that document) has a Pointerenter/leave event listener.
-   */
-  void SetHasPointerEnterLeaveEventListeners()
-  {
-    mMayHavePointerEnterLeaveEventListener = true;
-  }
-
 
   virtual JSObject* GetCachedXBLPrototypeHandler(nsXBLPrototypeHandler* aKey) = 0;
   virtual void CacheXBLPrototypeHandler(nsXBLPrototypeHandler* aKey,
@@ -577,14 +508,6 @@ public:
    * Outer windows only.
    */
   virtual bool DispatchCustomEvent(const nsAString& aEventName) = 0;
-
-  /**
-   * Call when the document principal may have changed and the compartment
-   * principal needs to be updated.
-   *
-   * Inner windows only.
-   */
-  virtual void RefreshCompartmentPrincipal() = 0;
 
   /**
    * Like nsIDOMWindow::Open, except that we don't navigate to the given URL.
@@ -797,6 +720,65 @@ public:
   void InvalidateServiceWorkerRegistration(const nsAString& aScope);
 
   nsPerformance* GetPerformance();
+
+  bool HasMutationListeners(uint32_t aMutationEventType) const
+  {
+    if (!mOuterWindow) {
+      NS_ERROR("HasMutationListeners() called on orphan inner window!");
+
+      return false;
+    }
+
+    return (mMutationBits & aMutationEventType) != 0;
+  }
+
+  void SetMutationListeners(uint32_t aType)
+  {
+    if (!mOuterWindow) {
+      NS_ERROR("HasMutationListeners() called on orphan inner window!");
+
+      return;
+    }
+
+    mMutationBits |= aType;
+  }
+
+  /**
+   * Call this to check whether some node (this window, its document,
+   * or content in that document) has a mouseenter/leave event listener.
+   */
+  bool HasMouseEnterLeaveEventListeners()
+  {
+    return mMayHaveMouseEnterLeaveEventListener;
+  }
+
+  /**
+   * Call this to indicate that some node (this window, its document,
+   * or content in that document) has a mouseenter/leave event listener.
+   */
+  void SetHasMouseEnterLeaveEventListeners()
+  {
+    mMayHaveMouseEnterLeaveEventListener = true;
+  }
+
+  /**
+   * Call this to check whether some node (this window, its document,
+   * or content in that document) has a Pointerenter/leave event listener.
+   */
+  bool HasPointerEnterLeaveEventListeners()
+  {
+    return mMayHavePointerEnterLeaveEventListener;
+  }
+
+  /**
+   * Call this to indicate that some node (this window, its document,
+   * or content in that document) has a Pointerenter/leave event listener.
+   */
+  void SetHasPointerEnterLeaveEventListeners()
+  {
+    mMayHavePointerEnterLeaveEventListener = true;
+  }
+
 
 protected:
   void CreatePerformanceObjectIfNeeded();

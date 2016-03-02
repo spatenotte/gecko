@@ -1,11 +1,13 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
+/* import-globals-from ./shared-head.js */
 // Currently this file expects "promise" to be imported into scope.
-/* globals promise */
 
 // Common utility functions for working with Redux stores.  The file is meant
 // to be safe to load in both mochitest and xpcshell environments.

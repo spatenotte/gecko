@@ -95,7 +95,7 @@ CompositorChild::Destroy()
     mLayerManager = nullptr;
   }
 
-  nsAutoTArray<PLayerTransactionChild*, 16> transactions;
+  AutoTArray<PLayerTransactionChild*, 16> transactions;
   ManagedPLayerTransactionChild(transactions);
   for (int i = transactions.Length() - 1; i >= 0; --i) {
     RefPtr<LayerTransactionChild> layers =
@@ -197,10 +197,30 @@ CompositorChild::DeallocPLayerTransactionChild(PLayerTransactionChild* actor)
 }
 
 bool
-CompositorChild::RecvInvalidateAll()
+CompositorChild::RecvInvalidateLayers(const uint64_t& aLayersId)
 {
   if (mLayerManager) {
+    MOZ_ASSERT(aLayersId == 0);
     FrameLayerBuilder::InvalidateAllLayers(mLayerManager);
+  } else if (aLayersId != 0) {
+    if (dom::TabChild* child = dom::TabChild::GetFrom(aLayersId)) {
+      child->InvalidateLayers();
+    }
+  }
+  return true;
+}
+
+bool
+CompositorChild::RecvCompositorUpdated(const uint64_t& aLayersId,
+                                      const TextureFactoryIdentifier& aNewIdentifier)
+{
+  if (mLayerManager) {
+    // This case is handled directly by nsBaseWidget.
+    MOZ_ASSERT(aLayersId == 0);
+  } else if (aLayersId != 0) {
+    if (dom::TabChild* child = dom::TabChild::GetFrom(aLayersId)) {
+      child->CompositorUpdated(aNewIdentifier);
+    }
   }
   return true;
 }
@@ -450,7 +470,8 @@ CompositorChild::SharedFrameMetricsData::SharedFrameMetricsData(
   , mLayersId(aLayersId)
   , mAPZCId(aAPZCId)
 {
-  mBuffer = new ipc::SharedMemoryBasic(metrics);
+  mBuffer = new ipc::SharedMemoryBasic;
+  mBuffer->SetHandle(metrics);
   mBuffer->Map(sizeof(FrameMetrics));
   mMutex = new CrossProcessMutex(handle);
   MOZ_COUNT_CTOR(SharedFrameMetricsData);

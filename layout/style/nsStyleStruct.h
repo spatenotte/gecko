@@ -582,7 +582,7 @@ struct nsStyleImageLayers {
                                   // This property is used for mask layer only.
                                   // For a background layer, it should always
                                   // be the initial value, which is
-                                  // NS_STYLE_MASK_MODE_AUTO.
+                                  // NS_STYLE_MASK_MODE_MATCH_SOURCE.
     Repeat        mRepeat;        // [reset] See nsStyleConsts.h
 
     // Initializes only mImage
@@ -641,7 +641,7 @@ struct nsStyleImageLayers {
   // layer.  In layers below the bottom layer, properties will be
   // uninitialized unless their count, above, indicates that they are
   // present.
-  nsAutoTArray<Layer, 1> mLayers;
+  AutoTArray<Layer, 1> mLayers;
 
   const Layer& BottomLayer() const { return mLayers[mImageCount - 1]; }
 
@@ -2392,7 +2392,7 @@ struct nsStyleDisplay
                                 // match mWillChange. Also tracks if any of the
                                 // properties in the will-change list require
                                 // a stacking context.
-  nsAutoTArray<nsString, 1> mWillChange;
+  AutoTArray<nsString, 1> mWillChange;
 
   uint8_t mTouchAction;         // [reset] see nsStyleConsts.h
   uint8_t mScrollBehavior;      // [reset] see nsStyleConsts.h NS_STYLE_SCROLL_BEHAVIOR_*
@@ -2415,7 +2415,7 @@ struct nsStyleDisplay
   nsStyleCoord mChildPerspective; // [reset] none, coord
   nsStyleCoord mPerspectiveOrigin[2]; // [reset] percent, coord, calc
 
-  nsAutoTArray<mozilla::StyleTransition, 1> mTransitions; // [reset]
+  AutoTArray<mozilla::StyleTransition, 1> mTransitions; // [reset]
   // The number of elements in mTransitions that are not from repeating
   // a list due to another property being longer.
   uint32_t mTransitionTimingFunctionCount,
@@ -2423,7 +2423,7 @@ struct nsStyleDisplay
            mTransitionDelayCount,
            mTransitionPropertyCount;
 
-  nsAutoTArray<mozilla::StyleAnimation, 1> mAnimations; // [reset]
+  AutoTArray<mozilla::StyleAnimation, 1> mAnimations; // [reset]
   // The number of elements in mAnimations that are not from repeating
   // a list due to another property being longer.
   uint32_t mAnimationTimingFunctionCount,
@@ -3269,6 +3269,7 @@ public:
   }
 
   Type GetShapeType() const { return mType; }
+  nsCSSKeyword GetShapeTypeName() const;
 
   int32_t GetFillRule() const { return mFillRule; }
   void SetFillRule(int32_t aFillRule)
@@ -3465,6 +3466,7 @@ struct nsStyleSVGReset
   static nsChangeHint MaxDifference() {
     return nsChangeHint_UpdateEffects |
            nsChangeHint_UpdateOverflow |
+           nsChangeHint_UpdateContainingBlock |
            nsChangeHint_NeutralChange |
            NS_STYLE_HINT_REFLOW;
   }
@@ -3478,6 +3480,10 @@ struct nsStyleSVGReset
 
   bool HasFilters() const {
     return !mFilters.IsEmpty();
+  }
+
+  bool HasClipPath() const {
+    return mClipPath.GetType() != NS_STYLE_CLIP_PATH_NONE;
   }
 
   bool HasNonScalingStroke() const {

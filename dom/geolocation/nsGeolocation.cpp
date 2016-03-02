@@ -528,6 +528,12 @@ nsGeolocationRequest::Allow(JS::HandleValue aChoices)
     // getCurrentPosition requests serviced by the cache
     // will now be owned by the RequestSendLocationEvent
     Update(lastPosition.position);
+
+    // After Update is called, getCurrentPosition finishes it's job.
+    if (!mIsWatchPositionRequest) {
+      return NS_OK;
+    }
+
   } else {
     // if it is not a watch request and timeout is 0,
     // invoke the errorCallback (if present) with TIMEOUT code
@@ -536,14 +542,15 @@ nsGeolocationRequest::Allow(JS::HandleValue aChoices)
       return NS_OK;
     }
 
-    // Kick off the geo device, if it isn't already running
-    nsresult rv = gs->StartDevice(GetPrincipal());
+  }
 
-    if (NS_FAILED(rv)) {
-      // Location provider error
-      NotifyError(nsIDOMGeoPositionError::POSITION_UNAVAILABLE);
-      return NS_OK;
-    }
+  // Kick off the geo device, if it isn't already running
+  nsresult rv = gs->StartDevice(GetPrincipal());
+
+  if (NS_FAILED(rv)) {
+    // Location provider error
+    NotifyError(nsIDOMGeoPositionError::POSITION_UNAVAILABLE);
+    return NS_OK;
   }
 
   if (mLocator->ContainsRequest(this)) {
@@ -874,7 +881,7 @@ nsresult nsGeolocationService::Init()
     return NS_ERROR_FAILURE;
   }
 
-  obs->AddObserver(this, "quit-application", false);
+  obs->AddObserver(this, "xpcom-shutdown", false);
   obs->AddObserver(this, "mozsettings-changed", false);
 
 #ifdef MOZ_ENABLE_QT5GEOPOSITION
@@ -982,10 +989,10 @@ nsGeolocationService::Observe(nsISupports* aSubject,
                               const char* aTopic,
                               const char16_t* aData)
 {
-  if (!strcmp("quit-application", aTopic)) {
+  if (!strcmp("xpcom-shutdown", aTopic)) {
     nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
     if (obs) {
-      obs->RemoveObserver(this, "quit-application");
+      obs->RemoveObserver(this, "xpcom-shutdown");
       obs->RemoveObserver(this, "mozsettings-changed");
     }
 
@@ -1279,7 +1286,8 @@ Geolocation::Init(nsPIDOMWindowInner* aContentDom)
 
     mPrincipal = doc->NodePrincipal();
 
-    if (XRE_IsContentProcess()) {
+    if (Preferences::GetBool("dom.wakelock.enabled") &&
+        XRE_IsContentProcess()) {
       doc->AddSystemEventListener(NS_LITERAL_STRING("visibilitychange"),
                                   /* listener */ this,
                                   /* use capture */ true,
@@ -1382,7 +1390,8 @@ Geolocation::Shutdown()
   mPendingCallbacks.Clear();
   mWatchingCallbacks.Clear();
 
-  if (XRE_IsContentProcess()) {
+  if (Preferences::GetBool("dom.wakelock.enabled") &&
+      XRE_IsContentProcess()) {
     if (nsCOMPtr<nsPIDOMWindowInner> window = do_QueryReferent(mOwner)) {
       nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
       if (doc) {

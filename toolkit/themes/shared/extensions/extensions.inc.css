@@ -8,6 +8,7 @@
 .main-content {
   padding-top: 0;
   -moz-padding-end: 0;
+  padding-bottom: 0;
 }
 
 #nav-header {
@@ -136,7 +137,6 @@
 
 button.warning {
   list-style-image: url("chrome://mozapps/skin/extensions/alerticon-warning.svg");
-  list-stye-position: inside;
 }
 
 

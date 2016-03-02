@@ -20,6 +20,7 @@
 #define wasm_types_h
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/EnumeratedArray.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Move.h"
 
@@ -37,9 +38,12 @@ class PropertyName;
 
 namespace wasm {
 
+using mozilla::EnumeratedArray;
 using mozilla::Move;
 using mozilla::DebugOnly;
 using mozilla::MallocSizeOf;
+
+typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
 
 // The ValType enum represents the WebAssembly "value type", which are used to
 // specify the type of locals and parameters.
@@ -72,7 +76,7 @@ ToMIRType(ValType vt)
 {
     switch (vt) {
       case ValType::I32: return jit::MIRType_Int32;
-      case ValType::I64: MOZ_CRASH("NYI");
+      case ValType::I64: return jit::MIRType_Int64;
       case ValType::F32: return jit::MIRType_Float32;
       case ValType::F64: return jit::MIRType_Double;
       case ValType::I32x4: return jit::MIRType_Int32x4;
@@ -192,6 +196,29 @@ ToMIRType(ExprType et)
     return IsVoid(et) ? jit::MIRType_None : ToMIRType(ValType(et));
 }
 
+static inline const char*
+ToCString(ExprType type)
+{
+    switch (type) {
+      case ExprType::Void:  return "void";
+      case ExprType::I32:   return "i32";
+      case ExprType::I64:   return "i64";
+      case ExprType::F32:   return "f32";
+      case ExprType::F64:   return "f64";
+      case ExprType::I32x4: return "i32x4";
+      case ExprType::F32x4: return "f32x4";
+      case ExprType::B32x4: return "b32x4";
+      case ExprType::Limit:;
+    }
+    MOZ_CRASH("bad expression type");
+}
+
+static inline const char*
+ToCString(ValType type)
+{
+    return ToCString(ToExprType(type));
+}
+
 // The Sig class represents a WebAssembly function signature which takes a list
 // of value types and returns an expression type. The engine uses two in-memory
 // representations of the argument Vector's memory (when elements do not fit
@@ -241,6 +268,13 @@ class Sig
     }
 };
 
+struct SigHashPolicy
+{
+    typedef const Sig& Lookup;
+    static HashNumber hash(Lookup sig) { return sig.hash(); }
+    static bool match(const Sig* lhs, Lookup rhs) { return *lhs == rhs; }
+};
+
 // A "declared" signature is a Sig object that is created and owned by the
 // ModuleGenerator. These signature objects are read-only and have the same
 // lifetime as the ModuleGenerator. This type is useful since some uses of Sig
@@ -263,7 +297,7 @@ typedef Vector<const DeclaredSig*, 0, SystemAllocPolicy> DeclaredSigPtrVector;
 
 struct Offsets
 {
-    MOZ_IMPLICIT Offsets(uint32_t begin = 0, uint32_t end = 0)
+    explicit Offsets(uint32_t begin = 0, uint32_t end = 0)
       : begin(begin), end(end)
     {}
 
@@ -542,6 +576,7 @@ enum class SymbolicAddress
     ReportOverRecursed,
     OnOutOfBounds,
     OnImpreciseConversion,
+    BadIndirectCall,
     HandleExecutionInterrupt,
     InvokeImport_Void,
     InvokeImport_I32,
@@ -553,6 +588,23 @@ enum class SymbolicAddress
 
 void*
 AddressOf(SymbolicAddress imm, ExclusiveContext* cx);
+
+// A wasm::JumpTarget represents one of a special set of stubs that can be
+// jumped to from any function. Because wasm modules can be larger than the
+// range of a plain jump, these potentially out-of-range jumps must be recorded
+// and patched specially by the MacroAssembler and ModuleGenerator.
+
+enum class JumpTarget
+{
+    StackOverflow,
+    OutOfBounds,
+    ConversionError,
+    BadIndirectCall,
+    Throw,
+    Limit
+};
+
+typedef EnumeratedArray<JumpTarget, JumpTarget::Limit, Uint32Vector> JumpSiteArray;
 
 // The CompileArgs struct captures global parameters that affect all wasm code
 // generation. It also currently is the single source of truth for whether or
@@ -567,6 +619,14 @@ struct CompileArgs
     explicit CompileArgs(ExclusiveContext* cx);
     bool operator==(CompileArgs rhs) const;
     bool operator!=(CompileArgs rhs) const { return !(*this == rhs); }
+};
+
+// A Module can either be asm.js or wasm.
+
+enum ModuleKind
+{
+    Wasm,
+    AsmJS
 };
 
 // Constants:

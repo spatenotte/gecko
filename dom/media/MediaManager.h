@@ -30,6 +30,7 @@
 #include "mozilla/media/MediaChild.h"
 #include "mozilla/media/MediaParent.h"
 #include "mozilla/Logging.h"
+#include "mozilla/UniquePtr.h"
 #include "DOMMediaStream.h"
 
 #ifdef MOZ_WEBRTC
@@ -94,7 +95,8 @@ public:
   NS_IMETHOD GetType(nsAString& aType);
   Source* GetSource();
   nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
-                    const MediaEnginePrefs &aPrefs);
+                    const MediaEnginePrefs &aPrefs,
+                    const nsACString& aOrigin);
   nsresult Restart(const dom::MediaTrackConstraints &aConstraints,
                    const MediaEnginePrefs &aPrefs);
 };
@@ -108,7 +110,8 @@ public:
   NS_IMETHOD GetType(nsAString& aType);
   Source* GetSource();
   nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
-                    const MediaEnginePrefs &aPrefs);
+                    const MediaEnginePrefs &aPrefs,
+                    const nsACString& aOrigin);
   nsresult Restart(const dom::MediaTrackConstraints &aConstraints,
                    const MediaEnginePrefs &aPrefs);
 };
@@ -166,7 +169,7 @@ public:
 
   void StopSharing();
 
-  void StopTrack(TrackID aID, bool aIsAudio);
+  void StopTrack(TrackID aID);
 
   typedef media::Pledge<bool, dom::MediaStreamError*> PledgeVoid;
 
@@ -225,7 +228,7 @@ public:
 
   // implement in .cpp to avoid circular dependency with MediaOperationTask
   // Can be invoked from EITHER MainThread or MSG thread
-  void Invalidate();
+  void Stop();
 
   void
   AudioConfig(bool aEchoOn, uint32_t aEcho,
@@ -318,7 +321,7 @@ private:
   // MainThread only.
   bool mAudioStopped;
 
-  // true if we have sent MEDIA_STOP or MEDIA_STOP_TRACK for mAudioDevice.
+  // true if we have sent MEDIA_STOP or MEDIA_STOP_TRACK for mVideoDevice.
   // MainThread only.
   bool mVideoStopped;
 
@@ -499,7 +502,7 @@ private:
   already_AddRefed<PledgeChar>
   SelectSettings(
       dom::MediaStreamConstraints& aConstraints,
-      RefPtr<media::Refcountable<ScopedDeletePtr<SourceSet>>>& aSources);
+      RefPtr<media::Refcountable<UniquePtr<SourceSet>>>& aSources);
 
   StreamListeners* AddWindowID(uint64_t aWindowId);
   WindowTable *GetActiveWindows() {
@@ -548,7 +551,7 @@ private:
 #endif
 public:
   media::CoatCheck<media::Pledge<nsCString>> mGetOriginKeyPledges;
-  ScopedDeletePtr<media::Parent<media::NonE10s>> mNonE10sParent;
+  UniquePtr<media::Parent<media::NonE10s>> mNonE10sParent;
 };
 
 } // namespace mozilla

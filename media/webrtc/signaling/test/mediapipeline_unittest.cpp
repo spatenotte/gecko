@@ -36,9 +36,14 @@
 
 #include "webrtc/modules/interface/module_common_types.h"
 
+#include "FakeIPC.h"
+#include "FakeIPC.cpp"
+
 #define GTEST_HAS_RTTI 0
 #include "gtest/gtest.h"
 #include "gtest_utils.h"
+
+#include "TestHarness.h"
 
 using namespace mozilla;
 MOZ_MTLOG_MODULE("mediapipeline")
@@ -696,6 +701,7 @@ TEST_F(MediaPipelineTest, TestAudioSendEmptyBundleFilter) {
 
 
 int main(int argc, char **argv) {
+  ScopedXPCOM xpcom("mediapipeline_unittest");
   test_utils = new MtransportTestUtils();
   // Start the tests
   NSS_NoDB_Init(nullptr);

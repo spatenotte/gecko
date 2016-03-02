@@ -149,14 +149,15 @@ public:
         mDirection(direction),
         mMoved(false)
     {
-        MOZ_ASSERT(mMessageName);
+        MOZ_RELEASE_ASSERT(mMessageName);
     }
 
     InterruptFrame(InterruptFrame&& aOther)
     {
-        MOZ_ASSERT(aOther.mMessageName);
+        MOZ_RELEASE_ASSERT(aOther.mMessageName);
         mMessageName = aOther.mMessageName;
         aOther.mMessageName = nullptr;
+        mMoved = aOther.mMoved;
         aOther.mMoved = true;
 
         mMessageRoutingId = aOther.mMessageRoutingId;
@@ -166,7 +167,7 @@ public:
 
     ~InterruptFrame()
     {
-        MOZ_ASSERT_IF(!mMessageName, mMoved);
+        MOZ_RELEASE_ASSERT(mMessageName || mMoved);
     }
 
     InterruptFrame& operator=(InterruptFrame&& aOther)
@@ -213,7 +214,7 @@ private:
     int32_t mMessageRoutingId;
     Semantics mMesageSemantics;
     Direction mDirection;
-    DebugOnly<bool> mMoved;
+    bool mMoved;
 
     // Disable harmful methods.
     InterruptFrame(const InterruptFrame& aOther) = delete;
@@ -248,7 +249,7 @@ public:
     ~CxxStackFrame() {
         mThat.AssertWorkerThread();
 
-        MOZ_ASSERT(!mThat.mCxxStackFrames.empty());
+        MOZ_RELEASE_ASSERT(!mThat.mCxxStackFrames.empty());
 
         const InterruptFrame& frame = mThat.mCxxStackFrames.back();
         bool exitingSync = frame.IsOutgoingSync();
@@ -280,31 +281,6 @@ private:
     CxxStackFrame& operator=(const CxxStackFrame&) = delete;
 };
 
-namespace {
-
-class MOZ_RAII MaybeScriptBlocker {
-public:
-    explicit MaybeScriptBlocker(MessageChannel *aChannel, bool aBlock
-                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-        : mBlocked(aChannel->ShouldBlockScripts() && aBlock)
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        if (mBlocked) {
-            nsContentUtils::AddScriptBlocker();
-        }
-    }
-    ~MaybeScriptBlocker() {
-        if (mBlocked) {
-            nsContentUtils::RemoveScriptBlocker();
-        }
-    }
-private:
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-    bool mBlocked;
-};
-
-} // namespace
-
 MessageChannel::MessageChannel(MessageListener *aListener)
   : mListener(aListener),
     mChannelState(ChannelClosed),
@@ -332,7 +308,6 @@ MessageChannel::MessageChannel(MessageListener *aListener)
     mSawInterruptOutMsg(false),
     mIsWaitingForIncoming(false),
     mAbortOnError(false),
-    mBlockScripts(false),
     mFlags(REQUIRE_DEFAULT),
     mPeerPidSet(false),
     mPeerPid(-1)
@@ -354,7 +329,7 @@ MessageChannel::MessageChannel(MessageListener *aListener)
 
 #ifdef OS_WIN
     mEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    NS_ASSERTION(mEvent, "CreateEvent failed! Nothing is going to work!");
+    MOZ_RELEASE_ASSERT(mEvent, "CreateEvent failed! Nothing is going to work!");
 #endif
 }
 
@@ -363,8 +338,8 @@ MessageChannel::~MessageChannel()
     MOZ_COUNT_DTOR(ipc::MessageChannel);
     IPC_ASSERT(mCxxStackFrames.empty(), "mismatched CxxStackFrame ctor/dtors");
 #ifdef OS_WIN
-    DebugOnly<BOOL> ok = CloseHandle(mEvent);
-    MOZ_ASSERT(ok);
+    BOOL ok = CloseHandle(mEvent);
+    MOZ_RELEASE_ASSERT(ok);
 #endif
     Clear();
 }
@@ -492,7 +467,7 @@ MessageChannel::Open(MessageChannel *aTargetChan, MessageLoop *aTargetLoop, Side
 
     while (ChannelOpening == mChannelState)
         mMonitor->Wait();
-    NS_ASSERTION(ChannelConnected == mChannelState, "not connected when awoken");
+    MOZ_RELEASE_ASSERT(ChannelConnected == mChannelState, "not connected when awoken");
     return (ChannelConnected == mChannelState);
 }
 
@@ -509,8 +484,8 @@ MessageChannel::OnOpenAsSlave(MessageChannel *aTargetChan, Side aSide)
     mMonitor = aTargetChan->mMonitor;
 
     MonitorAutoLock lock(*mMonitor);
-    NS_ASSERTION(ChannelOpening == aTargetChan->mChannelState,
-                 "Target channel not in the process of opening");
+    MOZ_RELEASE_ASSERT(ChannelOpening == aTargetChan->mChannelState,
+                          "Target channel not in the process of opening");
     mChannelState = ChannelConnected;
     aTargetChan->mChannelState = ChannelConnected;
     aTargetChan->mMonitor->Notify();
@@ -622,7 +597,7 @@ MessageChannel::ShouldDeferMessage(const Message& aMsg)
 
     // Unless they're urgent, we always defer async messages.
     if (!aMsg.is_sync()) {
-        MOZ_ASSERT(aMsg.priority() == IPC::Message::PRIORITY_NORMAL);
+        MOZ_RELEASE_ASSERT(aMsg.priority() == IPC::Message::PRIORITY_NORMAL);
         return true;
     }
 
@@ -684,10 +659,10 @@ MessageChannel::OnMessageReceivedFromLink(const Message& aMsg)
             return;
         }
 
-        MOZ_ASSERT(aMsg.transaction_id() == mCurrentTransaction);
-        MOZ_ASSERT(AwaitingSyncReply());
-        MOZ_ASSERT(!mRecvd);
-        MOZ_ASSERT(!mTimedOutMessageSeqno);
+        MOZ_RELEASE_ASSERT(aMsg.transaction_id() == mCurrentTransaction);
+        MOZ_RELEASE_ASSERT(AwaitingSyncReply());
+        MOZ_RELEASE_ASSERT(!mRecvd);
+        MOZ_RELEASE_ASSERT(!mTimedOutMessageSeqno);
 
         // Rather than storing errors in mRecvd, we mark them in
         // mRecvdErrors. We need a counter because multiple replies can arrive
@@ -709,8 +684,8 @@ MessageChannel::OnMessageReceivedFromLink(const Message& aMsg)
     }
 
     // Prioritized messages cannot be compressed.
-    MOZ_ASSERT_IF(aMsg.compress_type() != IPC::Message::COMPRESSION_NONE,
-                  aMsg.priority() == IPC::Message::PRIORITY_NORMAL);
+    MOZ_RELEASE_ASSERT(aMsg.compress_type() == IPC::Message::COMPRESSION_NONE ||
+                          aMsg.priority() == IPC::Message::PRIORITY_NORMAL);
 
     bool compress = false;
     if (aMsg.compress_type() == IPC::Message::COMPRESSION_ENABLED) {
@@ -721,8 +696,8 @@ MessageChannel::OnMessageReceivedFromLink(const Message& aMsg)
             // This message type has compression enabled, and the back of the
             // queue was the same message type and routed to the same destination.
             // Replace it with the newer message.
-            MOZ_ASSERT(mPending.back().compress_type() ==
-                       IPC::Message::COMPRESSION_ENABLED);
+            MOZ_RELEASE_ASSERT(mPending.back().compress_type() ==
+                                  IPC::Message::COMPRESSION_ENABLED);
             mPending.pop_back();
         }
     } else if (aMsg.compress_type() == IPC::Message::COMPRESSION_ALL) {
@@ -735,7 +710,7 @@ MessageChannel::OnMessageReceivedFromLink(const Message& aMsg)
             // Erase it.  Note that, since we always compress these redundancies, There Can
             // Be Only One.
             compress = true;
-            MOZ_ASSERT((*it).compress_type() == IPC::Message::COMPRESSION_ALL);
+            MOZ_RELEASE_ASSERT((*it).compress_type() == IPC::Message::COMPRESSION_ALL);
             mPending.erase((++it).base());
         }
     }
@@ -813,8 +788,8 @@ MessageChannel::ProcessPendingRequests(int seqno, int transaction)
         for (MessageQueue::iterator it = mPending.begin(); it != mPending.end(); ) {
             Message &msg = *it;
 
-            MOZ_ASSERT(mCurrentTransaction == transaction,
-                       "Calling ShouldDeferMessage when cancelled");
+            MOZ_RELEASE_ASSERT(mCurrentTransaction == transaction,
+                                  "Calling ShouldDeferMessage when cancelled");
             bool defer = ShouldDeferMessage(msg);
 
             // Only log the interesting messages.
@@ -868,9 +843,6 @@ MessageChannel::Send(Message* aMsg, Message* aReply)
 {
     nsAutoPtr<Message> msg(aMsg);
 
-    // See comment in DispatchSyncMessage.
-    MaybeScriptBlocker scriptBlocker(this, true);
-
     // Sanity checks.
     AssertWorkerThread();
     mMonitor->AssertNotCurrentThreadOwns();
@@ -912,7 +884,7 @@ MessageChannel::Send(Message* aMsg, Message* aReply)
         // Generally only the parent dispatches urgent messages. And the only
         // sync messages it can send are high-priority. Mainly we want to ensure
         // here that we don't return false for non-CPOW messages.
-        MOZ_ASSERT(msg->priority() == IPC::Message::PRIORITY_HIGH);
+        MOZ_RELEASE_ASSERT(msg->priority() == IPC::Message::PRIORITY_HIGH);
         IPC_LOG("Sending while dispatching urgent message");
         mLastSendError = SyncSendError::SendingCPOWWhileDispatchingUrgent;
         return false;
@@ -922,7 +894,7 @@ MessageChannel::Send(Message* aMsg, Message* aReply)
         (msg->priority() < DispatchingSyncMessagePriority() ||
          msg->priority() < AwaitingSyncReplyPriority()))
     {
-        MOZ_ASSERT(DispatchingSyncMessage() || DispatchingAsyncMessage());
+        MOZ_RELEASE_ASSERT(DispatchingSyncMessage() || DispatchingAsyncMessage());
         IPC_LOG("Cancel from Send");
         CancelMessage *cancel = new CancelMessage(mCurrentTransaction);
         CancelTransaction(mCurrentTransaction);
@@ -953,7 +925,7 @@ MessageChannel::Send(Message* aMsg, Message* aReply)
 
     int32_t seqno = msg->seqno();
     int prio = msg->priority();
-    DebugOnly<msgid_t> replyType = msg->type() + 1;
+    msgid_t replyType = msg->type() + 1;
 
     AutoSetValue<bool> replies(mAwaitingSyncReply, true);
     AutoSetValue<int> prioSet(mAwaitingSyncReplyPriority, prio);
@@ -996,9 +968,9 @@ MessageChannel::Send(Message* aMsg, Message* aReply)
             break;
         }
 
-        MOZ_ASSERT(!mTimedOutMessageSeqno);
+        MOZ_RELEASE_ASSERT(!mTimedOutMessageSeqno);
 
-        MOZ_ASSERT(mCurrentTransaction == transaction);
+        MOZ_RELEASE_ASSERT(mCurrentTransaction == transaction);
         bool maybeTimedOut = !WaitForSyncNotify(handleWindowsMessages);
 
         if (!Connected()) {
@@ -1044,12 +1016,12 @@ MessageChannel::Send(Message* aMsg, Message* aReply)
         }
     }
 
-    MOZ_ASSERT(mRecvd);
-    MOZ_ASSERT(mRecvd->is_reply(), "expected reply");
-    MOZ_ASSERT(!mRecvd->is_reply_error());
-    MOZ_ASSERT(mRecvd->type() == replyType, "wrong reply type");
-    MOZ_ASSERT(mRecvd->seqno() == seqno);
-    MOZ_ASSERT(mRecvd->is_sync());
+    MOZ_RELEASE_ASSERT(mRecvd);
+    MOZ_RELEASE_ASSERT(mRecvd->is_reply(), "expected reply");
+    MOZ_RELEASE_ASSERT(!mRecvd->is_reply_error());
+    MOZ_RELEASE_ASSERT(mRecvd->seqno() == seqno);
+    MOZ_RELEASE_ASSERT(mRecvd->type() == replyType, "wrong reply type");
+    MOZ_RELEASE_ASSERT(mRecvd->is_sync());
 
     *aReply = Move(*mRecvd);
     mRecvd = nullptr;
@@ -1377,7 +1349,7 @@ MessageChannel::OnMaybeDequeueOne()
     }
 
     // We should not be in a transaction yet if we're not blocked.
-    MOZ_ASSERT(mCurrentTransaction == 0);
+    MOZ_RELEASE_ASSERT(mCurrentTransaction == 0);
     DispatchMessage(recvd);
 
     return true;
@@ -1398,7 +1370,7 @@ MessageChannel::DispatchMessage(const Message &aMsg)
         AutoEnterTransaction transaction(this, aMsg);
 
         int id = aMsg.transaction_id();
-        MOZ_ASSERT_IF(aMsg.is_sync(), id == mCurrentTransaction);
+        MOZ_RELEASE_ASSERT(!aMsg.is_sync() || id == mCurrentTransaction);
 
         {
             MonitorAutoUnlock unlock(*mMonitor);
@@ -1430,15 +1402,10 @@ MessageChannel::DispatchSyncMessage(const Message& aMsg, Message*& aReply)
 
     int prio = aMsg.priority();
 
-    // We don't want to run any code that might run a nested event loop here, so
-    // we avoid running event handlers. Once we've sent the response to the
-    // urgent message, it's okay to run event handlers again since the parent is
-    // no longer blocked.
-    MOZ_ASSERT_IF(prio > IPC::Message::PRIORITY_NORMAL, NS_IsMainThread());
-    MaybeScriptBlocker scriptBlocker(this, prio > IPC::Message::PRIORITY_NORMAL);
+    MOZ_RELEASE_ASSERT(prio == IPC::Message::PRIORITY_NORMAL || NS_IsMainThread());
 
     MessageChannel* dummy;
-    MessageChannel*& blockingVar = ShouldBlockScripts() ? gParentProcessBlocker : dummy;
+    MessageChannel*& blockingVar = mSide == ChildSide && NS_IsMainThread() ? gParentProcessBlocker : dummy;
 
     Result rv;
     {
@@ -1463,7 +1430,7 @@ void
 MessageChannel::DispatchAsyncMessage(const Message& aMsg)
 {
     AssertWorkerThread();
-    MOZ_ASSERT(!aMsg.is_interrupt() && !aMsg.is_sync());
+    MOZ_RELEASE_ASSERT(!aMsg.is_interrupt() && !aMsg.is_sync());
 
     if (aMsg.routing_id() == MSG_ROUTING_NONE) {
         NS_RUNTIMEABORT("unhandled special message!");
@@ -1582,7 +1549,7 @@ MessageChannel::MaybeUndeferIncall()
     IPC_ASSERT(0 < mRemoteStackDepthGuess, "fatal logic error");
     --mRemoteStackDepthGuess;
 
-    MOZ_ASSERT(call.priority() == IPC::Message::PRIORITY_NORMAL);
+    MOZ_RELEASE_ASSERT(call.priority() == IPC::Message::PRIORITY_NORMAL);
     mPending.push_back(call);
 }
 
@@ -1731,7 +1698,7 @@ MessageChannel::SetReplyTimeoutMs(int32_t aTimeoutMs)
 void
 MessageChannel::OnChannelConnected(int32_t peer_id)
 {
-    MOZ_ASSERT(!mPeerPidSet);
+    MOZ_RELEASE_ASSERT(!mPeerPidSet);
     mPeerPidSet = true;
     mPeerPid = peer_id;
     mWorkerLoop->PostTask(FROM_HERE, new DequeueTask(mOnChannelConnectedTask));
@@ -1741,7 +1708,7 @@ void
 MessageChannel::DispatchOnChannelConnected()
 {
     AssertWorkerThread();
-    MOZ_ASSERT(mPeerPidSet);
+    MOZ_RELEASE_ASSERT(mPeerPidSet);
     if (mListener)
         mListener->OnChannelConnected(mPeerPid);
 }
@@ -1979,13 +1946,6 @@ MessageChannel::CloseWithTimeout()
 }
 
 void
-MessageChannel::BlockScripts()
-{
-    MOZ_ASSERT(NS_IsMainThread());
-    mBlockScripts = true;
-}
-
-void
 MessageChannel::Close()
 {
     AssertWorkerThread();
@@ -2102,7 +2062,7 @@ MessageChannel::DumpInterruptStack(const char* const pfx) const
 int32_t
 MessageChannel::GetTopmostMessageRoutingId() const
 {
-    MOZ_ASSERT(MessageLoop::current() == mWorkerLoop);
+    MOZ_RELEASE_ASSERT(MessageLoop::current() == mWorkerLoop);
     if (mCxxStackFrames.empty()) {
         return MSG_ROUTING_NONE;
     }
@@ -2188,20 +2148,20 @@ MessageChannel::CancelTransaction(int transaction)
         // 2. Parent times out H.
         // 3. Child dispatches H and sends nested message H' (same transaction).
         // 4. Parent dispatches H' and cancels.
-        MOZ_ASSERT_IF(mCurrentTransaction, mCurrentTransaction == transaction);
+        MOZ_RELEASE_ASSERT(!mCurrentTransaction || mCurrentTransaction == transaction);
         mCurrentTransaction = 0;
 
         // During a timeout Send should always fail.
-        MOZ_ASSERT(!mAwaitingSyncReply);
+        MOZ_RELEASE_ASSERT(!mAwaitingSyncReply);
     } else {
-        MOZ_ASSERT(mCurrentTransaction == transaction);
+        MOZ_RELEASE_ASSERT(mCurrentTransaction == transaction);
         mCurrentTransaction = 0;
 
         mAwaitingSyncReply = false;
         mAwaitingSyncReplyPriority = 0;
     }
 
-    DebugOnly<bool> foundSync = false;
+    bool foundSync = false;
     for (MessageQueue::iterator it = mPending.begin(); it != mPending.end(); ) {
         Message &msg = *it;
 
@@ -2213,8 +2173,8 @@ MessageChannel::CancelTransaction(int transaction)
         // avoid processing messages out of order in the short time before it
         // crashes.
         if (msg.is_sync() && msg.priority() != IPC::Message::PRIORITY_NORMAL) {
-            MOZ_ASSERT(!foundSync);
-            MOZ_ASSERT(msg.transaction_id() != transaction);
+            MOZ_RELEASE_ASSERT(!foundSync);
+            MOZ_RELEASE_ASSERT(msg.transaction_id() != transaction);
             IPC_LOG("Removing msg from queue seqno=%d xid=%d", msg.seqno(), msg.transaction_id());
             foundSync = true;
             it = mPending.erase(it);
@@ -2248,7 +2208,7 @@ MessageChannel::CancelCurrentTransaction()
         }
 
         IPC_LOG("Cancel requested: current xid=%d", mCurrentTransaction);
-        MOZ_ASSERT(DispatchingSyncMessage());
+        MOZ_RELEASE_ASSERT(DispatchingSyncMessage());
         CancelMessage *cancel = new CancelMessage(mCurrentTransaction);
         CancelTransaction(mCurrentTransaction);
         mLink->SendMessage(cancel);

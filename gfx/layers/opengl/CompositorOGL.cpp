@@ -486,8 +486,6 @@ CompositorOGL::PrepareViewport(CompositingRenderTargetOGL* aRenderTarget)
   // Set the viewport correctly.
   mGLContext->fViewport(0, 0, size.width, size.height);
 
-  mRenderBounds = Rect(0, 0, size.width, size.height);
-
   mViewportSize = size;
 
   if (!aRenderTarget->HasComplexProjection()) {
@@ -631,6 +629,7 @@ void
 CompositorOGL::BeginFrame(const nsIntRegion& aInvalidRegion,
                           const Rect *aClipRectIn,
                           const Rect& aRenderBounds,
+                          bool aOpaque,
                           Rect *aClipRectOut,
                           Rect *aRenderBoundsOut)
 {
@@ -869,7 +868,8 @@ CompositorOGL::GetShaderConfigFor(Effect *aEffect,
     MOZ_ASSERT_IF(source->GetTextureTarget() == LOCAL_GL_TEXTURE_RECTANGLE_ARB,
                   source->GetFormat() == gfx::SurfaceFormat::R8G8B8A8 ||
                   source->GetFormat() == gfx::SurfaceFormat::R8G8B8X8 ||
-                  source->GetFormat() == gfx::SurfaceFormat::R5G6B5_UINT16);
+                  source->GetFormat() == gfx::SurfaceFormat::R5G6B5_UINT16 ||
+                  source->GetFormat() == gfx::SurfaceFormat::YUV422 );
     config = ShaderConfigFromTargetAndFormat(source->GetTextureTarget(),
                                              source->GetFormat());
     if (!texturedEffect->mPremultiplied) {
@@ -1007,7 +1007,9 @@ CompositorOGL::DrawQuad(const Rect& aRect,
   }
 
   IntPoint offset = mCurrentRenderTarget->GetOrigin();
-  Rect renderBound = mRenderBounds;
+  IntSize size = mCurrentRenderTarget->GetSize();
+
+  Rect renderBound(0, 0, size.width, size.height);
   renderBound.IntersectRect(renderBound, aClipRect);
   renderBound.MoveBy(offset);
 
@@ -1021,7 +1023,8 @@ CompositorOGL::DrawQuad(const Rect& aRect,
   // Inflate a small size to avoid some numerical imprecision issue.
   destRect.Inflate(1, 1);
   destRect.MoveBy(-offset);
-  if (!mRenderBounds.Intersects(destRect)) {
+  renderBound = Rect(0, 0, size.width, size.height);
+  if (!renderBound.Intersects(destRect)) {
     return;
   }
 
@@ -1123,17 +1126,11 @@ CompositorOGL::DrawQuad(const Rect& aRect,
   }
 
   if (BlendOpIsMixBlendMode(blendMode)) {
-    gfx::IntRect rect = ComputeBackdropCopyRect(aRect, aClipRect, aTransform);
-    mixBlendBackdrop = CreateTexture(rect, true, mCurrentRenderTarget->GetFBO());
+    gfx::Matrix4x4 backdropTransform;
+    gfx::IntRect rect = ComputeBackdropCopyRect(aRect, aClipRect, aTransform, &backdropTransform);
 
-    // Create a transform from adjusted clip space to render target space,
-    // translate it for the backdrop rect, then transform it into the backdrop's
-    // uv-space.
-    gfx::Matrix4x4 transform;
-    transform.PostScale(mRenderBounds.width, mRenderBounds.height, 1.0);
-    transform.PostTranslate(-rect.x, -rect.y, 0.0);
-    transform.PostScale(1 / float(rect.width), 1 / float(rect.height), 1.0);
-    program->SetBackdropTransform(transform);
+    mixBlendBackdrop = CreateTexture(rect, true, mCurrentRenderTarget->GetFBO());
+    program->SetBackdropTransform(backdropTransform);
   }
 
   program->SetRenderOffset(offset.x, offset.y);

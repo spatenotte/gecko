@@ -278,6 +278,7 @@ TimeStamp EventStateManager::sHandlingInputStart;
 
 EventStateManager::WheelPrefs*
   EventStateManager::WheelPrefs::sInstance = nullptr;
+bool EventStateManager::WheelPrefs::sWheelEventsEnabledOnPlugins = true;
 EventStateManager::DeltaAccumulator*
   EventStateManager::DeltaAccumulator::sInstance = nullptr;
 
@@ -731,7 +732,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       if (modifierMask &&
           (modifierMask == Prefs::ChromeAccessModifierMask() ||
            modifierMask == Prefs::ContentAccessModifierMask())) {
-        nsAutoTArray<uint32_t, 10> accessCharCodes;
+        AutoTArray<uint32_t, 10> accessCharCodes;
         nsContentUtils::GetAccessKeyCandidates(keyEvent, accessCharCodes);
 
         if (HandleAccessKey(aPresContext, accessCharCodes,
@@ -1291,7 +1292,7 @@ EventStateManager::HandleCrossProcessEvent(WidgetEvent* aEvent,
   // event to.
   //
   // NB: the elements of |targets| must be unique, for correctness.
-  nsAutoTArray<nsCOMPtr<nsIContent>, 1> targets;
+  AutoTArray<nsCOMPtr<nsIContent>, 1> targets;
   if (aEvent->mClass != eTouchEventClass || aEvent->mMessage == eTouchStart) {
     // If this event only has one target, and it's remote, add it to
     // the array.
@@ -2006,6 +2007,7 @@ EventStateManager::GetContentViewer(nsIContentViewer** aCv)
 
   nsCOMPtr<mozIDOMWindowProxy> focusedWindow;
   fm->GetFocusedWindow(getter_AddRefs(focusedWindow));
+  if (!focusedWindow) return NS_ERROR_FAILURE;
 
   auto* ourWindow = nsPIDOMWindowOuter::From(focusedWindow);
 
@@ -2366,6 +2368,11 @@ EventStateManager::ComputeScrollTarget(nsIFrame* aTargetFrame,
                                        WidgetWheelEvent* aEvent,
                                        ComputeScrollTargetOptions aOptions)
 {
+  if ((aOptions & INCLUDE_PLUGIN_AS_TARGET) &&
+      !WheelPrefs::WheelEventsEnabledOnPlugins()) {
+    aOptions = RemovePluginFromTarget(aOptions);
+  }
+
   if (aOptions & PREFER_MOUSE_WHEEL_TRANSACTION) {
     // If the user recently scrolled with the mousewheel, then they probably
     // want to scroll the same view as before instead of the view under the
@@ -4681,7 +4688,8 @@ EventStateManager::CheckForAndDispatchClick(WidgetMouseEvent* aEvent,
       nsWeakFrame currentTarget = mCurrentTarget;
       ret = presShell->HandleEventWithTarget(&event, currentTarget,
                                              mouseContent, aStatus);
-      if (NS_SUCCEEDED(ret) && aEvent->clickCount == 2) {
+      if (NS_SUCCEEDED(ret) && aEvent->clickCount == 2 &&
+          mouseContent && mouseContent->IsInComposedDoc()) {
         //fire double click
         WidgetMouseEvent event2(aEvent->mFlags.mIsTrusted, eMouseDoubleClick,
                                 aEvent->widget, WidgetMouseEvent::eReal);
@@ -5030,19 +5038,17 @@ EventStateManager::SetContentState(nsIContent* aContent, EventStates aState)
   return true;
 }
 
-PLDHashOperator
+void
 EventStateManager::ResetLastOverForContent(
                      const uint32_t& aIdx,
                      RefPtr<OverOutElementsWrapper>& aElemWrapper,
-                     void* aClosure)
+                     nsIContent* aContent)
 {
-  nsIContent* content = static_cast<nsIContent*>(aClosure);
   if (aElemWrapper && aElemWrapper->mLastOverElement &&
-      nsContentUtils::ContentIsDescendantOf(aElemWrapper->mLastOverElement, content)) {
+      nsContentUtils::ContentIsDescendantOf(aElemWrapper->mLastOverElement,
+                                            aContent)) {
     aElemWrapper->mLastOverElement = nullptr;
   }
-
-  return PL_DHASH_NEXT;
 }
 
 void
@@ -5091,8 +5097,11 @@ EventStateManager::ContentRemoved(nsIDocument* aDocument, nsIContent* aContent)
 
   // See bug 292146 for why we want to null this out
   ResetLastOverForContent(0, mMouseEnterLeaveHelper, aContent);
-  mPointersEnterLeaveHelper.Enumerate(
-    &EventStateManager::ResetLastOverForContent, aContent);
+  for (auto iter = mPointersEnterLeaveHelper.Iter();
+       !iter.Done();
+       iter.Next()) {
+    ResetLastOverForContent(iter.Key(), iter.Data(), aContent);
+  }
 }
 
 bool
@@ -5512,6 +5521,9 @@ EventStateManager::WheelPrefs::WheelPrefs()
 {
   Reset();
   Preferences::RegisterCallback(OnPrefChanged, "mousewheel.", nullptr);
+  Preferences::AddBoolVarCache(&sWheelEventsEnabledOnPlugins,
+                               "plugin.mousewheel.enabled",
+                               true);
 }
 
 EventStateManager::WheelPrefs::~WheelPrefs()
@@ -5729,6 +5741,16 @@ EventStateManager::WheelPrefs::GetUserPrefsForEvent(WidgetWheelEvent* aEvent,
 
   *aOutMultiplierX = mMultiplierX[index];
   *aOutMultiplierY = mMultiplierY[index];
+}
+
+// static
+bool
+EventStateManager::WheelPrefs::WheelEventsEnabledOnPlugins()
+{
+  if (!sInstance) {
+    GetInstance(); // initializing sWheelEventsEnabledOnPlugins
+  }
+  return sWheelEventsEnabledOnPlugins;
 }
 
 bool

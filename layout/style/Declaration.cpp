@@ -351,7 +351,11 @@ Declaration::GetImageLayerValue(
         }
       // This layer is an mask layer
       } else {
+#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
         MOZ_ASSERT(aTable == nsStyleImageLayers::kMaskLayerTable);
+#else
+        MOZ_ASSERT_UNREACHABLE("Should never get here when mask-as-shorthand is disable");
+#endif
         if (repeat || position || clip || origin || size || composite || mode) {
           // Uneven length lists, so can't be serialized as shorthand.
           aValue.Truncate();
@@ -370,7 +374,11 @@ Declaration::GetImageLayerValue(
       }
     // This layer is an mask layer
     } else {
+#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
       MOZ_ASSERT(aTable == nsStyleImageLayers::kMaskLayerTable);
+#else
+      MOZ_ASSERT_UNREACHABLE("Should never get here when mask-as-shorthand is disable");
+#endif
       if (!repeat || !position || !clip || !origin || !size ||
           !composite || !mode) {
         // Uneven length lists, so can't be serialized as shorthand.
@@ -657,11 +665,13 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue,
                          nsStyleImageLayers::kBackgroundLayerTable);
       break;
     }
+#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
     case eCSSProperty_mask: {
       GetImageLayerValue(data, aValue, aSerialization,
                          nsStyleImageLayers::kMaskLayerTable);
       break;
     }
+#endif
     case eCSSProperty_font: {
       // systemFont might not be present; other values are guaranteed to be
       // available based on the shorthand check at the beginning of the
@@ -1442,7 +1452,7 @@ Declaration::ToString(nsAString& aString) const
 
   int32_t count = mOrder.Length();
   int32_t index;
-  nsAutoTArray<nsCSSProperty, 16> shorthandsUsed;
+  AutoTArray<nsCSSProperty, 16> shorthandsUsed;
   for (index = 0; index < count; index++) {
     nsCSSProperty property = GetPropertyAt(index);
 
@@ -1615,13 +1625,6 @@ Declaration::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     n += mImportantVariables->SizeOfIncludingThis(aMallocSizeOf);
   }
   return n;
-}
-
-bool
-Declaration::HasVariableDeclaration(const nsAString& aName) const
-{
-  return (mVariables && mVariables->Has(aName)) ||
-         (mImportantVariables && mImportantVariables->Has(aName));
 }
 
 void

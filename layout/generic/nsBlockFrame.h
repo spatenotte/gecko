@@ -16,7 +16,6 @@
 #include "nsHTMLParts.h"
 #include "nsLineBox.h"
 #include "nsCSSPseudoElements.h"
-#include "nsStyleSet.h"
 #include "nsFloatManager.h"
 
 enum LineReflowStatus {
@@ -363,13 +362,7 @@ protected:
   virtual ~nsBlockFrame();
 
 #ifdef DEBUG
-  already_AddRefed<nsStyleContext> GetFirstLetterStyle(nsPresContext* aPresContext)
-  {
-    return aPresContext->StyleSet()->
-      ProbePseudoElementStyle(mContent->AsElement(),
-                              nsCSSPseudoElements::ePseudo_firstLetter,
-                              mStyleContext);
-  }
+  already_AddRefed<nsStyleContext> GetFirstLetterStyle(nsPresContext* aPresContext);
 #endif
 
   NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(LineCursorProperty, nsLineBox)
@@ -453,6 +446,15 @@ protected:
    * @return whether the frame is a BIDI form control
    */
   bool IsVisualFormControl(nsPresContext* aPresContext);
+
+  /**
+   * Helper function to create bullet frame.
+   * @param aCreateBulletList true to create bullet list; otherwise number list.
+   * @param aListStylePositionInside true to put the list position inside;
+   * otherwise outside.
+   */
+  void CreateBulletFrameForListItem(bool aCreateBulletList,
+                                    bool aListStylePositionInside);
 
 public:
   /**

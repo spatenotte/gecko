@@ -43,17 +43,38 @@
 
           "name": {
             "type": "string",
-            "optional": false
+            "optional": false,
+            "preprocess": "localize"
+          },
+
+          "short_name": {
+            "type": "string",
+            "optional": true,
+            "preprocess": "localize"
           },
 
           "description": {
             "type": "string",
-            "optional": true
+            "optional": true,
+            "preprocess": "localize"
+          },
+
+          "creator": {
+            "type": "string",
+            "optional": true,
+            "preprocess": "localize"
           },
 
           "version": {
             "type": "string",
             "optional": false
+          },
+
+          "homepage_url": {
+            "type": "string",
+            "format": "url",
+            "optional": true,
+            "preprocess": "localize"
           },
 
           "icons": {
@@ -93,7 +114,15 @@
 
           "permissions": {
             "type": "array",
-            "items": { "$ref": "Permission" },
+            "items": {
+              "choices": [
+                { "$ref": "Permission" },
+                {
+                  "type": "string",
+                  "deprecated": "Unknown permission ${value}"
+                }
+              ]
+            },
             "optional": true
           },
 
@@ -102,6 +131,11 @@
             "items": { "type": "string" },
             "optional": true
           }
+        },
+
+        "additionalProperties": {
+          "type": "any",
+          "deprecated": "An unexpected property was found in the WebExtension manifest"
         }
       },
       {

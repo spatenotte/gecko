@@ -1571,7 +1571,7 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
   PermissionHashKey* entry = mPermissionTable.PutEntry(key);
   if (!entry) return NS_ERROR_FAILURE;
   if (!entry->GetKey()) {
-    mPermissionTable.RawRemoveEntry(entry);
+    mPermissionTable.RemoveEntry(entry);
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -1694,7 +1694,7 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
 
       // If there are no more permissions stored for that entry, clear it.
       if (entry->GetPermissions().IsEmpty()) {
-        mPermissionTable.RawRemoveEntry(entry);
+        mPermissionTable.RemoveEntry(entry);
       }
 
       break;
@@ -1773,14 +1773,6 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
 
       // If requested, create the entry in the DB.
       if (aDBOperation == eWriteToDB) {
-        uint32_t appId;
-        rv = aPrincipal->GetAppId(&appId);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        bool isInBrowserElement;
-        rv = aPrincipal->GetIsInBrowserElement(&isInBrowserElement);
-        NS_ENSURE_SUCCESS(rv, rv);
-
         UpdateDB(eOperationAdding, mStmtInsert, id, origin, aType, aPermission,
                  aExpireType, aExpireTime, aModificationTime);
       }
@@ -2948,4 +2940,3 @@ nsPermissionManager::FetchPermissions() {
   }
   return NS_OK;
 }
-

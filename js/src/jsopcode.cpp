@@ -830,6 +830,7 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
         Sprint(sp, "%4u", PCToLineNumber(script, pc));
     Sprint(sp, "  %s", CodeName[op]);
 
+    int i;
     switch (JOF_TYPE(cs->format)) {
       case JOF_BYTE:
           // Scan the trynotes to find the associated catch block
@@ -905,7 +906,7 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       }
 
       case JOF_REGEXP: {
-        JSObject* obj = script->getRegExp(GET_UINT32_INDEX(pc));
+        js::RegExpObject* obj = script->getRegExp(pc);
         JSAutoByteString bytes;
         RootedValue v(cx, ObjectValue(*obj));
         if (!ToDisassemblySource(cx, v, &bytes))
@@ -946,9 +947,6 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
         Sprint(sp, " %u", GET_UINT32(pc));
         break;
 
-      {
-        int i;
-
       case JOF_UINT16:
         i = (int)GET_UINT16(pc);
         goto print_int;
@@ -972,7 +970,6 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       print_int:
         Sprint(sp, " %d", i);
         break;
-      }
 
       default: {
         char numBuf[12];
@@ -1180,9 +1177,7 @@ ExpressionDecompiler::decompilePC(jsbytecode* pc)
       case JSOP_REGEXP:
       case JSOP_OBJECT:
       case JSOP_NEWARRAY_COPYONWRITE: {
-        JSObject* obj = (op == JSOP_REGEXP)
-                        ? script->getRegExp(GET_UINT32_INDEX(pc))
-                        : script->getObject(GET_UINT32_INDEX(pc));
+        JSObject* obj = script->getObject(GET_UINT32_INDEX(pc));
         RootedValue objv(cx, ObjectValue(*obj));
         JSString* str = ValueToSource(cx, objv);
         if (!str)

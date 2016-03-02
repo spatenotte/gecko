@@ -4,15 +4,14 @@
 "use strict";
 
 var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-var { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
-var { gDevTools } = Cu.import("resource://devtools/client/framework/gDevTools.jsm", {});
 var { console } = Cu.import("resource://gre/modules/Console.jsm", {});
 var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 
+var Services = require("Services");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 DevToolsUtils.testing = true;
 DevToolsUtils.dumpn.wantLogging = true;
-DevToolsUtils.dumpv.wantLogging = true;
+DevToolsUtils.dumpv.wantVerbose = false;
 
 var { OS } = require("resource://gre/modules/osfile.jsm");
 var { FileUtils } = require("resource://gre/modules/FileUtils.jsm");
@@ -24,6 +23,7 @@ var HeapSnapshotFileUtils = require("devtools/shared/heapsnapshot/HeapSnapshotFi
 var HeapAnalysesClient = require("devtools/shared/heapsnapshot/HeapAnalysesClient");
 var { addDebuggerToGlobal } = require("resource://gre/modules/jsdebugger.jsm");
 var Store = require("devtools/client/memory/store");
+var { L10N } = require("devtools/client/memory/utils");
 var SYSTEM_PRINCIPAL = Cc["@mozilla.org/systemprincipal;1"].createInstance(Ci.nsIPrincipal);
 
 function dumpn(msg) {
@@ -71,24 +71,6 @@ function waitUntilSnapshotState (store, expected) {
   };
   do_print(`Waiting for snapshots to be of state: ${expected}`);
   return waitUntilState(store, predicate);
-}
-
-function isBreakdownType (report, type) {
-  // Little sanity check, all reports should have at least a children array.
-  if (!report || !Array.isArray(report.children)) {
-    return false;
-  }
-  switch (type) {
-    case "coarseType":
-      return report.children.find(c => c.name === "objects");
-    case "objectClass":
-      return report.children.find(c => c.name === "Function");
-    case "internalType":
-      return report.children.find(c => c.name === "js::BaseShape") &&
-             !report.children.find(c => c.name === "objects");
-    default:
-      throw new Error(`isBreakdownType does not yet support ${type}`);
-  }
 }
 
 function *createTempFile () {

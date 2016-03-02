@@ -1688,7 +1688,7 @@ nsDocShell::FirePageHideNotification(bool aIsUnload)
       mTiming->NotifyUnloadEventEnd();
     }
 
-    nsAutoTArray<nsCOMPtr<nsIDocShell>, 8> kids;
+    AutoTArray<nsCOMPtr<nsIDocShell>, 8> kids;
     uint32_t n = mChildList.Length();
     kids.SetCapacity(n);
     for (uint32_t i = 0; i < n; i++) {
@@ -2881,12 +2881,15 @@ nsDocShell::PopProfileTimelineMarkers(
     JSContext* aCx,
     JS::MutableHandle<JS::Value> aOut)
 {
+  RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
+  if (!timelines) {
+    return NS_OK;
+  }
+
   nsTArray<dom::ProfileTimelineMarker> store;
   SequenceRooter<dom::ProfileTimelineMarker> rooter(aCx, &store);
 
-  if (mObserved) {
-    mObserved->PopMarkers(aCx, store);
-  }
+  timelines->PopMarkers(this, aCx, store);
 
   if (!ToJSValue(aCx, store, aOut)) {
     JS_ClearPendingException(aCx);
@@ -3492,22 +3495,19 @@ nsDocShell::CanAccessItem(nsIDocShellTreeItem* aTargetItem,
 
   nsCOMPtr<nsIDocShell> targetDS = do_QueryInterface(aTargetItem);
   nsCOMPtr<nsIDocShell> accessingDS = do_QueryInterface(aAccessingItem);
-  if (!!targetDS != !!accessingDS) {
-    // We must be able to convert both or neither to nsIDocShell.
+  if (!targetDS || !accessingDS) {
+    // We must be able to convert both to nsIDocShell.
     return false;
   }
 
-  if (targetDS && accessingDS &&
-      (targetDS->GetIsInBrowserElement() !=
-         accessingDS->GetIsInBrowserElement() ||
-       targetDS->GetAppId() != accessingDS->GetAppId())) {
+  if (targetDS->GetIsInBrowserElement() != accessingDS->GetIsInBrowserElement() ||
+      targetDS->GetAppId() != accessingDS->GetAppId()) {
     return false;
   }
 
   // A private document can't access a non-private one, and vice versa.
-  if (aTargetItem->GetDocument()->GetLoadContext()->UsePrivateBrowsing() !=
-      aAccessingItem->GetDocument()->GetLoadContext()->UsePrivateBrowsing())
-  {
+  if (static_cast<nsDocShell*>(targetDS.get())->UsePrivateBrowsing() !=
+      static_cast<nsDocShell*>(accessingDS.get())->UsePrivateBrowsing()) {
     return false;
   }
 
@@ -4396,7 +4396,7 @@ nsDocShell::RemoveFromSessionHistory()
 
   int32_t index = 0;
   sessionHistory->GetIndex(&index);
-  nsAutoTArray<uint64_t, 16> ids;
+  AutoTArray<uint64_t, 16> ids;
   ids.AppendElement(mHistoryID);
   internalHistory->RemoveEntries(ids, index);
   return NS_OK;
@@ -4487,7 +4487,7 @@ nsDocShell::ClearFrameHistory(nsISHEntry* aEntry)
 
   int32_t count = 0;
   shcontainer->GetChildCount(&count);
-  nsAutoTArray<uint64_t, 16> ids;
+  AutoTArray<uint64_t, 16> ids;
   for (int32_t i = 0; i < count; ++i) {
     nsCOMPtr<nsISHEntry> child;
     shcontainer->GetChildAt(i, getter_AddRefs(child));
@@ -4972,7 +4972,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     bool sendTelemetry = false;
     if (NS_ERROR_PHISHING_URI == aError) {
       sendTelemetry = true;
-      error.AssignLiteral("phishingBlocked");
+      error.AssignLiteral("deceptiveBlocked");
       bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_PHISHING_PAGE_FRAME
                            : nsISecurityUITelemetry::WARNING_PHISHING_PAGE_TOP;
     } else if (NS_ERROR_MALWARE_URI == aError) {
@@ -5815,6 +5815,15 @@ nsDocShell::SetPosition(int32_t aX, int32_t aY)
   }
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetPositionDesktopPix(int32_t aX, int32_t aY)
+{
+  // Added to nsIBaseWindow in bug 1247335;
+  // implement if a use-case is found.
+  NS_ASSERTION(false, "implement me!");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -14151,11 +14160,6 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNonSubresourceReques
                                       bool* aShouldIntercept)
 {
   *aShouldIntercept = false;
-  // Preffed off.
-  if (!nsContentUtils::ServiceWorkerInterceptionEnabled()) {
-    return NS_OK;
-  }
-
   // No in private browsing
   if (mInPrivateBrowsing) {
     return NS_OK;
@@ -14313,9 +14317,11 @@ nsDocShell::InFrameSwap()
 NS_IMETHODIMP
 nsDocShell::IssueWarning(uint32_t aWarning, bool aAsError)
 {
-  nsCOMPtr<nsIDocument> doc = mContentViewer->GetDocument();
-  if (doc) {
-    doc->WarnOnceAbout(nsIDocument::DeprecatedOperations(aWarning), aAsError);
+  if (mContentViewer) {
+    nsCOMPtr<nsIDocument> doc = mContentViewer->GetDocument();
+    if (doc) {
+      doc->WarnOnceAbout(nsIDocument::DeprecatedOperations(aWarning), aAsError);
+    }
   }
   return NS_OK;
 }

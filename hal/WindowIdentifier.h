@@ -8,8 +8,8 @@
 #define mozilla_hal_WindowIdentifier_h
 
 #include "mozilla/Types.h"
-#include "nsTArray.h"
 #include "nsCOMPtr.h"
+#include "nsTArray.h"
 
 class nsPIDOMWindowInner;
 
@@ -100,7 +100,7 @@ private:
    */
   uint64_t GetWindowID() const;
 
-  AutoInfallibleTArray<uint64_t, 3> mID;
+  AutoTArray<uint64_t, 3> mID;
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
   bool mIsEmpty;
 };

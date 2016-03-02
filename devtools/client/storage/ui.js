@@ -69,6 +69,7 @@ var StorageUI = this.StorageUI = function StorageUI(front, target, panelWin) {
     emptyText: L10N.getStr("table.emptyText"),
     highlightUpdated: true,
   });
+
   this.displayObjectSidebar = this.displayObjectSidebar.bind(this);
   this.table.on(TableWidget.EVENTS.ROW_SELECTED, this.displayObjectSidebar);
 
@@ -79,6 +80,10 @@ var StorageUI = this.StorageUI = function StorageUI(front, target, panelWin) {
   this.sidebar.setAttribute("width", "300");
   this.view = new VariablesView(this.sidebar.firstChild,
                                 GENERIC_VARIABLES_VIEW_SETTINGS);
+
+  this.searchBox = this._panelDoc.getElementById("storage-searchbox");
+  this.filterItems = this.filterItems.bind(this);
+  this.searchBox.addEventListener("input", this.filterItems);
 
   this.front.listStores().then(storageTypes => {
     this.populateStorageTree(storageTypes);
@@ -112,6 +117,8 @@ StorageUI.prototype = {
     this.front.off("stores-update", this.onUpdate);
     this.front.off("stores-cleared", this.onCleared);
     this._panelDoc.removeEventListener("keypress", this.handleKeypress);
+    this.searchBox.removeEventListener("input", this.filterItems);
+    this.searchBox = null;
     this._telemetry.toolClosed("storage");
   },
 
@@ -150,7 +157,7 @@ StorageUI.prototype = {
    *        An object containing which storage types were cleared
    */
   onCleared: function(response) {
-    let [type, host, db, objectStore] = this.tree.selectedItem;
+    let [type, host] = this.tree.selectedItem;
     if (response.hasOwnProperty(type) && response[type].indexOf(host) > -1) {
       this.table.clear();
       this.hideSidebar();
@@ -219,7 +226,7 @@ StorageUI.prototype = {
               this.tree.selectedItem = [type, host, name[0], name[1]];
               this.fetchStorageObjects(type, host, [JSON.stringify(name)], 1);
             }
-          } catch(ex) {
+          } catch (ex) {
             // Do nothing
           }
         }
@@ -317,7 +324,9 @@ StorageUI.prototype = {
   fetchStorageObjects: function(type, host, names, reason) {
     let fetchOpts = reason === 3 ? {offset: this.itemOffset}
                                  : {};
-    this.storageTypes[type].getStoreObjects(host, names, fetchOpts).then(({data}) => {
+    let storageType = this.storageTypes[type];
+
+    storageType.getStoreObjects(host, names, fetchOpts).then(({data}) => {
       if (!data.length) {
         this.emit("store-objects-updated");
         return;
@@ -341,11 +350,17 @@ StorageUI.prototype = {
   populateStorageTree: function(storageTypes) {
     this.storageTypes = {};
     for (let type in storageTypes) {
+      // Ignore `from` field, which is just a protocol.js implementation
+      // artifact.
       if (type === "from") {
         continue;
       }
-
-      let typeLabel = L10N.getStr("tree.labels." + type);
+      let typeLabel = type;
+      try {
+        typeLabel = L10N.getStr("tree.labels." + type);
+      } catch (e) {
+        console.error("Unable to localize tree label type:" + type);
+      }
       this.tree.add([{id: type, label: typeLabel, type: "store"}]);
       if (!storageTypes[type].hosts) {
         continue;
@@ -361,7 +376,7 @@ StorageUI.prototype = {
               this.tree.selectedItem = [type, host, names[0], names[1]];
               this.fetchStorageObjects(type, host, [name], 0);
             }
-          } catch(ex) {
+          } catch (ex) {
             // Do Nothing
           }
         }
@@ -537,6 +552,7 @@ StorageUI.prototype = {
   onHostSelect: function(event, item) {
     this.table.clear();
     this.hideSidebar();
+    this.searchBox.value = "";
 
     let [type, host] = item;
     let names = null;
@@ -568,7 +584,13 @@ StorageUI.prototype = {
       if (!uniqueKey) {
         this.table.uniqueId = uniqueKey = key;
       }
-      columns[key] = L10N.getStr("table.headers." + type + "." + key);
+      columns[key] = key;
+      try {
+        columns[key] = L10N.getStr("table.headers." + type + "." + key);
+      } catch (e) {
+        console.error("Unable to localize table header type:" + type +
+                      " key:" + key);
+      }
     }
     this.table.setColumns(columns, null, HIDDEN_COLUMNS);
     this.shouldResetColumns = false;
@@ -630,15 +652,26 @@ StorageUI.prototype = {
   },
 
   /**
+   * Handles filtering the table
+   */
+  filterItems() {
+    let value = this.searchBox.value;
+    this.table.filterItems(value, ["valueActor"]);
+    this._panelDoc.documentElement.classList.toggle("filtering", !!value);
+  },
+
+  /**
    * Handles endless scrolling for the table
    */
   handleScrollEnd: function() {
-    if (!this.shouldLoadMoreItems) return;
+    if (!this.shouldLoadMoreItems) {
+      return;
+    }
     this.shouldLoadMoreItems = false;
     this.itemOffset += 50;
 
     let item = this.tree.selectedItem;
-    let [type, host, db, objectStore] = item;
+    let [type, host] = item;
     let names = null;
     if (item.length > 2) {
       names = [JSON.stringify(item.slice(2))];

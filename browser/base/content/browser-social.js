@@ -259,8 +259,6 @@ SocialUI = {
   // called on tab/urlbar/location changes and after customization. Update
   // anything that is tab specific.
   updateState: function() {
-    if (location == "about:customizing")
-      return;
     goSetCommandEnabled("Social:PageShareOrMark", this.canShareOrMarkPage(gBrowser.currentURI));
     if (!SocialUI.enabled)
       return;
@@ -370,7 +368,7 @@ SocialFlyout = {
     // the xbl bindings for the iframe probably don't exist yet, so we can't
     // access iframe.messageManager directly - but can get at it with this dance.
     let mm = iframe.QueryInterface(Components.interfaces.nsIFrameLoaderOwner).frameLoader.messageManager;
-    mm.sendAsyncMessage("Social:SetErrorURL", null,
+    mm.sendAsyncMessage("Social:SetErrorURL",
                         { template: "about:socialerror?mode=compactInfo&origin=%{origin}" });
   },
 
@@ -512,7 +510,7 @@ SocialShare = {
     iframe.setAttribute("messagemanagergroup", "social");
     panel.lastChild.appendChild(iframe);
     let mm = iframe.QueryInterface(Components.interfaces.nsIFrameLoaderOwner).frameLoader.messageManager;
-    mm.sendAsyncMessage("Social:SetErrorURL", null,
+    mm.sendAsyncMessage("Social:SetErrorURL",
                         { template: "about:socialerror?mode=compactInfo&origin=%{origin}&url=%{url}" });
 
     this.populateProviderMenu();
@@ -763,7 +761,7 @@ SocialSidebar = {
 
   // Whether the sidebar can be shown for this window.
   get canShow() {
-    if (!SocialUI.enabled || document.mozFullScreen)
+    if (!SocialUI.enabled || document.fullscreenElement)
       return false;
     return Social.providers.some(p => p.sidebarURL);
   },

@@ -930,7 +930,7 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
   nsCOMPtr<nsIBrowserDOMWindow> browserDOMWindow =
     mRemoteBrowser->GetBrowserDOMWindow();
 
-  if (!otherBrowserDOMWindow || !browserDOMWindow) {
+  if (!!otherBrowserDOMWindow != !!browserDOMWindow) {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
@@ -1549,6 +1549,9 @@ nsFrameLoader::DestroyComplete()
   if (mChildMessageManager) {
     static_cast<nsInProcessTabChildGlobal*>(mChildMessageManager.get())->Disconnect();
   }
+
+  mMessageManager = nullptr;
+  mChildMessageManager = nullptr;
 }
 
 NS_IMETHODIMP
@@ -2463,7 +2466,9 @@ public:
   {
     nsInProcessTabChildGlobal* tabChild =
       static_cast<nsInProcessTabChildGlobal*>(mFrameLoader->mChildMessageManager.get());
-    if (tabChild && tabChild->GetInnerManager()) {
+    // Since bug 1126089, messages can arrive even when the docShell is destroyed.
+    // Here we make sure that those messages are not delivered.
+    if (tabChild && tabChild->GetInnerManager() && mFrameLoader->GetExistingDocShell()) {
       nsCOMPtr<nsIXPConnectJSObjectHolder> kungFuDeathGrip(tabChild->GetGlobal());
       ReceiveMessage(static_cast<EventTarget*>(tabChild), mFrameLoader,
                      tabChild->GetInnerManager());

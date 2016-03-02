@@ -16,7 +16,8 @@
 #include "nsTableFrame.h"
 #include "celldata.h"
 
-#include "RestyleManager.h"
+#include "mozilla/RestyleManagerHandle.h"
+#include "mozilla/RestyleManagerHandleInlines.h"
 #include <algorithm>
 
 #include "nsIScriptError.h"
@@ -226,7 +227,7 @@ ApplyBorderToStyle(const nsMathMLmtdFrame* aFrame,
 }
 
 static nsMargin
-ComputeBorderOverflow(nsMathMLmtdFrame* aFrame, nsStyleBorder aStyleBorder)
+ComputeBorderOverflow(nsMathMLmtdFrame* aFrame, const nsStyleBorder& aStyleBorder)
 {
   nsMargin overflow;
   int32_t rowIndex;

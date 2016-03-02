@@ -491,33 +491,15 @@ PluginModuleChromeParent::LoadModule(const char* aFilePath, uint32_t aPluginId,
 {
     PLUGIN_LOG_DEBUG_FUNCTION;
 
-    int32_t sandboxLevel = 0;
-#if defined(XP_WIN) && defined(MOZ_SANDBOX)
-    nsAutoCString sandboxPref("dom.ipc.plugins.sandbox-level.");
-    sandboxPref.Append(aPluginTag->GetNiceFileName());
-    if (NS_FAILED(Preferences::GetInt(sandboxPref.get(), &sandboxLevel))) {
-      sandboxLevel = Preferences::GetInt("dom.ipc.plugins.sandbox-level.default");
-    }
-
-#if defined(_AMD64_)
-    // As level 2 is now the default NPAPI sandbox level for 64-bit flash, we
-    // don't want to allow a lower setting unless this environment variable is
-    // set. This should be changed if the firefox.js pref file is changed.
-    if (aPluginTag->mIsFlashPlugin &&
-        !PR_GetEnv("MOZ_ALLOW_WEAKER_SANDBOX") && sandboxLevel < 2) {
-        sandboxLevel = 2;
-    }
-#endif
-#endif
-
     nsAutoPtr<PluginModuleChromeParent> parent(
-            new PluginModuleChromeParent(aFilePath, aPluginId, sandboxLevel,
+            new PluginModuleChromeParent(aFilePath, aPluginId,
+                                         aPluginTag->mSandboxLevel,
                                          aPluginTag->mSupportsAsyncInit));
     UniquePtr<LaunchCompleteTask> onLaunchedRunnable(new LaunchedTask(parent));
     parent->mSubprocess->SetCallRunnableImmediately(!parent->mIsStartingAsync);
     TimeStamp launchStart = TimeStamp::Now();
     bool launched = parent->mSubprocess->Launch(Move(onLaunchedRunnable),
-                                                sandboxLevel);
+                                                aPluginTag->mSandboxLevel);
     if (!launched) {
         // We never reached open
         parent->mShutdown = true;
@@ -673,6 +655,7 @@ PluginModuleParent::PluginModuleParent(bool aIsChrome, bool aAllowAsyncInit)
     , mNPPIface(nullptr)
     , mPlugin(nullptr)
     , mTaskFactory(this)
+    , mSandboxLevel(0)
     , mIsFlashPlugin(false)
     , mIsStartingAsync(false)
     , mNPInitialized(false)
@@ -736,7 +719,6 @@ PluginModuleChromeParent::PluginModuleChromeParent(const char* aFilePath,
     , mHangUIParent(nullptr)
     , mHangUIEnabled(true)
     , mIsTimerReset(true)
-    , mSandboxLevel(aSandboxLevel)
 #ifdef MOZ_CRASHREPORTER
     , mCrashReporterMutex("PluginModuleChromeParent::mCrashReporterMutex")
     , mCrashReporter(nullptr)
@@ -754,6 +736,7 @@ PluginModuleChromeParent::PluginModuleChromeParent(const char* aFilePath,
 {
     NS_ASSERTION(mSubprocess, "Out of memory!");
     sInstantiated = true;
+    mSandboxLevel = aSandboxLevel;
     mRunID = GeckoChildProcessHost::GetUniqueID();
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -1152,24 +1135,6 @@ PluginModuleChromeParent::AnnotateHang(mozilla::HangMonitor::HangAnnotations& aA
         aAnnotations.AddAnnotation(NS_LITERAL_STRING("pluginName"), mPluginName);
         aAnnotations.AddAnnotation(NS_LITERAL_STRING("pluginVersion"),
                                    mPluginVersion);
-        if (mIsFlashPlugin) {
-            bool isWhitelistedForShumway = false;
-            { // Scope for lock
-                mozilla::MutexAutoLock lock(mHangAnnotatorMutex);
-                if (!mProtocolCallStack.IsEmpty()) {
-                    mozilla::ipc::IProtocol* topProtocol =
-                        mProtocolCallStack.LastElement();
-                    PluginInstanceParent* instance =
-                        GetManagingInstance(topProtocol);
-                    if (instance) {
-                        isWhitelistedForShumway =
-                            instance->IsWhitelistedForShumway();
-                    }
-                }
-            }
-            aAnnotations.AddAnnotation(NS_LITERAL_STRING("pluginIsWhitelistedForShumway"),
-                                       isWhitelistedForShumway);
-        }
     }
 }
 
@@ -1392,6 +1357,7 @@ PluginModuleParent::GetPluginDetails()
     mPluginVersion = pluginTag->Version();
     mPluginFilename = pluginTag->FileName();
     mIsFlashPlugin = pluginTag->mIsFlashPlugin;
+    mSandboxLevel = pluginTag->mSandboxLevel;
     return true;
 }
 
@@ -2015,6 +1981,22 @@ PluginModuleParent::EndUpdateBackground(NPP instance, const nsIntRect& aRect)
 
     return i->EndUpdateBackground(aRect);
 }
+
+#if defined(XP_WIN)
+nsresult
+PluginModuleParent::GetScrollCaptureContainer(NPP aInstance,
+                                              mozilla::layers::ImageContainer** aContainer)
+{
+    PluginInstanceParent* inst = PluginInstanceParent::Cast(aInstance);
+    return !inst ? NS_ERROR_FAILURE : inst->GetScrollCaptureContainer(aContainer);
+}
+nsresult
+PluginModuleParent::UpdateScrollState(NPP aInstance, bool aIsScrolling)
+{
+    PluginInstanceParent* inst = PluginInstanceParent::Cast(aInstance);
+    return !inst ? NS_ERROR_FAILURE : inst->UpdateScrollState(aIsScrolling);
+}
+#endif
 
 void
 PluginModuleParent::OnInitFailure()
@@ -2669,6 +2651,23 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
 
     if (mIsFlashPlugin) {
         parentInstance->InitMetadata(strPluginType, srcAttribute);
+#ifdef XP_WIN
+        // Force windowless mode (bug 1201904) when sandbox level >= 2
+        if (mSandboxLevel >= 2) {
+           NS_NAMED_LITERAL_CSTRING(wmodeAttributeName, "wmode");
+           NS_NAMED_LITERAL_CSTRING(opaqueAttributeValue, "opaque");
+           auto wmodeAttributeIndex =
+               names.IndexOf(wmodeAttributeName, 0, comparator);
+           if (wmodeAttributeIndex != names.NoIndex) {
+               if (!values[wmodeAttributeIndex].EqualsLiteral("transparent")) {
+                   values[wmodeAttributeIndex].Assign(opaqueAttributeValue);
+               }
+           } else {
+               names.AppendElement(wmodeAttributeName);
+               values.AppendElement(opaqueAttributeValue);
+           }
+        }
+#endif
     }
 
     // Release the surrogate reference that was in pdata

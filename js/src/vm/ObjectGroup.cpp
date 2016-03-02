@@ -582,14 +582,8 @@ ObjectGroup::defaultNewGroup(ExclusiveContext* cx, const Class* clasp,
 
         const JSAtomState& names = cx->names();
 
-        if (obj->is<RegExpObject>()) {
-            AddTypePropertyId(cx, group, nullptr, NameToId(names.source), TypeSet::StringType());
-            AddTypePropertyId(cx, group, nullptr, NameToId(names.global), TypeSet::BooleanType());
-            AddTypePropertyId(cx, group, nullptr, NameToId(names.ignoreCase), TypeSet::BooleanType());
-            AddTypePropertyId(cx, group, nullptr, NameToId(names.multiline), TypeSet::BooleanType());
-            AddTypePropertyId(cx, group, nullptr, NameToId(names.sticky), TypeSet::BooleanType());
+        if (obj->is<RegExpObject>())
             AddTypePropertyId(cx, group, nullptr, NameToId(names.lastIndex), TypeSet::Int32Type());
-        }
 
         if (obj->is<StringObject>())
             AddTypePropertyId(cx, group, nullptr, NameToId(names.length), TypeSet::Int32Type());
@@ -1321,8 +1315,10 @@ ObjectGroup::newPlainObject(ExclusiveContext* cx, IdValuePair* properties, size_
         entry.types = types;
 
         ObjectGroupCompartment::PlainObjectTable::AddPtr np = table->lookupForAdd(lookup);
-        if (!table->add(np, key, entry))
+        if (!table->add(np, key, entry)) {
+            ReportOutOfMemory(cx);
             return nullptr;
+        }
 
         ids.forget();
         types.forget();
@@ -1390,8 +1386,7 @@ ObjectGroup::newPlainObject(ExclusiveContext* cx, IdValuePair* properties, size_
 // ObjectGroupCompartment AllocationSiteTable
 /////////////////////////////////////////////////////////////////////
 
-struct ObjectGroupCompartment::AllocationSiteKey : public DefaultHasher<AllocationSiteKey>,
-                                                   public JS::Traceable {
+struct ObjectGroupCompartment::AllocationSiteKey : public DefaultHasher<AllocationSiteKey> {
     ReadBarrieredScript script;
 
     uint32_t offset : 24;
@@ -1433,9 +1428,9 @@ struct ObjectGroupCompartment::AllocationSiteKey : public DefaultHasher<Allocati
                MovableCellHasher<JSObject*>::match(a.proto, b.proto);
     }
 
-    static void trace(AllocationSiteKey* key, JSTracer* trc) {
-        TraceRoot(trc, &key->script, "AllocationSiteKey script");
-        TraceNullableRoot(trc, &key->proto, "AllocationSiteKey proto");
+    void trace(JSTracer* trc) {
+        TraceRoot(trc, &script, "AllocationSiteKey script");
+        TraceNullableRoot(trc, &proto, "AllocationSiteKey proto");
     }
 
     bool needsSweep() {

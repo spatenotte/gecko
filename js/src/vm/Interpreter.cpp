@@ -389,9 +389,12 @@ js::RunScript(JSContext* cx, RunState& state)
 {
     JS_CHECK_RECURSION(cx, return false);
 
-#if defined(NIGHTLY_BUILD) && defined(MOZ_HAVE_RDTSC)
+    if (!Debugger::checkNoExecute(cx, state.script()))
+        return false;
+
+#if defined(MOZ_HAVE_RDTSC)
     js::AutoStopwatch stopwatch(cx);
-#endif // defined(NIGHTLY_BUILD) && defined(MOZ_HAVE_RDTSC)
+#endif // defined(MOZ_HAVE_RDTSC)
 
     SPSEntryMarker marker(cx->runtime(), state.script());
 
@@ -1018,7 +1021,7 @@ js::UnwindScopeToTryPc(JSScript* script, JSTryNote* tn)
 static bool
 ForcedReturn(JSContext* cx, ScopeIter& si, InterpreterRegs& regs, bool frameOk = true)
 {
-    bool ok = Debugger::onLeaveFrame(cx, regs.fp(), frameOk);
+    bool ok = Debugger::onLeaveFrame(cx, regs.fp(), regs.pc, frameOk);
     UnwindAllScopesInFrame(cx, si);
     // Point the frame to the end of the script, regardless of error. The
     // caller must jump to the correct continuation depending on 'ok'.
@@ -1204,7 +1207,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
         }
 
         ok = HandleClosingGeneratorReturn(cx, regs.fp(), ok);
-        ok = Debugger::onLeaveFrame(cx, regs.fp(), ok);
+        ok = Debugger::onLeaveFrame(cx, regs.fp(), regs.pc, ok);
     } else {
         // We may be propagating a forced return from the interrupt
         // callback, which cannot easily force a return.
@@ -1904,7 +1907,7 @@ CASE(JSOP_RETRVAL)
         TraceLogStopEvent(logger, TraceLogger_Engine);
         TraceLogStopEvent(logger, TraceLogger_Scripts);
 
-        interpReturnOK = Debugger::onLeaveFrame(cx, REGS.fp(), interpReturnOK);
+        interpReturnOK = Debugger::onLeaveFrame(cx, REGS.fp(), REGS.pc, interpReturnOK);
 
         REGS.fp()->epilogue(cx);
 
@@ -3990,7 +3993,7 @@ DEFAULT()
     MOZ_CRASH("Invalid HandleError continuation");
 
   exit:
-    interpReturnOK = Debugger::onLeaveFrame(cx, REGS.fp(), interpReturnOK);
+    interpReturnOK = Debugger::onLeaveFrame(cx, REGS.fp(), REGS.pc, interpReturnOK);
 
     REGS.fp()->epilogue(cx);
 
@@ -4081,6 +4084,10 @@ js::GetScopeName(JSContext* cx, HandleObject scopeChain, HandlePropertyName name
 
     if (!GetProperty(cx, obj, obj, name, vp))
         return false;
+
+    // We do our own explicit checking for |this|
+    if (name == cx->names().dotThis)
+        return true;
 
     // See note in FetchName.
     return CheckUninitializedLexical(cx, name, vp);
@@ -4879,16 +4886,29 @@ js::ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name,
 bool
 js::ThrowUninitializedThis(JSContext* cx, AbstractFramePtr frame)
 {
-    RootedFunction fun(cx, frame.callee());
-
-    const char* name = "anonymous";
-    JSAutoByteString str;
-    if (fun->atom()) {
-        if (!AtomToPrintableString(cx, fun->atom(), &str))
-            return false;
-        name = str.ptr();
+    RootedFunction fun(cx);
+    if (frame.isFunctionFrame()) {
+        fun = frame.callee();
+    } else {
+        MOZ_ASSERT(frame.isEvalFrame());
+        MOZ_ASSERT(frame.script()->isDirectEvalInFunction());
+        fun = frame.script()->getCallerFunction();
     }
 
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_UNINITIALIZED_THIS, name);
+    if (fun->isDerivedClassConstructor()) {
+        const char* name = "anonymous";
+        JSAutoByteString str;
+        if (fun->atom()) {
+            if (!AtomToPrintableString(cx, fun->atom(), &str))
+                return false;
+            name = str.ptr();
+        }
+
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_UNINITIALIZED_THIS, name);
+        return false;
+    }
+
+    MOZ_ASSERT(fun->isArrow());
+    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_UNINITIALIZED_THIS_ARROW);
     return false;
 }

@@ -89,6 +89,7 @@ nrappkit copyright:
 #include <sys/types.h>
 #include <assert.h>
 #include <errno.h>
+#include <string>
 
 #include "nspr.h"
 #include "prerror.h"
@@ -110,8 +111,10 @@ nrappkit copyright:
 #include "nsTArray.h"
 #include "mozilla/dom/TCPSocketBinding.h"
 #include "nsITCPSocketCallback.h"
+#include "nsIPrefService.h"
+#include "nsIPrefBranch.h"
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
 // csi_platform.h deep in nrappkit defines LOG_INFO and LOG_WARNING
 #ifdef LOG_INFO
 #define LOG_TEMP_INFO LOG_INFO
@@ -164,11 +167,12 @@ extern "C" {
 }
 #include "nr_socket_prsock.h"
 #include "simpletokenbucket.h"
+#include "test_nr_socket.h"
 
 // Implement the nsISupports ref counting
 namespace mozilla {
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
 class SingletonThreadHolder final
 {
 private:
@@ -256,7 +260,7 @@ static void ClearSingletonOnShutdown()
 static nsIThread* GetIOThreadAndAddUse_s()
 {
   // Always runs on STS thread!
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
   // We need to safely release this on shutdown to avoid leaks
   if (!sThread) {
     sThread = new SingletonThreadHolder(NS_LITERAL_CSTRING("mtransport"));
@@ -355,6 +359,9 @@ void NrSocket::OnSocketReady(PRFileDesc *fd, int16_t outflags) {
     fire_callback(NR_ASYNC_WAIT_READ);
   if (outflags & PR_POLL_WRITE & poll_flags())
     fire_callback(NR_ASYNC_WAIT_WRITE);
+  if (outflags & (PR_POLL_ERR | PR_POLL_NVAL | PR_POLL_HUP))
+    // TODO: Bug 946423: how do we notify the upper layers about this?
+    close();
 }
 
 void NrSocket::OnSocketDetached(PRFileDesc *fd) {
@@ -909,6 +916,8 @@ int NrSocket::listen(int backlog) {
   assert(fd_);
   status = PR_Listen(fd_, backlog);
   if (status != PR_SUCCESS) {
+    r_log(LOG_GENERIC, LOG_CRIT, "%s: PR_GetError() == %d",
+          __FUNCTION__, PR_GetError());
     ABORT(R_IO_ERROR);
   }
 
@@ -1047,7 +1056,6 @@ NS_IMETHODIMP NrUdpSocketIpcProxy::CallListenerOpened() {
 // callback while UDP socket is connected
 NS_IMETHODIMP NrUdpSocketIpcProxy::CallListenerConnected() {
   return socket_->CallListenerConnected();
-  return NS_OK;
 }
 
 // callback while UDP socket is closed
@@ -1068,7 +1076,7 @@ NrUdpSocketIpc::~NrUdpSocketIpc()
   // also guarantees socket_child_ is released from the io_thread, and
   // tells the SingletonThreadHolder we're done with it
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
   // close(), but transfer the socket_child_ reference to die as well
   RUN_ON_THREAD(io_thread_,
                 mozilla::WrapRunnableNM(&NrUdpSocketIpc::release_child_i,
@@ -1536,7 +1544,7 @@ void NrUdpSocketIpc::close_i() {
   }
 }
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
 // close(), but transfer the socket_child_ reference to die as well
 // static
 void NrUdpSocketIpc::release_child_i(nsIUDPSocketChild* aChild,
@@ -1575,7 +1583,7 @@ void NrUdpSocketIpc::recv_callback_s(RefPtr<nr_udp_message> msg) {
   }
 }
 
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
 // TCPSocket.
 class NrTcpSocketIpc::TcpSocketReadyRunner: public nsRunnable
 {
@@ -2055,24 +2063,26 @@ static nr_socket_vtbl nr_socket_local_vtbl={
   nr_socket_local_accept
 };
 
-int nr_socket_local_create(void *obj, nr_transport_addr *addr, nr_socket **sockp) {
-  RefPtr<NrSocketBase> sock;
+/* static */
+int
+NrSocketBase::CreateSocket(nr_transport_addr *addr, RefPtr<NrSocketBase> *sock)
+{
   int r, _status;
 
   // create IPC bridge for content process
   if (XRE_IsParentProcess()) {
-    sock = new NrSocket();
+    *sock = new NrSocket();
   } else {
     switch (addr->protocol) {
       case IPPROTO_UDP:
-        sock = new NrUdpSocketIpc();
+        *sock = new NrUdpSocketIpc();
         break;
       case IPPROTO_TCP:
-#if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZILLA_INTERNAL_API)
         {
           nsCOMPtr<nsIThread> main_thread;
           NS_GetMainThread(getter_AddRefs(main_thread));
-          sock = new NrTcpSocketIpc(main_thread.get());
+          *sock = new NrTcpSocketIpc(main_thread.get());
         }
 #else
         ABORT(R_REJECTED);
@@ -2081,9 +2091,26 @@ int nr_socket_local_create(void *obj, nr_transport_addr *addr, nr_socket **sockp
     }
   }
 
-  r = sock->create(addr);
+  r = (*sock)->create(addr);
   if (r)
     ABORT(r);
+
+  _status = 0;
+abort:
+  if (_status) {
+    *sock = nullptr;
+  }
+  return _status;
+}
+
+int nr_socket_local_create(void *obj, nr_transport_addr *addr, nr_socket **sockp) {
+  RefPtr<NrSocketBase> sock;
+  int r, _status;
+
+  r = NrSocketBase::CreateSocket(addr, &sock);
+  if (r) {
+    ABORT(r);
+  }
 
   r = nr_socket_create_int(static_cast<void *>(sock),
                            sock->vtbl(), sockp);

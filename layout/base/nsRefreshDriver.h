@@ -345,8 +345,9 @@ private:
 
   enum EnsureTimerStartedFlags {
     eNone = 0,
-    eAdjustingTimer = 1 << 0,
-    eAllowTimeToGoBackwards = 1 << 1
+    eForceAdjustTimer = 1 << 0,
+    eAllowTimeToGoBackwards = 1 << 1,
+    eNeverAdjustTimer = 1 << 2,
   };
   void EnsureTimerStarted(EnsureTimerStartedFlags aFlags = eNone);
   void StopTimer();
@@ -429,9 +430,9 @@ private:
     nsCOMPtr<nsIDOMEvent> mEvent;
   };
 
-  nsAutoTArray<nsIPresShell*, 16> mStyleFlushObservers;
-  nsAutoTArray<nsIPresShell*, 16> mLayoutFlushObservers;
-  nsAutoTArray<nsIPresShell*, 16> mPresShellsToInvalidateIfHidden;
+  AutoTArray<nsIPresShell*, 16> mStyleFlushObservers;
+  AutoTArray<nsIPresShell*, 16> mLayoutFlushObservers;
+  AutoTArray<nsIPresShell*, 16> mPresShellsToInvalidateIfHidden;
   // nsTArray on purpose, because we want to be able to swap.
   nsTArray<nsIDocument*> mFrameRequestCallbackDocs;
   nsTArray<nsIDocument*> mThrottledFrameRequestCallbackDocs;

@@ -13,11 +13,14 @@
 
 #include "mozilla/AutoRestore.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/dom/HTMLDetailsElement.h"
 #include "mozilla/dom/HTMLSelectElement.h"
+#include "mozilla/dom/HTMLSummaryElement.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/Likely.h"
 #include "mozilla/LinkedList.h"
 #include "nsAbsoluteContainingBlock.h"
+#include "nsCSSPseudoElements.h"
 #include "nsIAtom.h"
 #include "nsIFrameInlines.h"
 #include "nsGkAtoms.h"
@@ -32,7 +35,8 @@
 #include "nsPresShell.h"
 #include "nsIPresShell.h"
 #include "nsUnicharUtils.h"
-#include "nsStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsViewManager.h"
 #include "nsStyleConsts.h"
 #include "nsIDOMXULElement.h"
@@ -76,7 +80,8 @@
 #include "nsAutoLayoutPhase.h"
 #include "nsStyleStructInlines.h"
 #include "nsPageContentFrame.h"
-#include "RestyleManager.h"
+#include "mozilla/RestyleManagerHandle.h"
+#include "mozilla/RestyleManagerHandleInlines.h"
 #include "StickyScrollContainer.h"
 #include "nsFieldSetFrame.h"
 #include "nsInlineFrame.h"
@@ -90,6 +95,8 @@
 #include "nsIScrollableFrame.h"
 #include "nsBackdropFrame.h"
 #include "nsTransitionManager.h"
+#include "DetailsFrame.h"
+#include "SummaryFrame.h"
 
 #ifdef MOZ_XUL
 #include "nsIRootBox.h"
@@ -433,7 +440,7 @@ AnyKidsNeedBlockParent(nsIFrame *aFrameList)
 
 // Reparent a frame into a wrapper frame that is a child of its old parent.
 static void
-ReparentFrame(RestyleManager* aRestyleManager,
+ReparentFrame(RestyleManagerHandle aRestyleManager,
               nsContainerFrame* aNewParentFrame,
               nsIFrame* aFrame)
 {
@@ -446,7 +453,7 @@ ReparentFrames(nsCSSFrameConstructor* aFrameConstructor,
                nsContainerFrame* aNewParentFrame,
                const nsFrameList& aFrameList)
 {
-  RestyleManager* restyleManager = aFrameConstructor->RestyleManager();
+  RestyleManagerHandle restyleManager = aFrameConstructor->RestyleManager();
   for (nsFrameList::Enumerator e(aFrameList); !e.AtEnd(); e.Next()) {
     ReparentFrame(restyleManager, aNewParentFrame, e.get());
   }
@@ -1310,7 +1317,7 @@ nsFrameConstructorState::ProcessFrameInsertions(nsAbsoluteItems& aFrameItems,
     nsIFrame* firstNewFrame = aFrameItems.FirstChild();
 
     // Cache the ancestor chain so that we can reuse it if needed.
-    nsAutoTArray<nsIFrame*, 20> firstNewFrameAncestors;
+    AutoTArray<nsIFrame*, 20> firstNewFrameAncestors;
     nsIFrame* notCommonAncestor = nullptr;
     if (lastChild) {
       notCommonAncestor = nsLayoutUtils::FillAncestors(firstNewFrame,
@@ -1328,7 +1335,7 @@ nsFrameConstructorState::ProcessFrameInsertions(nsAbsoluteItems& aFrameItems,
     } else {
       // Try the other children. First collect them to an array so that a
       // reasonable fast binary search can be used to find the insertion point.
-      nsAutoTArray<nsIFrame*, 128> children;
+      AutoTArray<nsIFrame*, 128> children;
       for (nsIFrame* f = childList.FirstChild(); f != lastChild;
            f = f->GetNextSibling()) {
         children.AppendElement(f);
@@ -1546,7 +1553,11 @@ nsCSSFrameConstructor::NotifyDestroyingFrame(nsIFrame* aFrame)
     CountersDirty();
   }
 
-  RestyleManager()->NotifyDestroyingFrame(aFrame);
+  // stylo: ServoRestyleManager does not need to be notified of frames being
+  // destroyed.
+  if (mozilla::RestyleManager* geckoRM = RestyleManager()->GetAsGecko()) {
+    geckoRM->NotifyDestroyingFrame(aFrame);
+  }
 
   nsFrameManager::NotifyDestroyingFrame(aFrame);
 }
@@ -1753,11 +1764,11 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
                                                   nsContainerFrame* aParentFrame,
                                                   nsIContent*      aParentContent,
                                                   nsStyleContext*  aStyleContext,
-                                                  nsCSSPseudoElements::Type aPseudoElement,
+                                                  CSSPseudoElementType aPseudoElement,
                                                   FrameConstructionItemList& aItems)
 {
-  MOZ_ASSERT(aPseudoElement == nsCSSPseudoElements::ePseudo_before ||
-             aPseudoElement == nsCSSPseudoElements::ePseudo_after,
+  MOZ_ASSERT(aPseudoElement == CSSPseudoElementType::before ||
+             aPseudoElement == CSSPseudoElementType::after,
              "unexpected aPseudoElement");
 
   // XXXbz is this ever true?
@@ -1766,7 +1777,7 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
     return;
   }
 
-  nsStyleSet *styleSet = mPresShell->StyleSet();
+  StyleSetHandle styleSet = mPresShell->StyleSet();
 
   // Probe for the existence of the pseudo-element
   RefPtr<nsStyleContext> pseudoStyleContext;
@@ -1778,7 +1789,7 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
   if (!pseudoStyleContext)
     return;
 
-  bool isBefore = aPseudoElement == nsCSSPseudoElements::ePseudo_before;
+  bool isBefore = aPseudoElement == CSSPseudoElementType::before;
 
   // |ProbePseudoStyleFor| checked the 'display' property and the
   // |ContentCount()| of the 'content' property for us.
@@ -1805,19 +1816,24 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
     return;
   }
 
-  RestyleManager::ReframingStyleContexts* rsc =
-    RestyleManager()->GetReframingStyleContexts();
-  if (rsc) {
-    nsStyleContext* oldStyleContext = rsc->Get(container, aPseudoElement);
-    if (oldStyleContext) {
-      RestyleManager::TryStartingTransition(aState.mPresContext,
-                                            container,
-                                            oldStyleContext,
-                                            &pseudoStyleContext);
-    } else {
-      aState.mPresContext->TransitionManager()->
-        PruneCompletedTransitions(container, aPseudoElement,
-                                  pseudoStyleContext);
+  // stylo: ServoRestyleManager does not handle transitions yet, and when it
+  // does it probably won't need to track reframed style contexts to start
+  // transitions correctly.
+  if (mozilla::RestyleManager* geckoRM = RestyleManager()->GetAsGecko()) {
+    RestyleManager::ReframingStyleContexts* rsc =
+      geckoRM->GetReframingStyleContexts();
+    if (rsc) {
+      nsStyleContext* oldStyleContext = rsc->Get(container, aPseudoElement);
+      if (oldStyleContext) {
+        RestyleManager::TryStartingTransition(aState.mPresContext,
+                                              container,
+                                              oldStyleContext,
+                                              &pseudoStyleContext);
+      } else {
+        aState.mPresContext->TransitionManager()->
+          PruneCompletedTransitions(container, aPseudoElement,
+                                    pseudoStyleContext);
+      }
     }
   }
 
@@ -2591,12 +2607,16 @@ nsCSSFrameConstructor::ConstructRootFrame()
 {
   AUTO_LAYOUT_PHASE_ENTRY_POINT(mPresShell->GetPresContext(), FrameC);
 
-  nsStyleSet *styleSet = mPresShell->StyleSet();
+  StyleSetHandle styleSet = mPresShell->StyleSet();
 
   // Set up our style rule observer.
   // XXXbz wouldn't this make more sense as part of presshell init?
-  {
-    styleSet->SetBindingManager(mDocument->BindingManager());
+  if (styleSet->IsGecko()) {
+    // XXXheycam We don't support XBL bindings providing style to
+    // ServoStyleSets yet.
+    styleSet->AsGecko()->SetBindingManager(mDocument->BindingManager());
+  } else {
+    NS_ERROR("stylo: cannot get ServoStyleSheets from XBL bindings yet");
   }
 
   // --------- BUILD VIEWPORT -----------
@@ -2761,7 +2781,7 @@ nsCSSFrameConstructor::SetUpDocElementContainingBlock(nsIContent* aDocElement)
   // Start off with the viewport as parent; we'll adjust it as needed.
   nsContainerFrame* parentFrame = viewportFrame;
 
-  nsStyleSet* styleSet = mPresShell->StyleSet();
+  StyleSetHandle styleSet = mPresShell->StyleSet();
   // If paginated, make sure we don't put scrollbars in
   if (!isScrollable) {
     rootPseudoStyle = styleSet->ResolveAnonymousBoxStyle(rootPseudo,
@@ -2840,7 +2860,7 @@ nsCSSFrameConstructor::ConstructAnonymousContentForCanvas(nsFrameConstructorStat
 {
   NS_ASSERTION(aFrame->GetType() == nsGkAtoms::canvasFrame, "aFrame should be canvas frame!");
 
-  nsAutoTArray<nsIAnonymousContentCreator::ContentInfo, 4> anonymousItems;
+  AutoTArray<nsIAnonymousContentCreator::ContentInfo, 4> anonymousItems;
   GetAnonymousContent(aDocElement, aFrame, anonymousItems);
   if (anonymousItems.IsEmpty()) {
     return;
@@ -2862,7 +2882,7 @@ nsCSSFrameConstructor::ConstructPageFrame(nsIPresShell*  aPresShell,
                                           nsContainerFrame*& aCanvasFrame)
 {
   nsStyleContext* parentStyleContext = aParentFrame->StyleContext();
-  nsStyleSet *styleSet = aPresShell->StyleSet();
+  StyleSetHandle styleSet = aPresShell->StyleSet();
 
   RefPtr<nsStyleContext> pagePseudoStyle;
   pagePseudoStyle = styleSet->ResolveAnonymousBoxStyle(nsCSSAnonBoxes::page,
@@ -2957,7 +2977,7 @@ nsCSSFrameConstructor::CreateBackdropFrameFor(nsIPresShell* aPresShell,
 
   RefPtr<nsStyleContext> style = aPresShell->StyleSet()->
     ResolvePseudoElementStyle(aContent->AsElement(),
-                              nsCSSPseudoElements::ePseudo_backdrop,
+                              CSSPseudoElementType::backdrop,
                               /* aParentStyleContext */ nullptr,
                               /* aPseudoElement */ nullptr);
   nsBackdropFrame* backdropFrame = new (aPresShell) nsBackdropFrame(style);
@@ -3294,6 +3314,58 @@ nsCSSFrameConstructor::ConstructFieldSetFrame(nsFrameConstructorState& aState,
   return fieldsetFrame;
 }
 
+nsIFrame*
+nsCSSFrameConstructor::ConstructDetailsFrame(nsFrameConstructorState& aState,
+                                             FrameConstructionItem& aItem,
+                                             nsContainerFrame* aParentFrame,
+                                             const nsStyleDisplay* aStyleDisplay,
+                                             nsFrameItems& aFrameItems)
+{
+  nsIContent* const content = aItem.mContent;
+  nsStyleContext* const styleContext = aItem.mStyleContext;
+  nsContainerFrame* geometricParent =
+    aState.GetGeometricParent(aStyleDisplay, aParentFrame);
+
+  nsContainerFrame* detailsFrame = NS_NewDetailsFrame(mPresShell, styleContext);
+  nsIFrame* frameToReturn = nullptr;
+
+  // Build a scroll frame to wrap details frame if necessary.
+  if (aStyleDisplay->IsScrollableOverflow()) {
+    nsContainerFrame* scrollFrame = nullptr;
+
+    RefPtr<nsStyleContext> detailsStyle =
+      BeginBuildingScrollFrame(aState, content, styleContext, geometricParent ,
+                               nsCSSAnonBoxes::scrolledContent, false,
+                               scrollFrame);
+
+    aState.AddChild(scrollFrame, aFrameItems, content, styleContext,
+                    aParentFrame);
+
+    nsFrameItems scrollFrameItems;
+    ConstructBlock(aState, content, scrollFrame, scrollFrame,
+                   detailsStyle, &detailsFrame, scrollFrameItems,
+                   aStyleDisplay->IsAbsPosContainingBlock(scrollFrame) ?
+                     scrollFrame : nullptr,
+                   aItem.mPendingBinding);
+
+    MOZ_ASSERT(scrollFrameItems.OnlyChild() == detailsFrame);
+
+    FinishBuildingScrollFrame(scrollFrame, detailsFrame);
+
+    frameToReturn = scrollFrame;
+  } else {
+    ConstructBlock(aState, content, geometricParent, aParentFrame, styleContext,
+                   &detailsFrame, aFrameItems,
+                   aStyleDisplay->IsAbsPosContainingBlock(detailsFrame) ?
+                     detailsFrame : nullptr,
+                   aItem.mPendingBinding);
+
+    frameToReturn = detailsFrame;
+  }
+
+  return frameToReturn;
+}
+
 static nsIFrame*
 FindAncestorWithGeneratedContentPseudo(nsIFrame* aFrame)
 {
@@ -3481,6 +3553,19 @@ nsCSSFrameConstructor::FindHTMLData(Element* aElement,
     return nullptr;
   }
 
+  if (aTag == nsGkAtoms::details || aTag == nsGkAtoms::summary) {
+    if (!HTMLDetailsElement::IsDetailsEnabled()) {
+      return nullptr;
+    }
+  }
+
+  if (aTag == nsGkAtoms::summary &&
+      (!aParentFrame || aParentFrame->GetType() != nsGkAtoms::detailsFrame)) {
+    // <summary> is special only if it is a direct child of <details>. If it
+    // isn't, construct it as a normal block frame instead of a summary frame.
+    return nullptr;
+  }
+
   static const FrameConstructionDataByTag sHTMLData[] = {
     SIMPLE_TAG_CHAIN(img, nsCSSFrameConstructor::FindImgData),
     SIMPLE_TAG_CHAIN(mozgeneratedcontentimage,
@@ -3510,7 +3595,11 @@ nsCSSFrameConstructor::FindHTMLData(Element* aElement,
     SIMPLE_TAG_CREATE(video, NS_NewHTMLVideoFrame),
     SIMPLE_TAG_CREATE(audio, NS_NewHTMLVideoFrame),
     SIMPLE_TAG_CREATE(progress, NS_NewProgressFrame),
-    SIMPLE_TAG_CREATE(meter, NS_NewMeterFrame)
+    SIMPLE_TAG_CREATE(meter, NS_NewMeterFrame),
+    COMPLEX_TAG_CREATE(details, &nsCSSFrameConstructor::ConstructDetailsFrame),
+    { &nsGkAtoms::summary,
+      FCDATA_DECL(FCDATA_ALLOW_BLOCK_STYLES | FCDATA_MAY_NEED_SCROLLFRAME,
+                  NS_NewSummaryFrame) }
   };
 
   return FindDataByTag(aTag, aElement, aStyleContext, sHTMLData,
@@ -3968,7 +4057,7 @@ nsCSSFrameConstructor::CreateAnonymousFrames(nsFrameConstructorState& aState,
                                              PendingBinding*          aPendingBinding,
                                              nsFrameItems&            aChildItems)
 {
-  nsAutoTArray<nsIAnonymousContentCreator::ContentInfo, 4> newAnonymousItems;
+  AutoTArray<nsIAnonymousContentCreator::ContentInfo, 4> newAnonymousItems;
   nsresult rv = GetAnonymousContent(aParent, aParentFrame, newAnonymousItems);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -4429,7 +4518,7 @@ nsCSSFrameConstructor::BeginBuildingScrollFrame(nsFrameConstructorState& aState,
   aNewFrame = gfxScrollFrame;
 
   // we used the style that was passed in. So resolve another one.
-  nsStyleSet *styleSet = mPresShell->StyleSet();
+  StyleSetHandle styleSet = mPresShell->StyleSet();
   RefPtr<nsStyleContext> scrolledChildStyle =
     styleSet->ResolveAnonymousBoxStyle(aScrolledPseudo, contentStyle);
 
@@ -4825,7 +4914,7 @@ nsCSSFrameConstructor::ResolveStyleContext(nsStyleContext* aParentStyleContext,
                                            nsIContent* aContent,
                                            nsFrameConstructorState* aState)
 {
-  nsStyleSet *styleSet = mPresShell->StyleSet();
+  StyleSetHandle styleSet = mPresShell->StyleSet();
   aContent->OwnerDoc()->FlushPendingLinkUpdates();
 
   RefPtr<nsStyleContext> result;
@@ -4845,19 +4934,24 @@ nsCSSFrameConstructor::ResolveStyleContext(nsStyleContext* aParentStyleContext,
     result = styleSet->ResolveStyleForNonElement(aParentStyleContext);
   }
 
-  RestyleManager::ReframingStyleContexts* rsc =
-    RestyleManager()->GetReframingStyleContexts();
-  if (rsc) {
-    nsStyleContext* oldStyleContext =
-      rsc->Get(aContent, nsCSSPseudoElements::ePseudo_NotPseudoElement);
-    nsPresContext* presContext = mPresShell->GetPresContext();
-    if (oldStyleContext) {
-      RestyleManager::TryStartingTransition(presContext, aContent,
-                                            oldStyleContext, &result);
-    } else if (aContent->IsElement()) {
-      presContext->TransitionManager()->
-        PruneCompletedTransitions(aContent->AsElement(),
-          nsCSSPseudoElements::ePseudo_NotPseudoElement, result);
+  // ServoRestyleManager does not handle transitions yet, and when it does
+  // it probably won't need to track reframed style contexts to start
+  // transitions correctly.
+  if (mozilla::RestyleManager* geckoRM = RestyleManager()->GetAsGecko()) {
+    RestyleManager::ReframingStyleContexts* rsc =
+      geckoRM->GetReframingStyleContexts();
+    if (rsc) {
+      nsStyleContext* oldStyleContext =
+        rsc->Get(aContent, CSSPseudoElementType::NotPseudo);
+      nsPresContext* presContext = mPresShell->GetPresContext();
+      if (oldStyleContext) {
+        RestyleManager::TryStartingTransition(presContext, aContent,
+                                              oldStyleContext, &result);
+      } else if (aContent->IsElement()) {
+        presContext->TransitionManager()->
+          PruneCompletedTransitions(aContent->AsElement(),
+            CSSPseudoElementType::NotPseudo, result);
+      }
     }
   }
 
@@ -4882,7 +4976,7 @@ nsCSSFrameConstructor::FlushAccumulatedBlock(nsFrameConstructorState& aState,
   nsStyleContext* parentContext =
     nsFrame::CorrectStyleParentFrame(aParentFrame,
                                      anonPseudo)->StyleContext();
-  nsStyleSet* styleSet = mPresShell->StyleSet();
+  StyleSetHandle styleSet = mPresShell->StyleSet();
   RefPtr<nsStyleContext> blockContext;
   blockContext = styleSet->
     ResolveAnonymousBoxStyle(anonPseudo, parentContext);
@@ -5565,6 +5659,18 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
     }
   }
 
+  // When constructing a child of a non-open <details>, create only the frame
+  // for the main <summary> element, and skip other elements.
+  auto* details = HTMLDetailsElement::FromContentOrNull(parent);
+  if (details && details->IsDetailsEnabled() && !details->Open()) {
+    auto* summary = HTMLSummaryElement::FromContentOrNull(aContent);
+    if (!summary || !summary->IsMainSummary()) {
+      SetAsUndisplayedContent(aState, aItems, aContent, styleContext,
+                              isGeneratedContent);
+      return;
+    }
+  }
+
   bool isPopup = false;
   // Try to find frame construction data for this content
   const FrameConstructionData* data;
@@ -5678,7 +5784,7 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
       aParentFrame->AddStateBits(NS_FRAME_MAY_HAVE_GENERATED_CONTENT);
     }
     CreateGeneratedContentItem(aState, aParentFrame, aContent, styleContext,
-                               nsCSSPseudoElements::ePseudo_before, aItems);
+                               CSSPseudoElementType::before, aItems);
 
     FlattenedChildIterator iter(aContent);
     for (nsIContent* child = iter.GetNextChild(); child; child = iter.GetNextChild()) {
@@ -5711,7 +5817,7 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
     aItems.SetParentHasNoXBLChildren(!iter.XBLInvolved());
 
     CreateGeneratedContentItem(aState, aParentFrame, aContent, styleContext,
-                               nsCSSPseudoElements::ePseudo_after, aItems);
+                               CSSPseudoElementType::after, aItems);
     if (canHavePageBreak && display->mBreakAfter) {
       AddPageBreakItem(aContent, aStyleContext, aItems);
     }
@@ -6085,7 +6191,7 @@ AdjustAppendParentForAfterContent(nsFrameManager* aFrameManager,
   // document than aChild and return that in aAfterFrame.
   if (aParentFrame->GetGenConPseudos() ||
       nsLayoutUtils::HasPseudoStyle(aContainer, aParentFrame->StyleContext(),
-                                    nsCSSPseudoElements::ePseudo_after,
+                                    CSSPseudoElementType::after,
                                     aParentFrame->PresContext()) ||
       aFrameManager->GetDisplayContentsStyleFor(aContainer)) {
     nsIFrame* afterFrame = nullptr;
@@ -7168,10 +7274,11 @@ nsCSSFrameConstructor::ContentAppended(nsIContent*     aContainer,
   // before the AdjustAppendParentForAfterContent call.
   parentFrame = nsLayoutUtils::LastContinuationWithChild(parentFrame);
 
-  // We should never get here with fieldsets, since they have multiple
-  // insertion points.
-  NS_ASSERTION(parentFrame->GetType() != nsGkAtoms::fieldSetFrame,
-               "Unexpected parent");
+  // We should never get here with fieldsets or details, since they have
+  // multiple insertion points.
+  MOZ_ASSERT(parentFrame->GetType() != nsGkAtoms::fieldSetFrame &&
+             parentFrame->GetType() != nsGkAtoms::detailsFrame,
+             "Parent frame should not be fieldset or details!");
 
   // Deal with possible :after generated content on the parent
   nsIFrame* parentAfterFrame;
@@ -7616,6 +7723,22 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent*            aContainer,
     LAYOUT_PHASE_TEMP_EXIT();
     nsresult rv = RecreateFramesForContent(insertion.mParentFrame->GetContent(), false,
                                            REMOVE_FOR_RECONSTRUCTION, nullptr);
+    LAYOUT_PHASE_TEMP_REENTER();
+    return rv;
+  }
+
+  // We should only get here with details when doing a single insertion because
+  // we treat details frame as if it has multiple insertion points.
+  MOZ_ASSERT(isSingleInsert || frameType != nsGkAtoms::detailsFrame);
+  if (frameType == nsGkAtoms::detailsFrame) {
+    // When inserting an element into <details>, just reframe the details frame
+    // and let it figure out where the element should be laid out. It might seem
+    // expensive to recreate the entire details frame, but it's the simplest way
+    // to handle the insertion.
+    LAYOUT_PHASE_TEMP_EXIT();
+    nsresult rv =
+      RecreateFramesForContent(insertion.mParentFrame->GetContent(), false,
+                               REMOVE_FOR_RECONSTRUCTION, nullptr);
     LAYOUT_PHASE_TEMP_REENTER();
     return rv;
   }
@@ -8779,6 +8902,12 @@ nsCSSFrameConstructor::CreateContinuingFrame(nsPresContext*    aPresContext,
   } else if (nsGkAtoms::rubyTextContainerFrame == frameType) {
     newFrame = NS_NewRubyTextContainerFrame(shell, styleContext);
     newFrame->Init(content, aParentFrame, aFrame);
+  } else if (nsGkAtoms::detailsFrame == frameType) {
+    newFrame = NS_NewDetailsFrame(shell, styleContext);
+    newFrame->Init(content, aParentFrame, aFrame);
+  } else if (nsGkAtoms::summaryFrame == frameType) {
+    newFrame = NS_NewSummaryFrame(shell, styleContext);
+    newFrame->Init(content, aParentFrame, aFrame);
   } else {
     NS_RUNTIMEABORT("unexpected frame type");
   }
@@ -8949,6 +9078,13 @@ nsCSSFrameConstructor::GetInsertionPoint(nsIContent* aContainer,
     insertion.mMultiple = true;
   }
 
+  // A details frame moves the first summary frame to be its first child, so we
+  // treat it as if it has multiple content insertion points.
+  if (insertion.mParentFrame &&
+      insertion.mParentFrame->GetType() == nsGkAtoms::detailsFrame) {
+    insertion.mMultiple = true;
+  }
+
   return insertion;
 }
 
@@ -9097,6 +9233,17 @@ nsCSSFrameConstructor::MaybeRecreateContainerForFrameRemoval(nsIFrame* aFrame,
     // the fieldset to ensure another legend is used, if there is one
     *aResult = RecreateFramesForContent(aFrame->GetParent()->GetContent(), false,
                                         aFlags, aDestroyedFramesFor);
+    return true;
+  }
+
+  if (insertionFrame && insertionFrame->GetType() == nsGkAtoms::summaryFrame &&
+      aFrame->GetParent()->GetType() == nsGkAtoms::detailsFrame) {
+    // When removing a summary frame, we should reframe the parent details frame
+    // to ensure that another summary is used or the default summary is
+    // generated.
+    *aResult = RecreateFramesForContent(aFrame->GetParent()->GetContent(),
+                                        false, REMOVE_FOR_RECONSTRUCTION,
+                                        aDestroyedFramesFor);
     return true;
   }
 
@@ -9430,7 +9577,7 @@ nsCSSFrameConstructor::GetFirstLetterStyle(nsIContent* aContent,
   if (aContent) {
     return mPresShell->StyleSet()->
       ResolvePseudoElementStyle(aContent->AsElement(),
-                                nsCSSPseudoElements::ePseudo_firstLetter,
+                                CSSPseudoElementType::firstLetter,
                                 aStyleContext,
                                 nullptr);
   }
@@ -9444,7 +9591,7 @@ nsCSSFrameConstructor::GetFirstLineStyle(nsIContent* aContent,
   if (aContent) {
     return mPresShell->StyleSet()->
       ResolvePseudoElementStyle(aContent->AsElement(),
-                                nsCSSPseudoElements::ePseudo_firstLine,
+                                CSSPseudoElementType::firstLine,
                                 aStyleContext,
                                 nullptr);
   }
@@ -9458,7 +9605,7 @@ nsCSSFrameConstructor::ShouldHaveFirstLetterStyle(nsIContent* aContent,
                                                   nsStyleContext* aStyleContext)
 {
   return nsLayoutUtils::HasPseudoStyle(aContent, aStyleContext,
-                                       nsCSSPseudoElements::ePseudo_firstLetter,
+                                       CSSPseudoElementType::firstLetter,
                                        mPresShell->GetPresContext());
 }
 
@@ -9478,7 +9625,7 @@ nsCSSFrameConstructor::ShouldHaveFirstLineStyle(nsIContent* aContent,
 {
   bool hasFirstLine =
     nsLayoutUtils::HasPseudoStyle(aContent, aStyleContext,
-                                  nsCSSPseudoElements::ePseudo_firstLine,
+                                  CSSPseudoElementType::firstLine,
                                   mPresShell->GetPresContext());
   if (hasFirstLine) {
     // But disable for fieldsets
@@ -10381,7 +10528,7 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
   // Create any anonymous frames we need here.  This must happen before the
   // non-anonymous children are processed to ensure that popups are never
   // constructed before the popupset.
-  nsAutoTArray<nsIAnonymousContentCreator::ContentInfo, 4> anonymousItems;
+  AutoTArray<nsIAnonymousContentCreator::ContentInfo, 4> anonymousItems;
   GetAnonymousContent(aContent, aPossiblyLeafFrame, anonymousItems);
 #ifdef DEBUG
   for (uint32_t i = 0; i < anonymousItems.Length(); ++i) {
@@ -10406,7 +10553,7 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
         nsFrame::CorrectStyleParentFrame(aFrame, nullptr)->StyleContext();
       // Probe for generated content before
       CreateGeneratedContentItem(aState, aFrame, aContent, styleContext,
-                                 nsCSSPseudoElements::ePseudo_before,
+                                 CSSPseudoElementType::before,
                                  itemsToConstruct);
     }
 
@@ -10454,7 +10601,7 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
     if (aCanHaveGeneratedContent) {
       // Probe for generated content after
       CreateGeneratedContentItem(aState, aFrame, aContent, styleContext,
-                                 nsCSSPseudoElements::ePseudo_after,
+                                 CSSPseudoElementType::after,
                                  itemsToConstruct);
     }
   } else {
@@ -10870,7 +11017,7 @@ nsCSSFrameConstructor::CreateFloatingLetterFrame(
   // letter frame and will have the float property set on it; the text
   // frame shouldn't have that set).
   RefPtr<nsStyleContext> textSC;
-  nsStyleSet* styleSet = mPresShell->StyleSet();
+  StyleSetHandle styleSet = mPresShell->StyleSet();
   textSC = styleSet->ResolveStyleForNonElement(aStyleContext);
   aTextFrame->SetStyleContextWithoutNotification(textSC);
   InitAndRestoreFrame(aState, aTextContent, letterFrame, aTextFrame);
@@ -11419,7 +11566,9 @@ nsCSSFrameConstructor::ConstructBlock(nsFrameConstructorState& aState,
 {
   // Create column wrapper if necessary
   nsContainerFrame* blockFrame = *aNewFrame;
-  NS_ASSERTION(blockFrame->GetType() == nsGkAtoms::blockFrame, "not a block frame?");
+  NS_ASSERTION((blockFrame->GetType() == nsGkAtoms::blockFrame ||
+                blockFrame->GetType() == nsGkAtoms::detailsFrame),
+               "not a block frame nor a details frame?");
   nsContainerFrame* parent = aParentFrame;
   RefPtr<nsStyleContext> blockStyle = aStyleContext;
   const nsStyleColumn* columns = aStyleContext->StyleColumn();
@@ -11702,7 +11851,7 @@ nsCSSFrameConstructor::BuildInlineChildItems(nsFrameConstructorState& aState,
   if (!aItemIsWithinSVGText) {
     // Probe for generated content before
     CreateGeneratedContentItem(aState, nullptr, parentContent, parentStyleContext,
-                               nsCSSPseudoElements::ePseudo_before,
+                               CSSPseudoElementType::before,
                                aParentItem.mChildItems);
   }
 
@@ -11772,7 +11921,7 @@ nsCSSFrameConstructor::BuildInlineChildItems(nsFrameConstructorState& aState,
   if (!aItemIsWithinSVGText) {
     // Probe for generated content after
     CreateGeneratedContentItem(aState, nullptr, parentContent, parentStyleContext,
-                               nsCSSPseudoElements::ePseudo_after,
+                               CSSPseudoElementType::after,
                                aParentItem.mChildItems);
   }
 

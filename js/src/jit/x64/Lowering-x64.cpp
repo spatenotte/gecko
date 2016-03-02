@@ -14,13 +14,13 @@
 using namespace js;
 using namespace js::jit;
 
-void
-LIRGeneratorX64::useBoxFixed(LInstruction* lir, size_t n, MDefinition* mir, Register reg1, Register, bool useAtStart)
+LBoxAllocation
+LIRGeneratorX64::useBoxFixed(MDefinition* mir, Register reg1, Register, bool useAtStart)
 {
     MOZ_ASSERT(mir->type() == MIRType_Value);
 
     ensureDefined(mir);
-    lir->setOperand(n, LUse(reg1, mir->virtualRegister(), useAtStart));
+    return LBoxAllocation(LUse(reg1, mir->virtualRegister(), useAtStart));
 }
 
 LAllocation
@@ -59,7 +59,7 @@ LIRGeneratorX64::visitBox(MBox* box)
     }
 
     if (opd->isConstant()) {
-        define(new(alloc()) LValue(opd->toConstant()->value()), box, LDefinition(LDefinition::BOX));
+        define(new(alloc()) LValue(opd->toConstant()->toJSValue()), box, LDefinition(LDefinition::BOX));
     } else {
         LBox* ins = new(alloc()) LBox(useRegister(opd), opd->type());
         define(ins, box, LDefinition(LDefinition::BOX));
@@ -340,4 +340,48 @@ LIRGeneratorX64::visitRandom(MRandom* ins)
                                         temp(),
                                         temp());
     defineFixed(lir, ins, LFloatReg(ReturnDoubleReg));
+}
+
+void
+LIRGeneratorX64::lowerDivI64(MDiv* div)
+{
+    if (div->isUnsigned()) {
+        lowerUDiv64(div);
+        return;
+    }
+
+    LDivOrModI64* lir = new(alloc()) LDivOrModI64(useRegister(div->lhs()), useRegister(div->rhs()),
+                                                  tempFixed(rdx));
+    defineInt64Fixed(lir, div, LInt64Allocation(LAllocation(AnyRegister(rax))));
+}
+
+void
+LIRGeneratorX64::lowerModI64(MMod* mod)
+{
+    if (mod->isUnsigned()) {
+        lowerUMod64(mod);
+        return;
+    }
+
+    LDivOrModI64* lir = new(alloc()) LDivOrModI64(useRegister(mod->lhs()), useRegister(mod->rhs()),
+                                                  tempFixed(rax));
+    defineInt64Fixed(lir, mod, LInt64Allocation(LAllocation(AnyRegister(rdx))));
+}
+
+void
+LIRGeneratorX64::lowerUDiv64(MDiv* div)
+{
+    LUDivOrMod64* lir = new(alloc()) LUDivOrMod64(useRegister(div->lhs()),
+                                                  useRegister(div->rhs()),
+                                                  tempFixed(rdx));
+    defineInt64Fixed(lir, div, LInt64Allocation(LAllocation(AnyRegister(rax))));
+}
+
+void
+LIRGeneratorX64::lowerUMod64(MMod* mod)
+{
+    LUDivOrMod64* lir = new(alloc()) LUDivOrMod64(useRegister(mod->lhs()),
+                                                  useRegister(mod->rhs()),
+                                                  tempFixed(rax));
+    defineInt64Fixed(lir, mod, LInt64Allocation(LAllocation(AnyRegister(rdx))));
 }

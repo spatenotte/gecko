@@ -6,6 +6,8 @@
 
 DIRS += ['locales']
 
+CONFIGURE_SUBST_FILES += ['adjust_sdk_app_token']
+
 include('android-services.mozbuild')
 
 thirdparty_source_dir = TOPSRCDIR + '/mobile/android/thirdparty/'
@@ -97,7 +99,6 @@ gujar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'util/ColorUtils.java',
     'util/DrawableUtil.java',
     'util/EventCallback.java',
-    'util/Experiments.java',
     'util/FileUtils.java',
     'util/FloatUtils.java',
     'util/GamepadUtils.java',
@@ -116,6 +117,7 @@ gujar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'util/NativeEventListener.java',
     'util/NativeJSContainer.java',
     'util/NativeJSObject.java',
+    'util/NetworkUtils.java',
     'util/NonEvictingLruCache.java',
     'util/PrefUtils.java',
     'util/ProxySelector.java',
@@ -223,6 +225,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'db/LocalReadingListAccessor.java',
     'db/LocalSearches.java',
     'db/LocalTabsAccessor.java',
+    'db/LocalUrlAnnotations.java',
     'db/LocalURLMetadata.java',
     'db/PasswordsProvider.java',
     'db/PerProfileDatabaseProvider.java',
@@ -240,7 +243,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'db/Table.java',
     'db/TabsAccessor.java',
     'db/TabsProvider.java',
-    'db/TopSitesCursorWrapper.java',
+    'db/UrlAnnotations.java',
     'db/URLMetadata.java',
     'db/URLMetadataTable.java',
     'DevToolsAuthHelper.java',
@@ -439,6 +442,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'NotificationClient.java',
     'NotificationHandler.java',
     'NotificationHelper.java',
+    'notifications/WhatsNewReceiver.java',
     'NotificationService.java',
     'NSSBridge.java',
     'OrderedBroadcastHelper.java',
@@ -504,6 +508,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'restrictions/GuestProfileConfiguration.java',
     'restrictions/Restrictable.java',
     'restrictions/RestrictedProfileConfiguration.java',
+    'restrictions/RestrictionCache.java',
     'restrictions/RestrictionConfiguration.java',
     'restrictions/RestrictionProvider.java',
     'ScreenshotObserver.java',
@@ -574,17 +579,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'trackingprotection/TrackingProtectionPrompt.java',
     'updater/UpdateService.java',
     'updater/UpdateServiceHelper.java',
-    'Webapp.java',
-    'webapp/Allocator.java',
-    'webapp/ApkResources.java',
-    'webapp/Dispatcher.java',
-    'webapp/EventListener.java',
-    'webapp/InstallHelper.java',
-    'webapp/InstallListener.java',
-    'webapp/TaskKiller.java',
-    'webapp/UninstallListener.java',
-    'webapp/WebappImpl.java',
-    'webapp/Webapps.java',
+    'util/Experiments.java',
     'widget/ActivityChooserModel.java',
     'widget/AllCapsTextView.java',
     'widget/AnchoredPopup.java',
@@ -740,6 +735,35 @@ if CONFIG['MOZ_ANDROID_GCM']:
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_GCM_AAR_RES']]
         resjar.generated_sources += ['com/google/android/gms/gcm/R.java']
 
+if CONFIG['MOZ_INSTALL_TRACKING']:
+    gbjar.extra_jars += [
+        CONFIG['ANDROID_PLAY_SERVICES_ADS_AAR_LIB'],
+        CONFIG['ANDROID_PLAY_SERVICES_ANALYTICS_AAR_LIB'],
+        CONFIG['ANDROID_PLAY_SERVICES_APPINDEXING_AAR_LIB'],
+        CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB'],
+    ]
+
+    if CONFIG['ANDROID_PLAY_SERVICES_ADS_AAR']:
+        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.ads']
+        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_ADS_AAR_RES']]
+        resjar.generated_sources += ['com/google/android/gms/ads/R.java']
+
+    if CONFIG['ANDROID_PLAY_SERVICES_ANALYTICS_AAR']:
+        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.analytics']
+        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_ANALYTICS_AAR_RES']]
+        resjar.generated_sources += ['com/google/android/gms/analytics/R.java']
+
+    if CONFIG['ANDROID_PLAY_SERVICES_APPINDEXING_AAR']:
+        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.appindexing']
+        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_APPINDEXING_AAR_RES']]
+        resjar.generated_sources += ['com/google/android/gms/appindexing/R.java']
+
+
+    if CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR']:
+        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms']
+        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_RES']]
+        resjar.generated_sources += ['com/google/android/gms/R.java']
+
 gbjar.extra_jars += [CONFIG['ANDROID_APPCOMPAT_V7_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_DESIGN_AAR_LIB']]
 gbjar.extra_jars += [CONFIG['ANDROID_RECYCLERVIEW_V7_AAR_LIB']]
@@ -885,6 +909,15 @@ ANDROID_ASSETS_DIRS += [
     '/mobile/android/app/assets',
 ]
 
+if CONFIG['MOZ_ANDROID_DISTRIBUTION_DIRECTORY']:
+    # If you change this, also change its equivalent in mobile/android/bouncer.
+    if not CONFIG['MOZ_ANDROID_PACKAGE_INSTALL_BOUNCER']:
+        # If we are packaging the bouncer, it will have the distribution, so don't put
+        # it in the main APK as well.
+        ANDROID_ASSETS_DIRS += [
+            '%' + CONFIG['MOZ_ANDROID_DISTRIBUTION_DIRECTORY'] + '/assets',
+        ]
+
 # We do not expose MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN here because that
 # would leak the value to build logs.  Instead we expose the token quietly where
 # appropriate in Makefile.in.
@@ -944,3 +977,6 @@ if CONFIG['MOZ_ANDROID_SEARCH_ACTIVITY']:
     ]
 
 FINAL_TARGET_PP_FILES += ['package-name.txt.in']
+
+DEFINES['OBJDIR'] = OBJDIR
+DEFINES['TOPOBJDIR'] = TOPOBJDIR

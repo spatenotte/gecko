@@ -1,8 +1,7 @@
 /* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Check that variables view works as expected in the web console.
 
@@ -109,11 +108,13 @@ function onUpdatedTestPropFound(aResults) {
   });
 }
 
-function onFooObjFetchAfterPropRename(aVar) {
+function* onFooObjFetchAfterPropRename(aVar) {
   info("onFooObjFetchAfterPropRename");
 
-  let para = content.wrappedJSObject.document.querySelector("p");
-  let expectedValue = content.document.title + content.location + para;
+  let expectedValue = yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+    let para = content.wrappedJSObject.document.querySelector("p");
+    return content.document.title + content.location + para;
+  });
 
   // Check that the new value is in the variables view.
   return findVariableViewProperties(aVar, [
@@ -140,11 +141,13 @@ function onRenamedTestPropFound(aResults) {
   });
 }
 
-function onPropUpdateError(aVar) {
+function* onPropUpdateError(aVar) {
   info("onPropUpdateError");
 
-  let para = content.wrappedJSObject.document.querySelector("p");
-  let expectedValue = content.document.title + content.location + para;
+  let expectedValue = yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
+    let para = content.wrappedJSObject.document.querySelector("p");
+    return content.document.title + content.location + para;
+  });
 
   // Make sure the property did not change.
   return findVariableViewProperties(aVar, [

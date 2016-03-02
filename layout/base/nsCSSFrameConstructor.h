@@ -12,12 +12,12 @@
 #define nsCSSFrameConstructor_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/RestyleManagerHandle.h"
 
 #include "nsCOMPtr.h"
 #include "nsILayoutHistoryState.h"
 #include "nsQuoteList.h"
 #include "nsCounterManager.h"
-#include "nsCSSPseudoElements.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsFrameManager.h"
 #include "nsIDocument.h"
@@ -39,8 +39,6 @@ class nsFrameConstructorState;
 
 namespace mozilla {
 
-class RestyleManager;
-
 namespace dom {
 
 class FlattenedChildIterator;
@@ -51,6 +49,7 @@ class FlattenedChildIterator;
 class nsCSSFrameConstructor : public nsFrameManager
 {
 public:
+  typedef mozilla::CSSPseudoElementType CSSPseudoElementType;
   typedef mozilla::dom::Element Element;
 
   friend class mozilla::RestyleManager;
@@ -70,7 +69,7 @@ private:
   nsCSSFrameConstructor& operator=(const nsCSSFrameConstructor& aCopy) = delete;
 
 public:
-  mozilla::RestyleManager* RestyleManager() const
+  mozilla::RestyleManagerHandle RestyleManager() const
     { return mPresShell->GetPresContext()->RestyleManager(); }
 
   nsIFrame* ConstructRootFrame();
@@ -452,7 +451,7 @@ private:
                                   nsContainerFrame*          aFrame,
                                   nsIContent*                aContent,
                                   nsStyleContext*            aStyleContext,
-                                  nsCSSPseudoElements::Type  aPseudoElement,
+                                  CSSPseudoElementType       aPseudoElement,
                                   FrameConstructionItemList& aItems);
 
   // This method can change aFrameList: it can chop off the beginning and put
@@ -1296,6 +1295,14 @@ private:
                                    nsContainerFrame*        aParentFrame,
                                    const nsStyleDisplay*    aStyleDisplay,
                                    nsFrameItems&            aFrameItems);
+
+  // ConstructDetailsFrame puts the new frame in aFrameItems and
+  // handles the kids of the details.
+  nsIFrame* ConstructDetailsFrame(nsFrameConstructorState& aState,
+                                  FrameConstructionItem& aItem,
+                                  nsContainerFrame* aParentFrame,
+                                  const nsStyleDisplay* aStyleDisplay,
+                                  nsFrameItems& aFrameItems);
 
   // aParentFrame might be null.  If it is, that means it was an
   // inline frame.

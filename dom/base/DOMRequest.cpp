@@ -62,7 +62,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(DOMRequest,
                                                DOMEventTargetHelper)
   // Don't need NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER because
   // DOMEventTargetHelper does it for us.
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mResult)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mResult)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DOMRequest)
@@ -231,7 +231,7 @@ DOMRequest::Then(JSContext* aCx, AnyCallback* aResolveCallback,
   }
 
   // Just use the global of the Promise itself as the callee global.
-  JS::Rooted<JSObject*> global(aCx, mPromise->GetWrapper());
+  JS::Rooted<JSObject*> global(aCx, mPromise->PromiseObj());
   global = js::GetGlobalForObjectCrossCompartment(global);
   mPromise->Then(aCx, global, aResolveCallback, aRejectCallback, aRetval, aRv);
 }

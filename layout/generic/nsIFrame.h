@@ -90,6 +90,7 @@ struct CharacterDataChangeInfo;
 
 namespace mozilla {
 
+enum class CSSPseudoElementType : uint8_t;
 class EventStates;
 
 namespace layers {
@@ -844,12 +845,13 @@ public:
   
   nsPoint GetPositionIgnoringScrolling();
 
-  typedef nsAutoTArray<nsIContent*, 2> ContentArray;
+  typedef AutoTArray<nsIContent*, 2> ContentArray;
   static void DestroyContentArray(ContentArray* aArray);
 
 #define NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(prop, type, dtor)             \
   static const mozilla::FramePropertyDescriptor<type>* prop() {           \
-    static MOZ_CONSTEXPR auto descriptor =                                \
+    /* Use of MOZ_CONSTEXPR caused startup crashes with MSVC2015u1 PGO. */\
+    static const auto descriptor =                                        \
       mozilla::FramePropertyDescriptor<type>::NewWithDestructor<dtor>();  \
     return &descriptor;                                                   \
   }
@@ -857,14 +859,16 @@ public:
 // Don't use this unless you really know what you're doing!
 #define NS_DECLARE_FRAME_PROPERTY_WITH_FRAME_IN_DTOR(prop, type, dtor)    \
   static const mozilla::FramePropertyDescriptor<type>* prop() {           \
-    static MOZ_CONSTEXPR auto descriptor = mozilla::                      \
+    /* Use of MOZ_CONSTEXPR caused startup crashes with MSVC2015u1 PGO. */\
+    static const auto descriptor = mozilla::                              \
       FramePropertyDescriptor<type>::NewWithDestructorWithFrame<dtor>();  \
     return &descriptor;                                                   \
   }
 
 #define NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(prop, type)                \
   static const mozilla::FramePropertyDescriptor<type>* prop() {           \
-    static MOZ_CONSTEXPR auto descriptor =                                \
+    /* Use of MOZ_CONSTEXPR caused startup crashes with MSVC2015u1 PGO. */\
+    static const auto descriptor =                                        \
       mozilla::FramePropertyDescriptor<type>::NewWithoutDestructor();     \
     return &descriptor;                                                   \
   }
@@ -1275,6 +1279,13 @@ public:
    * transform.
    */
   bool Combines3DTransformWithAncestors() const;
+
+  /**
+   * Returns whether this frame has a hidden backface and has a parent that
+   * Extend3DContext(). This is useful because in some cases the hidden
+   * backface can safely be ignored if it could not be visible anyway.
+   */
+  bool In3DContextAndBackfaceIsHidden() const;
 
   bool IsPreserve3DLeaf() const {
     return Combines3DTransformWithAncestors() && !Extend3DContext();
@@ -2136,6 +2147,11 @@ public:
     // will be excluded during the construction of children. 
     eExcludesIgnorableWhitespace =      1 << 14,
     eSupportsCSSTransforms =            1 << 15,
+
+    // A replaced element that has replaced-element sizing
+    // characteristics (i.e., like images or iframes), as opposed to
+    // inline-block sizing characteristics (like form controls).
+    eReplacedSizing =                   1 << 16,
 
     // These are to allow nsFrame::Init to assert that IsFrameOfType
     // implementations all call the base class method.  They are only
@@ -3082,7 +3098,8 @@ public:
    * generated and which corresponds to the specified pseudo-element type,
    * or nullptr if there is no such anonymous content.
    */
-  virtual mozilla::dom::Element* GetPseudoElement(nsCSSPseudoElements::Type aType);
+  virtual mozilla::dom::Element*
+  GetPseudoElement(mozilla::CSSPseudoElementType aType);
 
   bool BackfaceIsHidden() {
     return StyleDisplay()->BackfaceIsHidden();

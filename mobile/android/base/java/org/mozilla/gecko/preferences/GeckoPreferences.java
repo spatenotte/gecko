@@ -120,7 +120,7 @@ OnSharedPreferenceChangeListener
 
     private static boolean sIsCharEncodingEnabled;
     private boolean mInitialized;
-    private int mPrefsRequestId;
+    private PrefsHelper.PrefHandler mPrefsRequest;
     private List<Header> mHeaders;
 
     // These match keys in resources/xml*/preferences*.xml
@@ -140,6 +140,7 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_DEVTOOLS_REMOTE_LINK = NON_PREF_PREFIX + "remote_debugging.link";
     private static final String PREFS_TRACKING_PROTECTION = "privacy.trackingprotection.state";
     private static final String PREFS_TRACKING_PROTECTION_PB = "privacy.trackingprotection.pbmode.enabled";
+    private static final String PREFS_ZOOMED_VIEW_ENABLED = "ui.zoomedview.enabled";
     public static final String PREFS_VOICE_INPUT_ENABLED = NON_PREF_PREFIX + "voice_input_enabled";
     public static final String PREFS_QRCODE_ENABLED = NON_PREF_PREFIX + "qrcode_enabled";
     private static final String PREFS_TRACKING_PROTECTION_PRIVATE_BROWSING = "privacy.trackingprotection.pbmode.enabled";
@@ -513,7 +514,7 @@ OnSharedPreferenceChangeListener
         mInitialized = true;
         if (Versions.preHC) {
             PreferenceScreen screen = getPreferenceScreen();
-            mPrefsRequestId = setupPreferences(screen);
+            mPrefsRequest = setupPreferences(screen);
         }
     }
 
@@ -537,8 +538,9 @@ OnSharedPreferenceChangeListener
         EventDispatcher.getInstance().unregisterGeckoThreadListener((NativeEventListener) this,
             "Snackbar:Show");
 
-        if (mPrefsRequestId > 0) {
-            PrefsHelper.removeObserver(mPrefsRequestId);
+        if (mPrefsRequest != null) {
+            PrefsHelper.removeObserver(mPrefsRequest);
+            mPrefsRequest = null;
         }
 
         // The intent extras will be null if this is the top-level settings
@@ -653,7 +655,7 @@ OnSharedPreferenceChangeListener
 
                 SnackbarHelper.showSnackbar(GeckoPreferences.this,
                         getString(stringRes),
-                        Snackbar.LENGTH_SHORT);
+                        Snackbar.LENGTH_LONG);
             }
         } catch (Exception e) {
             Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
@@ -674,7 +676,7 @@ OnSharedPreferenceChangeListener
       * @return The integer id for the PrefsHelper.PrefHandlerBase listener added
       *         to monitor changes to Gecko prefs.
       */
-    public int setupPreferences(PreferenceGroup prefs) {
+    public PrefsHelper.PrefHandler setupPreferences(PreferenceGroup prefs) {
         ArrayList<String> list = new ArrayList<String>();
         setupPreferences(prefs, list);
         return getGeckoPreferences(prefs, list);
@@ -832,6 +834,12 @@ OnSharedPreferenceChangeListener
                     tabQueuePreference = (CheckBoxPreference) pref;
                     // Only show tab queue pref on nightly builds with the tab queue build flag.
                     if (!TabQueueHelper.TAB_QUEUE_ENABLED) {
+                        preferences.removePreference(pref);
+                        i--;
+                        continue;
+                    }
+                } else if (PREFS_ZOOMED_VIEW_ENABLED.equals(key)) {
+                    if (!AppConstants.NIGHTLY_BUILD) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -1465,8 +1473,10 @@ OnSharedPreferenceChangeListener
     }
 
     // Initialize preferences by requesting the preference values from Gecko
-    private int getGeckoPreferences(final PreferenceGroup screen, ArrayList<String> prefs) {
-        return PrefsHelper.getPrefs(prefs, new PrefsHelper.PrefHandlerBase() {
+    private PrefsHelper.PrefHandler getGeckoPreferences(final PreferenceGroup screen,
+                                                        ArrayList<String> prefs) {
+
+        final PrefsHelper.PrefHandler prefHandler = new PrefsHelper.PrefHandlerBase() {
             private Preference getField(String prefName) {
                 return screen.findPreference(prefName);
             }
@@ -1548,11 +1558,6 @@ OnSharedPreferenceChangeListener
             }
 
             @Override
-            public boolean isObserver() {
-                return true;
-            }
-
-            @Override
             public void finish() {
                 // enable all preferences once we have them from gecko
                 ThreadUtils.postToUiThread(new Runnable() {
@@ -1562,7 +1567,10 @@ OnSharedPreferenceChangeListener
                     }
                 });
             }
-        });
+        };
+        final String[] prefNames = prefs.toArray(new String[prefs.size()]);
+        PrefsHelper.addObserver(prefNames, prefHandler);
+        return prefHandler;
     }
 
     @Override

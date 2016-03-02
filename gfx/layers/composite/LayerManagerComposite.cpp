@@ -133,13 +133,6 @@ LayerManagerComposite::~LayerManagerComposite()
 }
 
 
-bool
-LayerManagerComposite::Initialize()
-{
-  bool result = mCompositor->Initialize();
-  return result;
-}
-
 void
 LayerManagerComposite::Destroy()
 {
@@ -217,14 +210,54 @@ IntersectMaybeRects(const Maybe<RectType>& aRect1, const Maybe<RectType>& aRect2
   return aRect2;
 }
 
+/**
+ * Get accumulated transform of from the context creating layer to the
+ * given layer.
+ */
+static Matrix4x4
+GetAccTransformIn3DContext(Layer* aLayer) {
+  Matrix4x4 transform = aLayer->GetLocalTransform();
+  for (Layer* layer = aLayer->GetParent();
+       layer && layer->Extend3DContext();
+       layer = layer->GetParent()) {
+    transform = transform * layer->GetLocalTransform();
+  }
+  return transform;
+}
+
 void
 LayerManagerComposite::PostProcessLayers(Layer* aLayer,
                                          nsIntRegion& aOpaqueRegion,
                                          LayerIntRegion& aVisibleRegion,
                                          const Maybe<ParentLayerIntRect>& aClipFromAncestors)
 {
+  if (aLayer->Extend3DContext()) {
+    // For layers participating 3D rendering context, their visible
+    // region should be empty (invisible), so we pass through them
+    // without doing anything.
+
+    // Direct children of the establisher may have a clip, becaue the
+    // item containing it; ex. of nsHTMLScrollFrame, may give it one.
+    Maybe<ParentLayerIntRect> layerClip =
+      aLayer->AsLayerComposite()->GetShadowClipRect();
+    Maybe<ParentLayerIntRect> ancestorClipForChildren =
+      IntersectMaybeRects(layerClip, aClipFromAncestors);
+    MOZ_ASSERT(!layerClip || !aLayer->Combines3DTransformWithAncestors(),
+               "Only direct children of the establisher could have a clip");
+
+    for (Layer* child = aLayer->GetLastChild();
+         child;
+         child = child->GetPrevSibling()) {
+      PostProcessLayers(child, aOpaqueRegion, aVisibleRegion,
+                        ancestorClipForChildren);
+    }
+    return;
+  }
+
   nsIntRegion localOpaque;
-  Matrix4x4 transform = aLayer->GetLocalTransform();
+  // Treat layers on the path to the root of the 3D rendering context as
+  // a giant layer if it is a leaf.
+  Matrix4x4 transform = GetAccTransformIn3DContext(aLayer);
   Matrix transform2d;
   Maybe<nsIntPoint> integerTranslation;
   // If aLayer has a simple transform (only an integer translation) then we
@@ -242,6 +275,9 @@ LayerManagerComposite::PostProcessLayers(Layer* aLayer,
   // from our ancestors.
   LayerComposite* composite = aLayer->AsLayerComposite();
   Maybe<ParentLayerIntRect> layerClip = composite->GetShadowClipRect();
+  MOZ_ASSERT(!layerClip || !aLayer->Combines3DTransformWithAncestors(),
+             "The layer with a clip should not participate "
+             "a 3D rendering context");
   Maybe<ParentLayerIntRect> outsideClip =
     IntersectMaybeRects(layerClip, aClipFromAncestors);
 
@@ -282,8 +318,12 @@ LayerManagerComposite::PostProcessLayers(Layer* aLayer,
   //  - They recalculate their visible regions, taking ancestorClipForChildren
   //    into account, and accumulate them into descendantsVisibleRegion.
   LayerIntRegion descendantsVisibleRegion;
+  bool hasPreserve3DChild = false;
   for (Layer* child = aLayer->GetLastChild(); child; child = child->GetPrevSibling()) {
     PostProcessLayers(child, localOpaque, descendantsVisibleRegion, ancestorClipForChildren);
+    if (child->Extend3DContext()) {
+      hasPreserve3DChild = true;
+    }
   }
 
   // Recalculate our visible region.
@@ -291,7 +331,7 @@ LayerManagerComposite::PostProcessLayers(Layer* aLayer,
 
   // If we have descendants, throw away the visible region stored on this
   // layer, and use the region accumulated by our descendants instead.
-  if (aLayer->GetFirstChild()) {
+  if (aLayer->GetFirstChild() && !hasPreserve3DChild) {
     visible = descendantsVisibleRegion;
   }
 
@@ -758,6 +798,21 @@ LayerManagerComposite::PopGroupForLayerEffects(RefPtr<CompositingRenderTarget> a
                         Matrix4x4());
 }
 
+// Used to clear the 'mLayerComposited' flag at the beginning of each Render().
+static void
+ClearLayerFlags(Layer* aLayer) {
+  if (!aLayer) {
+    return;
+  }
+  if (aLayer->AsLayerComposite()) {
+    aLayer->AsLayerComposite()->SetLayerComposited(false);
+  }
+  for (Layer* child = aLayer->GetFirstChild(); child;
+       child = child->GetNextSibling()) {
+    ClearLayerFlags(child);
+  }
+}
+
 void
 LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion)
 {
@@ -768,6 +823,8 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion)
     NS_WARNING("Call on destroyed layer manager");
     return;
   }
+
+  ClearLayerFlags(mRoot);
 
   // At this time, it doesn't really matter if these preferences change
   // during the execution of the function; we should be safe in all
@@ -842,13 +899,15 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion)
 
   CompositorBench(mCompositor, bounds);
 
+  MOZ_ASSERT(mRoot->GetOpacity() == 1);
+  bool opaqueContent = (mRoot->GetContentFlags() & Layer::CONTENT_OPAQUE) != 0;
   if (mRoot->GetClipRect()) {
     clipRect = *mRoot->GetClipRect();
     Rect rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
-    mCompositor->BeginFrame(aInvalidRegion, &rect, bounds, nullptr, &actualBounds);
+    mCompositor->BeginFrame(aInvalidRegion, &rect, bounds, opaqueContent, nullptr, &actualBounds);
   } else {
     gfx::Rect rect;
-    mCompositor->BeginFrame(aInvalidRegion, nullptr, bounds, &rect, &actualBounds);
+    mCompositor->BeginFrame(aInvalidRegion, nullptr, bounds, opaqueContent, &rect, &actualBounds);
     clipRect = ParentLayerIntRect(rect.x, rect.y, rect.width, rect.height);
   }
 
@@ -1101,8 +1160,10 @@ LayerManagerComposite::RenderToPresentationSurface()
   nsIntRegion invalid;
   Rect bounds(0.0f, 0.0f, scale * pageWidth, (float)actualHeight);
   Rect rect, actualBounds;
+  MOZ_ASSERT(mRoot->GetOpacity() == 1);
+  bool opaqueContent = (mRoot->GetContentFlags() & Layer::CONTENT_OPAQUE) != 0;
 
-  mCompositor->BeginFrame(invalid, nullptr, bounds, &rect, &actualBounds);
+  mCompositor->BeginFrame(invalid, nullptr, bounds, opaqueContent, &rect, &actualBounds);
 
   // The Java side of Fennec sets a scissor rect that accounts for
   // chrome such as the URL bar. Override that so that the entire frame buffer
@@ -1186,7 +1247,7 @@ LayerManagerComposite::ComputeRenderIntegrityInternal(Layer* aLayer,
   }
 
   // See if there's any incomplete rendering
-  nsIntRegion incompleteRegion = aLayer->GetEffectiveVisibleRegion().ToUnknownRegion();
+  nsIntRegion incompleteRegion = aLayer->GetLocalVisibleRegion().ToUnknownRegion();
   incompleteRegion.Sub(incompleteRegion, paintedLayer->GetValidRegion());
 
   if (!incompleteRegion.IsEmpty()) {
@@ -1435,24 +1496,12 @@ LayerManagerComposite::AutoAddMaskEffect::~AutoAddMaskEffect()
   mCompositable->RemoveMaskEffect();
 }
 
-already_AddRefed<DrawTarget>
-LayerManagerComposite::CreateDrawTarget(const IntSize &aSize,
-                                        SurfaceFormat aFormat)
+void
+LayerManagerComposite::ChangeCompositor(Compositor* aNewCompositor)
 {
-#ifdef XP_MACOSX
-  // We don't want to accelerate if the surface is too small which indicates
-  // that it's likely used for an icon/static image. We also don't want to
-  // accelerate anything that is above the maximum texture size of weakest gpu.
-  // Safari uses 5000 area as the minimum for acceleration, we decided 64^2 is more logical.
-  bool useAcceleration = aSize.width <= 4096 && aSize.height <= 4096 &&
-                         aSize.width > 64 && aSize.height > 64 &&
-                         gfxPlatformMac::GetPlatform()->UseAcceleratedCanvas();
-  if (useAcceleration) {
-    return Factory::CreateDrawTarget(BackendType::COREGRAPHICS_ACCELERATED,
-                                     aSize, aFormat);
-  }
-#endif
-  return LayerManager::CreateDrawTarget(aSize, aFormat);
+  mCompositor = aNewCompositor;
+  mTextRenderer = new TextRenderer(aNewCompositor);
+  mTwoPassTmpTarget = nullptr;
 }
 
 LayerComposite::LayerComposite(LayerManagerComposite *aManager)
@@ -1530,6 +1579,12 @@ LayerComposite::GetFullyRenderedRegion() {
   } else {
     return GetShadowVisibleRegion().ToUnknownRegion();
   }
+}
+
+bool
+LayerComposite::HasStaleCompositor() const
+{
+  return mCompositeManager->GetCompositor() != mCompositor;
 }
 
 #ifndef MOZ_HAVE_PLATFORM_SPECIFIC_LAYER_BUFFERS

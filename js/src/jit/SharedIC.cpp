@@ -674,6 +674,8 @@ ICMonitoredStub::ICMonitoredStub(Kind kind, JitCode* stubCode, ICStub* firstMoni
   : ICStub(kind, ICStub::Monitored, stubCode),
     firstMonitorStub_(firstMonitorStub)
 {
+    // In order to silence Coverity - null pointer dereference checker
+    MOZ_ASSERT(firstMonitorStub_);
     // If the first monitored stub is a ICTypeMonitor_Fallback stub, then
     // double check that _its_ firstMonitorStub is the same as this one.
     MOZ_ASSERT_IF(firstMonitorStub_->isTypeMonitor_Fallback(),
@@ -730,7 +732,8 @@ ICStubCompiler::getStubCode()
     // Compile new stubcode.
     JitContext jctx(cx, nullptr);
     MacroAssembler masm;
-#ifndef JS_USE_LINK_REGISTER
+#if !defined(JS_USE_LINK_REGISTER) && \
+    !(defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64))
     // The first value contains the return addres,
     // which we pull into ICTailCallReg for tail calls.
     masm.adjustFrame(sizeof(intptr_t));
@@ -3628,7 +3631,7 @@ ICGetProp_CallScripted::Compiler::generateStubCode(MacroAssembler& masm)
     // Note that we use Push, not push, so that callJit will align the stack
     // properly on ARM.
     masm.Push(R0);
-    EmitBaselineCreateStubFrameDescriptor(masm, scratch);
+    EmitBaselineCreateStubFrameDescriptor(masm, scratch, JitFrameLayout::Size());
     masm.Push(Imm32(0));  // ActualArgc is 0
     masm.Push(callee);
     masm.Push(scratch);

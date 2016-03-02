@@ -108,13 +108,7 @@ namespace quota {
 
 using namespace mozilla::ipc;
 
-const bool QuotaManager::kRunningXPCShellTests =
-#ifdef ENABLE_TESTS
-  !!PR_GetEnv("XPCSHELL_TEST_PROFILE_DIR")
-#else
-  false
-#endif
-  ;
+const bool QuotaManager::kRunningXPCShellTests = !!PR_GetEnv("XPCSHELL_TEST_PROFILE_DIR");
 
 // We want profiles to be platform-independent so we always need to replace
 // the same characters on every platform. Windows has the most extensive set
@@ -2476,7 +2470,7 @@ QuotaObject::MaybeUpdateSize(int64_t aSize, bool aTruncate)
   if (newTemporaryStorageUsage > quotaManager->mTemporaryStorageLimit) {
     // This will block the thread without holding the lock while waitting.
 
-    nsAutoTArray<RefPtr<DirectoryLockImpl>, 10> locks;
+    AutoTArray<RefPtr<DirectoryLockImpl>, 10> locks;
 
     uint64_t sizeToBeFreed =
       quotaManager->LockedCollectOriginsForEviction(delta, locks);
@@ -3779,6 +3773,7 @@ QuotaManager::OpenDirectory(PersistenceType aPersistenceType,
 void
 QuotaManager::OpenDirectoryInternal(Nullable<PersistenceType> aPersistenceType,
                                     const OriginScope& aOriginScope,
+                                    Nullable<Client::Type> aClientType,
                                     bool aExclusive,
                                     OpenDirectoryListener* aOpenListener)
 {
@@ -3789,7 +3784,7 @@ QuotaManager::OpenDirectoryInternal(Nullable<PersistenceType> aPersistenceType,
                         EmptyCString(),
                         aOriginScope,
                         Nullable<bool>(),
-                        Nullable<Client::Type>(),
+                        Nullable<Client::Type>(aClientType),
                         aExclusive,
                         true,
                         aOpenListener);
@@ -3801,7 +3796,7 @@ QuotaManager::OpenDirectoryInternal(Nullable<PersistenceType> aPersistenceType,
 
   // All the locks that block this new exclusive lock need to be invalidated.
   // We also need to notify clients to abort operations for them.
-  nsAutoTArray<nsAutoPtr<nsTHashtable<nsCStringHashKey>>,
+  AutoTArray<nsAutoPtr<nsTHashtable<nsCStringHashKey>>,
                Client::TYPE_MAX> origins;
   origins.SetLength(Client::TYPE_MAX);
 
@@ -5035,6 +5030,7 @@ NormalOriginOperationBase::Open()
 
   QuotaManager::Get()->OpenDirectoryInternal(mPersistenceType,
                                              mOriginScope,
+                                             Nullable<Client::Type>(),
                                              mExclusive,
                                              this);
 }

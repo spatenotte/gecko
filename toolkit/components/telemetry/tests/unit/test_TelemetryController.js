@@ -1,5 +1,5 @@
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ 
+   http://creativecommons.org/publicdomain/zero/1.0/
 */
 /* This testcase triggers two telemetry pings.
  *
@@ -58,6 +58,7 @@ function checkPingFormat(aPing, aType, aHasClientId, aHasEnvironment) {
     buildId: "2007010101",
     name: APP_NAME,
     version: APP_VERSION,
+    displayVersion: AppConstants.MOZ_APP_VERSION_DISPLAY,
     vendor: "Mozilla",
     platformVersion: PLATFORM_VERSION,
     xpcomAbi: "noarch-spidermonkey",

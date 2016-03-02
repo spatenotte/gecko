@@ -259,6 +259,11 @@ protected:
     virtual nsresult EndUpdateBackground(NPP instance,
                                          const nsIntRect& aRect) override;
 
+#if defined(XP_WIN)
+    virtual nsresult GetScrollCaptureContainer(NPP aInstance, mozilla::layers::ImageContainer** aContainer) override;
+    virtual nsresult UpdateScrollState(NPP aInstance, bool aIsScrolling);
+#endif
+
 #if defined(XP_UNIX) && !defined(XP_MACOSX) && !defined(MOZ_WIDGET_GONK)
     virtual nsresult NP_Initialize(NPNetscapeFuncs* bFuncs, NPPluginFuncs* pFuncs, NPError* error) override;
 #else
@@ -325,6 +330,7 @@ protected:
     TimeDuration mTimeBlocked;
     nsCString mPluginName;
     nsCString mPluginVersion;
+    int32_t mSandboxLevel;
     bool mIsFlashPlugin;
 
 #ifdef MOZ_X11
@@ -548,7 +554,6 @@ private:
     PluginHangUIParent *mHangUIParent;
     bool mHangUIEnabled;
     bool mIsTimerReset;
-    int32_t mSandboxLevel;
 #ifdef MOZ_CRASHREPORTER
     /**
      * This mutex protects the crash reporter when the Plugin Hang UI event
